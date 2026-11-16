@@ -7,7 +7,11 @@ impl FileBrowser {
     pub(crate) fn entry_paths_in_directory(&self, directory: &Path) -> Vec<PathBuf> {
         let tab = self.tab();
         if tab.current_directory() == Some(directory) {
-            return tab.entries.iter().map(|entry| entry.path.clone()).collect();
+            return tab
+                .entries
+                .iter()
+                .map(|entry| entry.path().to_path_buf())
+                .collect();
         }
 
         if tab.view_mode() == BrowserViewMode::Icons {
@@ -15,7 +19,12 @@ impl FileBrowser {
                 .icon_grid_expansion
                 .as_ref()
                 .and_then(|state| state.entries_in_interactive_directory(directory))
-                .map(|entries| entries.iter().map(|entry| entry.path.clone()).collect())
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .map(|entry| entry.path().to_path_buf())
+                        .collect()
+                })
                 .unwrap_or_default();
         }
 
@@ -74,7 +83,12 @@ impl FileBrowser {
                     self.icon_grid_layout_for_pane(pane)
                         .interactive_entry_paths()
                 })
-                .unwrap_or_else(|| tab.entries.iter().map(|entry| entry.path.clone()).collect()),
+                .unwrap_or_else(|| {
+                    tab.entries
+                        .iter()
+                        .map(|entry| entry.path().to_path_buf())
+                        .collect()
+                }),
             BrowserViewMode::Columns | BrowserViewMode::List => {
                 crate::visible_entries::visible_entry_paths(&tab.entries, &tab.expanded_directories)
             }

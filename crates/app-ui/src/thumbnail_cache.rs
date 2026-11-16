@@ -427,12 +427,14 @@ impl ThumbnailCache {
 }
 
 pub(crate) fn request_for_entry(entry: &DirectoryEntry, max_edge: u32) -> Option<ThumbnailRequest> {
-    if entry.kind != FileKind::File || !thumbnails::is_supported_thumbnail_path(&entry.path) {
+    if entry.kind != FileKind::File
+        || !thumbnails::is_supported_thumbnail_media(entry.media_by_name())
+    {
         return None;
     }
 
     Some(ThumbnailRequest::new(
-        &entry.path,
+        entry.path(),
         ThumbnailSourceMetadata::from(&entry.metadata),
         max_edge,
     ))
@@ -443,7 +445,9 @@ pub(crate) fn request_for_transfer_conflict_path(
     metadata: &TransferConflictMetadata,
     max_edge: u32,
 ) -> Option<ThumbnailRequest> {
-    if metadata.is_directory || !thumbnails::is_supported_thumbnail_path(path) {
+    if metadata.is_directory
+        || !thumbnails::is_supported_thumbnail_media(file_core::media_by_name(path))
+    {
         return None;
     }
 

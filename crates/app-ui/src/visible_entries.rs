@@ -97,7 +97,7 @@ fn has_visible_list_expansion(
     entries: &[DirectoryEntry],
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
 ) -> bool {
-    let Some(root_parent) = entries.first().and_then(|entry| entry.path.parent()) else {
+    let Some(root_parent) = entries.first().and_then(|entry| entry.path().parent()) else {
         return false;
     };
 
@@ -186,7 +186,7 @@ fn list_entry_height_range(
         let block_top = total_height;
         total_height += (row_height + heights.snippet_height(visible_entry.entry))
             * visible_entry.animation_progress.clamp(0.0, 1.0);
-        if let Some(expanded) = expanded_directories.get(&visible_entry.entry.path) {
+        if let Some(expanded) = expanded_directories.get(visible_entry.entry.path()) {
             total_height += visible_entry_status_row_height(expanded, row_height);
         }
 
@@ -243,7 +243,7 @@ fn visit_visible_entry<'a>(
         animation_progress,
     });
     let Some(expanded) = expanded_directories
-        .get(&entry.path)
+        .get(entry.path())
         .filter(|expanded| expanded.is_expanded || expanded.is_collapsing)
     else {
         return;
@@ -328,7 +328,10 @@ pub(crate) fn visible_child_paths(
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
 ) -> Vec<PathBuf> {
     if current_directory == Some(directory) {
-        return entries.iter().map(|entry| entry.path.clone()).collect();
+        return entries
+            .iter()
+            .map(|entry| entry.path().to_path_buf())
+            .collect();
     }
 
     expanded_directories
@@ -339,7 +342,7 @@ pub(crate) fn visible_child_paths(
             expanded
                 .entries
                 .iter()
-                .map(|entry| entry.path.clone())
+                .map(|entry| entry.path().to_path_buf())
                 .collect()
         })
         .unwrap_or_default()
@@ -382,7 +385,7 @@ fn push_visible_entry_in_range<'a>(
     }
 
     let Some(expanded) = expanded_directories
-        .get(&entry.path)
+        .get(entry.path())
         .filter(|expanded| expanded.is_expanded || expanded.is_collapsing)
     else {
         return;
@@ -409,11 +412,11 @@ fn visible_subtree_contains(
     entry: &DirectoryEntry,
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
 ) -> bool {
-    if entry.path == path {
+    if entry.path() == path {
         return true;
     }
     let Some(expanded) = expanded_directories
-        .get(&entry.path)
+        .get(entry.path())
         .filter(|expanded| expanded.is_expanded || expanded.is_collapsing)
     else {
         return false;
@@ -430,9 +433,9 @@ fn push_selectable_entry_path(
     expanded_directories: &HashMap<PathBuf, ExpandedDirectory>,
     paths: &mut Vec<PathBuf>,
 ) {
-    paths.push(entry.path.clone());
+    paths.push(entry.path().to_path_buf());
     let Some(expanded) = expanded_directories
-        .get(&entry.path)
+        .get(entry.path())
         .filter(|expanded| expanded.is_expanded && !expanded.is_collapsing)
     else {
         return;
@@ -490,30 +493,32 @@ mod tests {
         let visible =
             visible_entries_in_range(&entries, &expanded_directories, range.start, range.end);
         assert_eq!(visible.len(), 3);
-        assert_eq!(visible[0].entry.path, entries[2].path);
-        assert_eq!(visible[2].entry.path, entries[4].path);
+        assert_eq!(visible[0].entry.path(), entries[2].path());
+        assert_eq!(visible[2].entry.path(), entries[4].path());
     }
 
     #[test]
     fn active_loaded_expansion_uses_recursive_rows() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("directory"), FileKind::Directory);
-        let child = test_entry(directory.path.join("child.txt"), FileKind::File);
+        let child = test_entry(directory.path().join("child.txt"), FileKind::File);
         let sibling = test_entry(root.join("sibling.txt"), FileKind::File);
         let entries = vec![directory.clone(), sibling];
-        let expanded_directories =
-            HashMap::from([(directory.path.clone(), expanded(vec![child.clone()], true))]);
+        let expanded_directories = HashMap::from([(
+            directory.path().to_path_buf(),
+            expanded(vec![child.clone()], true),
+        )]);
 
         let visible = visible_entries_in_range(&entries, &expanded_directories, 0, 3);
 
         assert_eq!(
             visible
                 .iter()
-                .map(|entry| entry.entry.path.clone())
+                .map(|entry| entry.entry.path().to_path_buf())
                 .collect::<Vec<_>>(),
             vec![
-                directory.path,
-                child.path,
+                directory.path().to_path_buf(),
+                child.path().to_path_buf(),
                 PathBuf::from("/workspace/sibling.txt")
             ]
         );
@@ -523,13 +528,16 @@ mod tests {
     fn collapsed_parent_hides_active_descendant_from_list_range() {
         let root = PathBuf::from("/workspace");
         let parent = test_entry(root.join("parent"), FileKind::Directory);
-        let child = test_entry(parent.path.join("child"), FileKind::Directory);
-        let nested = test_entry(child.path.join("nested.txt"), FileKind::File);
+        let child = test_entry(parent.path().join("child"), FileKind::Directory);
+        let nested = test_entry(child.path().join("nested.txt"), FileKind::File);
         let sibling = test_entry(root.join("sibling.txt"), FileKind::File);
         let entries = vec![parent.clone(), sibling.clone()];
         let expanded_directories = HashMap::from([
-            (parent.path.clone(), expanded(vec![child.clone()], false)),
-            (child.path.clone(), expanded(vec![nested], true)),
+            (
+                parent.path().to_path_buf(),
+                expanded(vec![child.clone()], false),
+            ),
+            (child.path().to_path_buf(), expanded(vec![nested], true)),
         ]);
 
         let visible = visible_entries_in_range(&entries, &expanded_directories, 0, 2);
@@ -537,9 +545,9 @@ mod tests {
         assert_eq!(
             visible
                 .iter()
-                .map(|entry| entry.entry.path.clone())
+                .map(|entry| entry.entry.path().to_path_buf())
                 .collect::<Vec<_>>(),
-            vec![parent.path, sibling.path]
+            vec![parent.path(), sibling.path()]
         );
     }
 
@@ -570,7 +578,7 @@ mod tests {
 
         let paths = visible_entry_paths(&entries, &HashMap::new());
 
-        assert_eq!(paths, vec![first.path, second.path]);
+        assert_eq!(paths, vec![first.path(), second.path()]);
     }
 
     #[test]
@@ -580,7 +588,7 @@ mod tests {
         let sibling = test_entry(root.join("sibling.txt"), FileKind::File);
         let entries = vec![directory.clone(), sibling.clone()];
         let expanded_directories =
-            HashMap::from([(directory.path.clone(), expanded(Vec::new(), true))]);
+            HashMap::from([(directory.path().to_path_buf(), expanded(Vec::new(), true))]);
 
         let range = list_entry_range_for_viewport(
             &entries,
@@ -619,10 +627,10 @@ mod tests {
             }
         );
 
-        let child = test_entry(directory.path.join("child.txt"), FileKind::File);
+        let child = test_entry(directory.path().join("child.txt"), FileKind::File);
         let mut animated = expanded(vec![child], true);
         animated.animation_progress = 0.5;
-        let expanded_directories = HashMap::from([(directory.path.clone(), animated)]);
+        let expanded_directories = HashMap::from([(directory.path().to_path_buf(), animated)]);
         let range = list_entry_range_for_viewport(
             &entries,
             &expanded_directories,
@@ -641,17 +649,19 @@ mod tests {
     fn visible_entries_include_expanded_children() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("project"), FileKind::Directory);
-        let child = test_entry(directory.path.join("main.rs"), FileKind::File);
+        let child = test_entry(directory.path().join("main.rs"), FileKind::File);
         let entries = vec![directory.clone()];
-        let expanded_directories =
-            HashMap::from([(directory.path.clone(), expanded(vec![child.clone()], true))]);
+        let expanded_directories = HashMap::from([(
+            directory.path().to_path_buf(),
+            expanded(vec![child.clone()], true),
+        )]);
 
         let visible = visible_entries(&entries, &expanded_directories);
 
         assert_eq!(visible.len(), 2);
-        assert_eq!(visible[0].entry.path, directory.path);
+        assert_eq!(visible[0].entry.path(), directory.path());
         assert_eq!(visible[0].depth, 0);
-        assert_eq!(visible[1].entry.path, child.path);
+        assert_eq!(visible[1].entry.path(), child.path());
         assert_eq!(visible[1].depth, 1);
     }
 
@@ -659,18 +669,24 @@ mod tests {
     fn visible_entries_include_nested_expanded_children() {
         let root = PathBuf::from("/workspace");
         let parent = test_entry(root.join("parent"), FileKind::Directory);
-        let child = test_entry(parent.path.join("child"), FileKind::Directory);
-        let grandchild = test_entry(child.path.join("note.txt"), FileKind::File);
+        let child = test_entry(parent.path().join("child"), FileKind::Directory);
+        let grandchild = test_entry(child.path().join("note.txt"), FileKind::File);
         let entries = vec![parent.clone()];
         let expanded_directories = HashMap::from([
-            (parent.path.clone(), expanded(vec![child.clone()], true)),
-            (child.path.clone(), expanded(vec![grandchild.clone()], true)),
+            (
+                parent.path().to_path_buf(),
+                expanded(vec![child.clone()], true),
+            ),
+            (
+                child.path().to_path_buf(),
+                expanded(vec![grandchild.clone()], true),
+            ),
         ]);
 
         let visible = visible_entries(&entries, &expanded_directories);
 
         assert_eq!(visible.len(), 3);
-        assert_eq!(visible[2].entry.path, grandchild.path);
+        assert_eq!(visible[2].entry.path(), grandchild.path());
         assert_eq!(visible[2].depth, 2);
     }
 
@@ -678,24 +694,24 @@ mod tests {
     fn collapsed_directory_hides_children() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("project"), FileKind::Directory);
-        let child = test_entry(directory.path.join("main.rs"), FileKind::File);
+        let child = test_entry(directory.path().join("main.rs"), FileKind::File);
         let entries = vec![directory.clone()];
         let expanded_directories =
-            HashMap::from([(directory.path.clone(), expanded(vec![child], false))]);
+            HashMap::from([(directory.path().to_path_buf(), expanded(vec![child], false))]);
 
         let paths = visible_entry_paths(&entries, &expanded_directories);
 
-        assert_eq!(paths, vec![directory.path]);
+        assert_eq!(paths, vec![directory.path()]);
     }
 
     #[test]
     fn collapsed_directory_hides_children_even_when_animation_progress_remains() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("project"), FileKind::Directory);
-        let child = test_entry(directory.path.join("main.rs"), FileKind::File);
+        let child = test_entry(directory.path().join("main.rs"), FileKind::File);
         let entries = vec![directory.clone()];
         let expanded_directories = HashMap::from([(
-            directory.path.clone(),
+            directory.path().to_path_buf(),
             ExpandedDirectory {
                 entries: vec![child],
                 directory_discovery: None,
@@ -716,7 +732,7 @@ mod tests {
         let visible = visible_entries(&entries, &expanded_directories);
 
         assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].entry.path, directory.path);
+        assert_eq!(visible[0].entry.path(), directory.path());
         assert_eq!(visible[0].depth, 0);
     }
 
@@ -724,10 +740,10 @@ mod tests {
     fn loading_directory_does_not_show_stale_children() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("project"), FileKind::Directory);
-        let child = test_entry(directory.path.join("main.rs"), FileKind::File);
+        let child = test_entry(directory.path().join("main.rs"), FileKind::File);
         let entries = vec![directory.clone()];
         let expanded_directories = HashMap::from([(
-            directory.path.clone(),
+            directory.path().to_path_buf(),
             ExpandedDirectory {
                 entries: vec![child],
                 directory_discovery: None,
@@ -747,17 +763,17 @@ mod tests {
 
         let paths = visible_entry_paths(&entries, &expanded_directories);
 
-        assert_eq!(paths, vec![directory.path]);
+        assert_eq!(paths, vec![directory.path()]);
     }
 
     #[test]
     fn loading_directory_does_not_expose_stale_visible_children() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("project"), FileKind::Directory);
-        let child = test_entry(directory.path.join("main.rs"), FileKind::File);
+        let child = test_entry(directory.path().join("main.rs"), FileKind::File);
         let entries = vec![directory.clone()];
         let expanded_directories = HashMap::from([(
-            directory.path.clone(),
+            directory.path().to_path_buf(),
             ExpandedDirectory {
                 entries: vec![child],
                 directory_discovery: None,
@@ -776,7 +792,7 @@ mod tests {
         )]);
 
         let paths = visible_child_paths(
-            &directory.path,
+            directory.path(),
             Some(&root),
             &entries,
             &expanded_directories,
@@ -789,10 +805,10 @@ mod tests {
     fn collapsing_directory_keeps_children_for_animation_but_not_selection_paths() {
         let root = PathBuf::from("/workspace");
         let directory = test_entry(root.join("project"), FileKind::Directory);
-        let child = test_entry(directory.path.join("main.rs"), FileKind::File);
+        let child = test_entry(directory.path().join("main.rs"), FileKind::File);
         let entries = vec![directory.clone()];
         let expanded_directories = HashMap::from([(
-            directory.path.clone(),
+            directory.path().to_path_buf(),
             ExpandedDirectory {
                 entries: vec![child.clone()],
                 directory_discovery: None,
@@ -814,8 +830,8 @@ mod tests {
         let selectable_paths = visible_entry_paths(&entries, &expanded_directories);
 
         assert_eq!(visible.len(), 2);
-        assert_eq!(visible[1].entry.path, child.path);
+        assert_eq!(visible[1].entry.path(), child.path());
         assert_eq!(visible[1].animation_progress, 0.5);
-        assert_eq!(selectable_paths, vec![directory.path]);
+        assert_eq!(selectable_paths, vec![directory.path()]);
     }
 }

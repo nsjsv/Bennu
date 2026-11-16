@@ -42,7 +42,7 @@ impl<'a> ListEntryHeights<'a> {
         match self.snippets {
             Some((search, height))
                 if search
-                    .detail(&entry.path)
+                    .detail(entry.path())
                     .is_some_and(|detail| detail.snippet.is_some()) =>
             {
                 height

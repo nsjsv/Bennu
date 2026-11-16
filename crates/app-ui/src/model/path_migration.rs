@@ -19,15 +19,10 @@ pub(super) fn migrate_directory_entry(
     entry: &mut DirectoryEntry,
     migrations: &[CompletedPathMigration],
 ) {
-    let migrated_path = path_after_completed_migrations(&entry.path, migrations);
-    if migrated_path == entry.path {
-        return;
+    let migrated_path = path_after_completed_migrations(entry.path(), migrations);
+    if migrated_path != entry.path() {
+        entry.relocate(migrated_path);
     }
-    entry.name = migrated_path
-        .file_name()
-        .unwrap_or_else(|| migrated_path.as_os_str())
-        .to_os_string();
-    entry.path = migrated_path;
 }
 
 pub(super) fn migrate_optional_path(

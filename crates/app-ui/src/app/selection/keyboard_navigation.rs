@@ -89,7 +89,7 @@ impl FileBrowser {
             let layout = self.icon_grid_layout_for_pane(pane);
             let target = layout.keyboard_target(self.tab().selected.as_deref(), direction)?;
             Some((
-                target.entry.path.clone(),
+                target.entry.path().to_path_buf(),
                 target.directory.map(Path::to_path_buf),
             ))
         }) else {
@@ -763,7 +763,7 @@ mod tests {
                 .column_viewports
                 .insert(current_dir, viewport);
         }
-        browser.select_path(browser.tab().entries[0].path.clone());
+        browser.select_path(browser.tab().entries[0].path().to_path_buf());
         browser
     }
 
@@ -784,7 +784,7 @@ mod tests {
         ] {
             let browser = browser_for_vertical_keyboard_navigation(view_mode, viewport_height);
             let (_, scroll_delta) = browser
-                .keyboard_selection_scroll(&browser.tab().entries[1].path)
+                .keyboard_selection_scroll(browser.tab().entries[1].path())
                 .expect("second row has a scroll target");
 
             assert_eq!(scroll_delta, expected_delta, "wrong delta in {view_mode:?}");
@@ -804,10 +804,10 @@ mod tests {
         );
         let sibling = entry(1);
         browser.tab_mut().entries = vec![directory.clone(), sibling.clone()].into();
-        browser
-            .tab_mut()
-            .expanded_directories
-            .insert(directory.path.clone(), expanded_directory(Vec::new(), 1.0));
+        browser.tab_mut().expanded_directories.insert(
+            directory.path().to_path_buf(),
+            expanded_directory(Vec::new(), 1.0),
+        );
 
         let bounds_for = |browser: &FileBrowser| {
             let pane = browser
@@ -820,7 +820,7 @@ mod tests {
             );
             crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
                 &rows,
-                &sibling.path,
+                sibling.path(),
                 LIST_ROW_HEIGHT,
                 LIST_HEADER_HEIGHT,
             )
@@ -833,17 +833,17 @@ mod tests {
         );
 
         let child = DirectoryEntry::new(
-            directory.path.join("child.txt"),
+            directory.path().join("child.txt"),
             FileKind::File,
             EntryMetadata::default(),
             false,
             false,
             false,
         );
-        browser
-            .tab_mut()
-            .expanded_directories
-            .insert(directory.path.clone(), expanded_directory(vec![child], 0.5));
+        browser.tab_mut().expanded_directories.insert(
+            directory.path().to_path_buf(),
+            expanded_directory(vec![child], 0.5),
+        );
 
         // 动画中的子行按进度收缩:sibling 位于 1.0 + 0.5 行高处。
         assert_eq!(
@@ -864,7 +864,7 @@ mod tests {
 
         assert_eq!(
             browser.tab().selected,
-            Some(browser.tab().entries[1].path.clone())
+            Some(browser.tab().entries[1].path().to_path_buf())
         );
         assert_eq!(widget_actions, 1);
     }
@@ -881,7 +881,7 @@ mod tests {
 
         assert_eq!(
             browser.tab().selected,
-            Some(browser.tab().entries[1].path.clone())
+            Some(browser.tab().entries[1].path().to_path_buf())
         );
         assert_eq!(widget_actions, 1);
     }
@@ -897,7 +897,7 @@ mod tests {
 
             assert_eq!(
                 browser.tab().selected,
-                Some(browser.tab().entries[1].path.clone())
+                Some(browser.tab().entries[1].path().to_path_buf())
             );
             assert_eq!(widget_actions, 0, "unexpected scroll in {view_mode:?}");
         }
@@ -911,18 +911,18 @@ mod tests {
         browser.main_window_width = 500.0;
         browser.sidebar_width = 0.0;
         browser.tab_mut().entries = (0..8).map(entry).collect::<Vec<_>>().into();
-        browser.select_path(browser.tab().entries[1].path.clone());
+        browser.select_path(browser.tab().entries[1].path().to_path_buf());
 
         drop(browser.move_file_selection(FileSelectionDirection::Down));
         assert_eq!(
             browser.tab().selected,
-            Some(browser.tab().entries[4].path.clone())
+            Some(browser.tab().entries[4].path().to_path_buf())
         );
 
         drop(browser.move_file_selection(FileSelectionDirection::Left));
         assert_eq!(
             browser.tab().selected,
-            Some(browser.tab().entries[3].path.clone())
+            Some(browser.tab().entries[3].path().to_path_buf())
         );
     }
 
@@ -934,13 +934,13 @@ mod tests {
         browser.main_window_width = 500.0;
         browser.sidebar_width = 0.0;
         browser.tab_mut().entries = (0..8).map(entry).collect::<Vec<_>>().into();
-        browser.select_path(browser.tab().entries[5].path.clone());
+        browser.select_path(browser.tab().entries[5].path().to_path_buf());
 
         drop(browser.move_file_selection(FileSelectionDirection::Down));
 
         assert_eq!(
             browser.tab().selected,
-            Some(browser.tab().entries[7].path.clone())
+            Some(browser.tab().entries[7].path().to_path_buf())
         );
     }
 

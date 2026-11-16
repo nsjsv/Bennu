@@ -75,9 +75,7 @@ pub use entry_naming::{
 };
 pub use external_tools::ExternalTool;
 pub use media::{
-    image_kind_by_name, is_audio_by_name, is_image_by_name, is_video_by_name, is_video_content,
-    is_video_file, media_kind_for_file, video_by_name, ImageKind, RasterSource, SupportedMediaKind,
-    VideoByName,
+    is_video_content, is_video_file, media_by_name, ImageKind, MediaByName, RasterSource,
 };
 pub use ops::{
     available_conversion_encoders, batch_rename_paths, convert_file_with_controls, copy_path,

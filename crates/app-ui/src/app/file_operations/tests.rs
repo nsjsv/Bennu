@@ -537,7 +537,7 @@ fn completed_rename_moves_search_results_and_origin_without_searching_again() {
 
     let moved = destination.join("nested/report.txt");
     assert_eq!(browser.renaming, Some(moved.clone()));
-    assert_eq!(browser.tab().entries[0].path, moved);
+    assert_eq!(browser.tab().entries[0].path(), moved);
     assert!(browser.tab().selected_paths.contains(&moved));
     let search = browser.active_search().unwrap();
     assert!(search.detail(&moved).is_some());
@@ -572,7 +572,7 @@ fn completed_delete_removes_results_without_searching_again() {
         .tab()
         .entries
         .iter()
-        .map(|entry| entry.path.clone())
+        .map(|entry| entry.path().to_path_buf())
         .collect::<Vec<_>>();
     assert_eq!(remaining, vec![kept]);
     let search = browser.active_search().unwrap();

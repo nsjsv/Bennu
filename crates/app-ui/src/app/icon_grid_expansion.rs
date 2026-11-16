@@ -642,7 +642,12 @@ impl FileBrowser {
                 let layout = self.icon_grid_layout_for_pane(pane);
                 layout.interactive_paths_matching(&tracked_paths)
             })
-            .unwrap_or_else(|| tab.entries.iter().map(|entry| entry.path.clone()).collect());
+            .unwrap_or_else(|| {
+                tab.entries
+                    .iter()
+                    .map(|entry| entry.path().to_path_buf())
+                    .collect()
+            });
         let tab = self.tab_mut();
         let primary_selection_was_hidden = tab
             .selected
@@ -779,7 +784,7 @@ impl FileBrowser {
         };
         entries
             .and_then(|entries| entries.get(anchor.index))
-            .is_some_and(|entry| entry.path == anchor.path && entry.expands_as_directory())
+            .is_some_and(|entry| entry.path() == anchor.path && entry.expands_as_directory())
     }
 
     fn icon_grid_state_matches_active_context(&self, state: &IconGridExpansionState) -> bool {

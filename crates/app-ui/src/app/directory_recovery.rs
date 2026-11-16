@@ -312,7 +312,7 @@ mod tests {
                 .tab()
                 .entries
                 .iter()
-                .map(|entry| entry.path.clone())
+                .map(|entry| entry.path().to_path_buf())
                 .collect::<Vec<_>>(),
             vec![remaining_entry]
         );

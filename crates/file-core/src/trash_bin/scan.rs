@@ -242,15 +242,16 @@ mod tests {
         assert_eq!(scan.entries.len(), 3);
         assert!(scan.entries.iter().any(|entry| {
             entry.original_path == home_original
-                && entry.entry.name.to_string_lossy() == "home-original.txt"
+                && entry.entry.name().to_string_lossy() == "home-original.txt"
+                && entry.entry.path() == entry.trash_path
         }));
         assert!(scan.entries.iter().any(|entry| {
             entry.original_path == volume.join("folder/item.txt")
-                && entry.entry.name.to_string_lossy() == "item.txt"
+                && entry.entry.name().to_string_lossy() == "item.txt"
         }));
         assert!(scan.entries.iter().any(|entry| {
             entry.original_path == visible_original
-                && entry.entry.name.to_string_lossy() == "visible-original.txt"
+                && entry.entry.name().to_string_lossy() == "visible-original.txt"
                 && !entry.entry.is_hidden
         }));
         assert_eq!(scan.skipped.len(), 1);

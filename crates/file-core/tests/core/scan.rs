@@ -28,7 +28,7 @@ async fn scan_directory_populates_time_metadata_from_filesystem() {
     let entry = scan
         .entries
         .iter()
-        .find(|entry| entry.path == file_path)
+        .find(|entry| entry.path() == file_path)
         .expect("scanned entry");
     let metadata = fs::symlink_metadata(&file_path).unwrap();
 
@@ -52,7 +52,7 @@ async fn scan_directory_populates_unix_owner_group_and_permissions() {
     let entry = scan
         .entries
         .iter()
-        .find(|entry| entry.path == file_path)
+        .find(|entry| entry.path() == file_path)
         .expect("scanned entry");
     let metadata = fs::symlink_metadata(&file_path).unwrap();
 

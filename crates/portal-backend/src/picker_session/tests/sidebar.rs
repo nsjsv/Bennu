@@ -12,7 +12,6 @@ use desktop_linux::{
     StorageDeviceAccess, StorageDeviceId,
 };
 use file_core::entry::{EntryMetadata, FileKind};
-use file_core::trash_bin::TrashEntry;
 
 fn home_location() -> SidebarLocation {
     SidebarLocation {
@@ -72,34 +71,6 @@ fn sidebar_data_backfill_replaces_state_and_verifies_scrollbar() {
     assert_eq!(session.sidebar().locations.len(), 1);
     assert_eq!(session.sidebar().connections.len(), 1);
     assert_eq!(session.sidebar().devices.len(), 1);
-}
-
-#[test]
-fn trash_row_entry_keeps_original_name_and_payload_path() {
-    let entry = DirectoryEntry::new(
-        PathBuf::from("/home/user/.local/share/Trash/files/report.pdf.2"),
-        FileKind::File,
-        EntryMetadata::default(),
-        false,
-        false,
-        false,
-    );
-    let trash_entry = TrashEntry::from_historical_entry(
-        PathBuf::from("/home/user/.local/share/Trash/files/report.pdf.2"),
-        PathBuf::from("/home/user/.local/share/Trash/info/report.pdf.2.trashinfo"),
-        PathBuf::from("/home/user/Documents/report.pdf"),
-        None,
-        entry,
-    );
-
-    let row = crate::picker_session::scan::trash_row_entry(trash_entry);
-
-    // 名称展示原始文件名（丢弃冲突后缀），确认返回 files/ 真实载荷路径。
-    assert_eq!(row.name, "report.pdf");
-    assert_eq!(
-        row.path,
-        PathBuf::from("/home/user/.local/share/Trash/files/report.pdf.2")
-    );
 }
 
 #[test]

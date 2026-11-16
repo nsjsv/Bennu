@@ -138,11 +138,13 @@ fn refresh_preview_thumbnail_after_resize(daemon: &mut PickerDaemon) -> Task<Mes
 /// 预览档位请求（视频归缩略图体系但 portal 行内不生成，档位请求与
 /// 主软件同门禁）。
 fn preview_thumbnail_request(entry: &DirectoryEntry, max_edge: u32) -> Option<ThumbnailRequest> {
-    if entry.kind != FileKind::File || !thumbnails::is_supported_thumbnail_path(&entry.path) {
+    if entry.kind != FileKind::File
+        || !thumbnails::is_supported_thumbnail_media(entry.media_by_name())
+    {
         return None;
     }
     Some(ThumbnailRequest::new(
-        &entry.path,
+        entry.path(),
         ThumbnailSourceMetadata::from(&entry.metadata),
         max_edge,
     ))

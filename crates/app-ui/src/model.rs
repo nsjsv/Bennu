@@ -802,9 +802,9 @@ pub(crate) fn entry_middle_press_message(
     entry: &DirectoryEntry,
 ) -> Message {
     if entry.kind == FileKind::Directory {
-        Message::OpenDirectoryFromMiddleClick(pane_id, entry.path.clone())
+        Message::OpenDirectoryFromMiddleClick(pane_id, entry.path().to_path_buf())
     } else {
-        Message::ArchiveMiddlePressed(pane_id, entry.path.clone())
+        Message::ArchiveMiddlePressed(pane_id, entry.path().to_path_buf())
     }
 }
 

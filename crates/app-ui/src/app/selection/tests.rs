@@ -925,10 +925,10 @@ fn path_lookup_and_entry_rule_agree_on_directories_and_archives() {
 
     for entry in &entries {
         assert_eq!(
-            browser.entry_acts_as_directory(&entry.path),
+            browser.entry_acts_as_directory(entry.path()),
             entry.expands_as_directory(),
             "{:?}",
-            entry.path
+            entry.path()
         );
     }
     assert!(entries[1].expands_as_directory());

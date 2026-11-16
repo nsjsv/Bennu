@@ -91,10 +91,7 @@ impl FileEntryVisualState {
             Self::Dragged
         } else if pane.is_path_selected(path) {
             Self::Selected
-        } else if pane
-            .hovered_entry
-            .is_some_and(|hovered| hovered.as_path() == path)
-        {
+        } else if pane.hovered_entry == Some(path) {
             Self::Hovered
         } else if is_open_child {
             Self::OpenChild
@@ -231,11 +228,11 @@ pub(crate) fn entry_thumbnail_or_icon<'a>(
     tone: FileEntryIconTone,
     density: FileEntryIconDensity,
 ) -> Element<'a, Message> {
-    let modifier = browser.file_entry_content_modifier(&entry.path);
+    let modifier = browser.file_entry_content_modifier(entry.path());
     let thumbnail_edge = density.thumbnail_edge();
     let thumbnail_size = density.thumbnail_size();
     // spring 候选目录条目:图标槽外圈显示自动打开进度环。
-    let spring_progress = browser.file_drag_spring_open_progress(&entry.path);
+    let spring_progress = browser.file_drag_spring_open_progress(entry.path());
     let decorated: Element<'a, Message> = if let Some(thumbnail) = browser
         .thumbnail_cache
         .ready_for_entry(entry, thumbnail_edge)

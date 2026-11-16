@@ -126,7 +126,7 @@ impl PickerSession {
         }
         let matched = self.rows.iter().position(|row| {
             row.entry
-                .name
+                .name()
                 .to_string_lossy()
                 .to_lowercase()
                 .contains(&needle)

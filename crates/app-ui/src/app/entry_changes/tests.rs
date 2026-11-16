@@ -180,12 +180,12 @@ async fn cross_directory_move_updates_both_expanded_lists_without_trespass() {
 
     let source_entries = &browser.tab().expanded_directories[&source_dir].entries;
     let target_entries = &browser.tab().expanded_directories[&target_dir].entries;
-    assert!(source_entries.iter().all(|entry| entry.path != source));
-    assert!(target_entries.iter().any(|entry| entry.path == target));
+    assert!(source_entries.iter().all(|entry| entry.path() != source));
+    assert!(target_entries.iter().any(|entry| entry.path() == target));
     // 目标条目不得混入源目录列表（父目录错误的幽灵条目）。
     assert!(source_entries
         .iter()
-        .all(|entry| entry.path.starts_with(&source_dir)));
+        .all(|entry| entry.path().starts_with(&source_dir)));
     assert!(browser.transfers_are_reflected_in_visible_directories(&[(source, target)]));
 }
 
@@ -421,7 +421,7 @@ async fn cross_pane_move_updates_inactive_source_and_active_target() {
     // 源面板（非活动）移除源条目，选中集合/锚点同步清理；活动与否不改变
     // 清理规则。
     let tab = browser.pane_by_id(BrowserPaneId(1)).unwrap().tab();
-    assert!(tab.entries.iter().all(|entry| entry.path != source));
+    assert!(tab.entries.iter().all(|entry| entry.path() != source));
     assert_eq!(tab.selected, None);
     assert!(tab.selected_paths.is_empty());
     assert_eq!(tab.selection_anchor, None);
@@ -535,7 +535,7 @@ async fn changes_reach_background_tab_showing_the_same_directory() {
             assert!(
                 tab.entries
                     .iter()
-                    .any(|entry| entry.path.ends_with("fresh.txt")),
+                    .any(|entry| entry.path().ends_with("fresh.txt")),
                 "pane {:?} tab {} missed the change",
                 pane.id,
                 tab.id

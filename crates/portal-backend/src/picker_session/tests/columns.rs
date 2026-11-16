@@ -200,11 +200,11 @@ fn scan_results_route_to_their_own_lane_by_path() {
     let (adir, _deep) = open_adir_lane(&mut session);
     assert_eq!(session.column_entry_count(1), 2);
     assert_eq!(
-        session.column_entry(1, 0).map(|e| e.path.clone()),
+        session.column_entry(1, 0).map(|e| e.path().to_path_buf()),
         Some(adir.join("deep"))
     );
     assert_eq!(
-        session.column_entry(1, 1).map(|e| e.path.clone()),
+        session.column_entry(1, 1).map(|e| e.path().to_path_buf()),
         Some(adir.join("note.txt"))
     );
 }
@@ -588,7 +588,9 @@ fn preview_target_is_focused_lane_anchor_entry() {
         shift: false,
     });
     assert_eq!(
-        session.preview_target_entry().map(|e| e.path.clone()),
+        session
+            .preview_target_entry()
+            .map(|e| e.path().to_path_buf()),
         Some(adir.join("note.txt"))
     );
 }

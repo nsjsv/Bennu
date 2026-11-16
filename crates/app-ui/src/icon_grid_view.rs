@@ -381,8 +381,8 @@ fn icon_grid_entry<'a>(
     transfer: Option<&crate::transfer_placeholders::TransferPlaceholder>,
     input: IconGridPanelInput,
 ) -> Element<'a, Message> {
-    let visual_state = FileEntryVisualState::from_entry_context(pane, &entry.path, false);
-    let content_modifier = browser.file_entry_content_modifier(&entry.path);
+    let visual_state = FileEntryVisualState::from_entry_context(pane, entry.path(), false);
+    let content_modifier = browser.file_entry_content_modifier(entry.path());
     let icon_tone = visual_state.icon_tone();
     let icon_edge = browser.user_config().icons_icon_edge();
     let tile_width = tile_width(icon_edge);
@@ -393,11 +393,11 @@ fn icon_grid_entry<'a>(
         pane.current_directory()
             .zip(expansion_parent)
             .and_then(|(current_directory, _)| {
-                browser.icon_grid_disclosure(pane.id, current_directory, &entry.path)
+                browser.icon_grid_disclosure(pane.id, current_directory, entry.path())
             });
     let shows_disclosure = is_expandable
-        && (pane.hovered_entry == Some(&entry.path)
-            || pane.is_path_selected(&entry.path)
+        && (pane.hovered_entry == Some(entry.path())
+            || pane.is_path_selected(entry.path())
             || disclosure.is_some());
 
     let base_icon: Element<'a, Message> =
@@ -425,7 +425,7 @@ fn icon_grid_entry<'a>(
             .on_press(Message::IconGridDirectoryToggled(
                 pane.id,
                 IconGridExpansionAnchor {
-                    path: entry.path.clone(),
+                    path: entry.path().to_path_buf(),
                     parent_directory: expansion_parent.to_path_buf(),
                     index: entry_index,
                 },
@@ -459,7 +459,7 @@ fn icon_grid_entry<'a>(
             base_icon
         };
 
-    let label: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
+    let label: Element<'a, Message> = if pane.renaming == Some(entry.path()) {
         rename_field(
             container(
                 inline_text_field(&tr!("File name"), pane.rename_input)
@@ -478,7 +478,7 @@ fn icon_grid_entry<'a>(
         )
     } else if let Some(search) = pane.location.search() {
         // 搜索结果：网格放不下所在文件夹和摘要，悬停总是给出完整信息。
-        let detail = search.detail(&entry.path);
+        let detail = search.detail(entry.path());
         let name = entry.name().to_string_lossy().into_owned();
         let name_highlights = detail.map_or_else(Vec::new, |detail| detail.name_highlights.clone());
         tooltip(
@@ -548,18 +548,27 @@ fn icon_grid_entry<'a>(
     }
 
     let area = mouse_area(tile)
-        .on_enter(Message::EntryHovered(pane.id, entry.path.clone()))
-        .on_exit(Message::EntryHoverCleared(pane.id, entry.path.clone()))
-        .on_press(Message::FlatEntryClicked(pane.id, entry.path.clone()))
-        .on_release(Message::EntryReleased(pane.id, entry.path.clone()))
-        .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
+        .on_enter(Message::EntryHovered(pane.id, entry.path().to_path_buf()))
+        .on_exit(Message::EntryHoverCleared(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
+        .on_press(Message::FlatEntryClicked(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
+        .on_release(Message::EntryReleased(pane.id, entry.path().to_path_buf()))
+        .on_right_press(Message::EntryRightClicked(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
         .interaction(iced::mouse::Interaction::Pointer);
     let area = if entry.expands_as_directory() && pane.location.folder_entries_are_live() {
         area.on_middle_press(crate::model::entry_middle_press_message(pane.id, entry))
     } else {
         area
     };
-    track_column_entry_bounds(area, pane.id, entry.path.clone())
+    track_column_entry_bounds(area, pane.id, entry.path().to_path_buf())
 }
 
 /// 加载中不显示文字:目录通常瞬间加载完,文字一闪而过反而像闪烁。

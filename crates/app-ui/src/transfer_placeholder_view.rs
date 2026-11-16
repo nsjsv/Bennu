@@ -306,7 +306,7 @@ impl ListTransferRow<'_> {
     /// 选中连排(selection run)计算只看真实条目;占位与状态行天然断开。
     fn entry_path(&self) -> Option<&Path> {
         match self {
-            Self::Entry { visible, .. } => Some(visible.entry.path.as_path()),
+            Self::Entry { visible, .. } => Some(visible.entry.path()),
             Self::DirectoryStatusRow { .. }
             | Self::GroupHeader { .. }
             | Self::Placeholder { .. } => None,
@@ -462,7 +462,7 @@ pub(crate) fn list_transfer_rows_vertical_bounds(
     for row in rows {
         let height = row.height(row_height);
         if let ListTransferRow::Entry { visible, .. } = row {
-            if visible.entry.path == path {
+            if visible.entry.path() == path {
                 return Some((offset, height));
             }
         }
@@ -489,7 +489,7 @@ pub(crate) fn list_entry_path_at_point<'a>(
         let height = row.height(row_height);
         if let ListTransferRow::Entry { visible, .. } = row {
             if point.y >= offset && point.y < offset + height {
-                return Some(visible.entry.path.as_path());
+                return Some(visible.entry.path());
             }
         }
         offset += height;
@@ -553,7 +553,7 @@ pub(crate) fn column_transfer_item_offset(
         transfer_sort_for_pane_directory(browser, pane, directory),
     );
     let index = merged.iter().position(
-        |item| matches!(item, MergedTransferItem::Entry { entry, .. } if entry.path == path),
+        |item| matches!(item, MergedTransferItem::Entry { entry, .. } if entry.path() == path),
     )?;
     Some(index as f32 * row_pitch)
 }

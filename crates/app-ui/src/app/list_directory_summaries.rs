@@ -356,7 +356,7 @@ impl FileBrowser {
 
         let Some(summary) = self
             .list_directory_summary_cache
-            .summary_for_path(&entry.path)
+            .summary_for_path(entry.path())
         else {
             return "-".to_owned();
         };
@@ -423,10 +423,10 @@ impl FileBrowser {
         .into_iter()
         .filter_map(|visible_entry| {
             (visible_entry.entry.kind == FileKind::Directory).then(|| RenderedListDirectory {
-                path: visible_entry.entry.path.clone(),
+                path: visible_entry.entry.path().to_path_buf(),
                 loaded_child_count: pane
                     .expanded_directories
-                    .get(&visible_entry.entry.path)
+                    .get(visible_entry.entry.path())
                     .filter(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loaded))
                     .map(|expanded| expanded.entries.len()),
             })
@@ -494,7 +494,7 @@ fn resort_entry_tree_by_displayed_size(
     let expanded_paths = entries
         .iter()
         .filter(|entry| entry.kind == FileKind::Directory)
-        .map(|entry| entry.path.clone())
+        .map(|entry| entry.path().to_path_buf())
         .collect::<Vec<_>>();
     for expanded_path in expanded_paths {
         let Some(mut expanded) = expanded_directories.remove(&expanded_path) else {
@@ -602,13 +602,13 @@ fn directory_displayed_size_value(
     summary_cache: &ListDirectorySummaryCache,
     display_mode: ListDirectorySizeDisplayMode,
 ) -> DirectoryDisplayedSizeValue {
-    let summary = summary_cache.summary_for_path(&entry.path);
+    let summary = summary_cache.summary_for_path(entry.path());
     match display_mode {
         ListDirectorySizeDisplayMode::ItemCount => summary
             .map(|summary| summary.direct_child_count as u64)
             .or_else(|| {
                 loaded_child_counts
-                    .get(&entry.path)
+                    .get(entry.path())
                     .copied()
                     .map(|count| count as u64)
             })
@@ -654,8 +654,8 @@ fn collect_list_directory_paths(
             continue;
         }
 
-        paths.push(entry.path.clone());
-        if let Some(expanded) = expanded_directories.get(&entry.path) {
+        paths.push(entry.path().to_path_buf());
+        if let Some(expanded) = expanded_directories.get(entry.path()) {
             collect_list_directory_paths(&expanded.entries, expanded_directories, paths);
         }
     }
@@ -776,7 +776,7 @@ mod tests {
                 .tab()
                 .entries
                 .iter()
-                .map(|entry| entry.path.clone())
+                .map(|entry| entry.path().to_path_buf())
                 .collect::<Vec<_>>(),
             vec![smaller, larger, PathBuf::from("/workspace/file.bin")]
         );

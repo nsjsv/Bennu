@@ -162,12 +162,12 @@ fn flat_layout_matches_existing_virtual_range() {
     assert_eq!(layout.root().flow.len(), 1);
     assert_eq!(visible.len(), old_range.end_entry - old_range.start_entry);
     assert_eq!(
-        visible.first().unwrap().entry.path,
-        entries[old_range.start_entry].path
+        visible.first().unwrap().entry.path(),
+        entries[old_range.start_entry].path()
     );
     assert_eq!(
-        visible.last().unwrap().entry.path,
-        entries[old_range.end_entry - 1].path
+        visible.last().unwrap().entry.path(),
+        entries[old_range.end_entry - 1].path()
     );
     assert_eq!(
         layout.total_height(),
@@ -246,7 +246,7 @@ fn opening_band_does_not_schedule_thumbnail_entries() {
 
     assert!(visible
         .iter()
-        .all(|visible| visible.entry.path != child.path));
+        .all(|visible| visible.entry.path() != child.path()));
 }
 
 #[test]
@@ -412,12 +412,12 @@ fn keyboard_navigation_crosses_from_root_row_into_expansion_panel() {
     let down = layout
         .keyboard_target(Some(Path::new("/workspace/root")), IconGridDirection::Down)
         .unwrap();
-    assert_eq!(down.entry.path, Path::new("/workspace/root/a"));
+    assert_eq!(down.entry.path(), Path::new("/workspace/root/a"));
     assert_eq!(down.directory, Some(Path::new("/workspace/root")));
     let left = layout
-        .keyboard_target(Some(&down.entry.path), IconGridDirection::Left)
+        .keyboard_target(Some(down.entry.path()), IconGridDirection::Left)
         .unwrap();
-    assert_eq!(left.entry.path, Path::new("/workspace/root"));
+    assert_eq!(left.entry.path(), Path::new("/workspace/root"));
 }
 
 #[test]
@@ -480,17 +480,17 @@ fn flat_layout_paths_and_membership_preserve_entry_identity() {
         layout.interactive_entry_paths(),
         entries
             .iter()
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path().to_path_buf())
             .collect::<Vec<_>>()
     );
     let matching = layout.interactive_paths_matching(&[
-        entries[1].path.clone(),
-        entries[3].path.clone(),
+        entries[1].path().to_path_buf(),
+        entries[3].path().to_path_buf(),
         PathBuf::from("/workspace/missing"),
     ]);
     assert_eq!(matching.len(), 2);
-    assert!(matching.contains(&entries[1].path));
-    assert!(matching.contains(&entries[3].path));
+    assert!(matching.contains(entries[1].path()));
+    assert!(matching.contains(entries[3].path()));
 }
 
 #[test]
@@ -574,5 +574,5 @@ fn unmeasured_viewport_fallback_covers_window_bound() {
         height: 0.0,
     });
     assert_eq!(all.len(), 30);
-    assert_eq!(all.last().unwrap().entry.path, entries[29].path);
+    assert_eq!(all.last().unwrap().entry.path(), entries[29].path());
 }

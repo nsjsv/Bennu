@@ -37,7 +37,7 @@ fn results_reach_their_own_tab_after_switching_tabs() {
         .find(|tab| tab.id == searching_tab)
         .unwrap();
     assert_eq!(
-        searching.entries[0].path,
+        searching.entries[0].path(),
         PathBuf::from("/workspace/report.txt")
     );
 }
@@ -80,7 +80,7 @@ fn a_copied_search_tab_searches_again_under_its_own_session() {
     assert_eq!(copied_request.run.session_id, copied_session);
     assert!(copy.entries.is_empty());
     assert_eq!(
-        browser.tab().entries[0].path,
+        browser.tab().entries[0].path(),
         PathBuf::from("/workspace/original.txt")
     );
 }

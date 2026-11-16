@@ -68,7 +68,7 @@ pub(crate) fn search_result_tooltip<'a>(
         .spacing(3)
         .push(rich_text(emphasized_spans(&name, name_highlights)).wrapping(Wrapping::WordOrGlyph))
         .push(
-            readable_text(location_text(&entry.path, home))
+            readable_text(location_text(entry.path(), home))
                 .size(CAPTION_SIZE)
                 .wrapping(Wrapping::WordOrGlyph),
         );

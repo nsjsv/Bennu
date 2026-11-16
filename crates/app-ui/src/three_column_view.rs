@@ -440,13 +440,13 @@ fn column_entry_row<'a>(
     let geometry = ColumnGeometry::for_level(browser.user_config().columns_view_density);
     let visual_state = FileEntryVisualState::from_entry_context(
         pane,
-        &entry.path,
-        active_child == Some(entry.path.as_path()),
+        entry.path(),
+        active_child == Some(entry.path()),
     );
-    let modifier = browser.file_entry_content_modifier(&entry.path);
+    let modifier = browser.file_entry_content_modifier(entry.path());
     let icon_tone = visual_state.icon_tone();
 
-    let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
+    let name: Element<'a, Message> = if pane.renaming == Some(entry.path()) {
         // 行槽高固定 24px（基准档），不显式压缩输入框时 iced 默认字号 16
         // 加默认 padding 5 会撑到 ~31px 溢出行槽，边框盖住文字。
         rename_field(
@@ -507,11 +507,20 @@ fn column_entry_row<'a>(
     };
 
     let row_area = mouse_area(row_container)
-        .on_enter(Message::EntryHovered(pane.id, entry.path.clone()))
-        .on_exit(Message::EntryHoverCleared(pane.id, entry.path.clone()))
-        .on_press(Message::ColumnEntryClicked(pane.id, entry.path.clone()))
-        .on_release(Message::EntryReleased(pane.id, entry.path.clone()))
-        .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
+        .on_enter(Message::EntryHovered(pane.id, entry.path().to_path_buf()))
+        .on_exit(Message::EntryHoverCleared(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
+        .on_press(Message::ColumnEntryClicked(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
+        .on_release(Message::EntryReleased(pane.id, entry.path().to_path_buf()))
+        .on_right_press(Message::EntryRightClicked(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
         .interaction(iced::mouse::Interaction::Pointer);
 
     let row_area = if acts_as_directory {
@@ -521,7 +530,7 @@ fn column_entry_row<'a>(
     };
 
     let row_element: Element<'a, Message> = row_area.into();
-    track_column_entry_bounds(row_element, pane.id, entry.path.clone())
+    track_column_entry_bounds(row_element, pane.id, entry.path().to_path_buf())
 }
 
 /// 选中连排位置:邻居只在合并流中相邻真实条目同被选中时延续连排,
@@ -536,7 +545,7 @@ fn selection_run_position_in_merged_items(
         crate::transfer_placeholders::MergedTransferItem::Entry { entry, .. } => *entry,
         crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => return None,
     };
-    if !selected_paths.contains(&entry.path) {
+    if !selected_paths.contains(entry.path()) {
         return None;
     }
     let neighbor_selected = |offset: usize| {
@@ -546,7 +555,7 @@ fn selection_run_position_in_merged_items(
                 crate::transfer_placeholders::MergedTransferItem::Entry {
                     entry: neighbor_entry,
                     ..
-                } => selected_paths.contains(&neighbor_entry.path),
+                } => selected_paths.contains(neighbor_entry.path()),
                 crate::transfer_placeholders::MergedTransferItem::Placeholder(_) => false,
             })
     };

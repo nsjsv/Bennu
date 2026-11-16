@@ -898,10 +898,10 @@ impl BatchRenameSource {
             .name()
             .to_str()
             .ok_or_else(|| BatchRenameSourceNameError {
-                path: entry.path.clone(),
+                path: entry.path().to_path_buf(),
             })?;
         Ok(Self {
-            path: entry.path.clone(),
+            path: entry.path().to_path_buf(),
             source_name_text: source_name_text.to_owned(),
             modified: entry.metadata.modified,
         })

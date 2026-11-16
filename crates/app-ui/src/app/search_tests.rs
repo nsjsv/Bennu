@@ -829,7 +829,7 @@ fn results_replace_the_folder_entries_and_use_the_normal_selection() {
         .tab()
         .entries
         .iter()
-        .map(|entry| entry.path.clone())
+        .map(|entry| entry.path().to_path_buf())
         .collect::<Vec<_>>();
     assert_eq!(entries, vec![first.clone(), second.clone()]);
 

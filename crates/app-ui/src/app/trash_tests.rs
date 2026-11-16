@@ -56,7 +56,7 @@ fn opening_trash_projects_the_cached_snapshot_without_a_loading_placeholder() {
     assert!(!browser.tab().directory_collection_phase.is_discovering());
     assert!(browser.pane().directory_loading_placeholder.is_none());
     assert_eq!(browser.tab().entries.len(), 1);
-    assert_eq!(browser.tab().entries[0].path, trash_path);
+    assert_eq!(browser.tab().entries[0].path(), trash_path);
 }
 
 #[test]

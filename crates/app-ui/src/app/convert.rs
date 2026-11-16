@@ -555,14 +555,16 @@ async fn classify_convert_sources(paths: Vec<PathBuf>) -> Vec<(PathBuf, Converti
 /// 转换源按文件类型分类。SVG 是矢量、相机 RAW 只有自带的预览图，引擎都没法当原片转，
 /// 不进入对话框。
 fn convertible_media_kind(path: &Path) -> Option<ConvertibleMediaKind> {
-    match file_core::media_kind_for_file(path)? {
-        file_core::SupportedMediaKind::Image => (file_core::image_kind_by_name(path)
-            == Some(file_core::ImageKind::Raster(
-                file_core::RasterSource::Picture,
-            )))
-        .then_some(ConvertibleMediaKind::Image),
-        file_core::SupportedMediaKind::Video => Some(ConvertibleMediaKind::Video),
-        file_core::SupportedMediaKind::Audio => Some(ConvertibleMediaKind::Audio),
+    match file_core::media_by_name(path) {
+        file_core::MediaByName::Image(file_core::ImageKind::Raster(
+            file_core::RasterSource::Picture,
+        )) => Some(ConvertibleMediaKind::Image),
+        file_core::MediaByName::Video => Some(ConvertibleMediaKind::Video),
+        file_core::MediaByName::MaybeVideo => {
+            file_core::is_video_file(path).then_some(ConvertibleMediaKind::Video)
+        }
+        file_core::MediaByName::Audio => Some(ConvertibleMediaKind::Audio),
+        file_core::MediaByName::Image(_) | file_core::MediaByName::Other => None,
     }
 }
 

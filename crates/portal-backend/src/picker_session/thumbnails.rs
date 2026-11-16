@@ -148,21 +148,23 @@ impl SessionThumbnailState {
                 continue;
             };
             // 仅图片：视频依赖外部 ffmpegthumbnailer，生成慢不做（prd 约定）。
-            if entry.kind != FileKind::File || !file_core::is_image_by_name(&entry.path) {
+            if entry.kind != FileKind::File
+                || !matches!(entry.media_by_name(), file_core::MediaByName::Image(_))
+            {
                 continue;
             }
-            if !self.can_cache(&entry.path) {
+            if !self.can_cache(entry.path()) {
                 continue;
             }
             let request = ThumbnailRequest::new(
-                &entry.path,
+                entry.path(),
                 thumbnails::ThumbnailSourceMetadata::from(&entry.metadata),
                 edge,
             );
             let key = request.key();
             let ready_covers_edge = self
                 .ready
-                .get(&entry.path)
+                .get(entry.path())
                 .is_some_and(|(ready_edge, _)| *ready_edge >= edge);
             if ready_covers_edge || self.in_flight.contains(&key) || self.queued_keys.contains(&key)
             {
@@ -337,7 +339,7 @@ impl PickerSession {
     pub(crate) fn directory_entry_for_path(&self, path: &Path) -> Option<&DirectoryEntry> {
         self.rows
             .iter()
-            .find(|row| row.entry.path == path)
+            .find(|row| row.entry.path() == path)
             .map(|row| &row.entry)
     }
 

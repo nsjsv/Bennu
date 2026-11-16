@@ -314,12 +314,12 @@ impl<'a> IconGridLayout<'a> {
     pub(crate) fn interactive_entry_paths(&self) -> Vec<PathBuf> {
         if let [IconGridFlowSegment::Rows(rows)] = self.root.flow.as_slice() {
             return interaction_geometry::rows_entries(&rows.cells)
-                .map(|entry| entry.path.clone())
+                .map(|entry| entry.path().to_path_buf())
                 .collect();
         }
         self.interactive_entry_geometry()
             .into_iter()
-            .map(|entry| entry.entry.path.clone())
+            .map(|entry| entry.entry.path().to_path_buf())
             .collect()
     }
 
@@ -342,7 +342,9 @@ impl<'a> IconGridLayout<'a> {
             // 键盘导航只落在真实条目上;占位格被自然跳过。
             let entries = interaction_geometry::rows_entries(&rows.cells).collect::<Vec<_>>();
             let current_index = current_path.and_then(|current_path| {
-                entries.iter().position(|entry| entry.path == current_path)
+                entries
+                    .iter()
+                    .position(|entry| entry.path() == current_path)
             });
             let target_index =
                 keyboard_target_index(current_index, direction, entries.len(), rows.column_count)?;
@@ -360,7 +362,7 @@ impl<'a> IconGridLayout<'a> {
         let current_index = current_path.and_then(|current_path| {
             entries
                 .iter()
-                .position(|entry| entry.entry.path == current_path)
+                .position(|entry| entry.entry.path() == current_path)
         });
         let target = match current_index {
             None => match direction {
@@ -414,7 +416,7 @@ impl<'a> IconGridLayout<'a> {
             self.icon_edge,
             point,
         )
-        .map(|entry| entry.path.as_path())
+        .map(|entry| entry.path())
     }
 
     fn interactive_entry_geometry(&self) -> Vec<IconGridEntryGeometry<'a>> {

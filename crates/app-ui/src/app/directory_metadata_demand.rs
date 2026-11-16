@@ -80,7 +80,7 @@ impl FileBrowser {
         if let Some(discovery) = pane.directory_discovery.cloned() {
             let mut targets = Vec::new();
             for entry in pane.entries.iter() {
-                if !selected.contains(&entry.path) {
+                if !selected.contains(entry.path()) {
                     continue;
                 }
                 if let Some(index) = entry.discovery_index {
@@ -106,7 +106,7 @@ impl FileBrowser {
             };
             let mut targets = Vec::new();
             for entry in expanded.entries.iter() {
-                if !selected.contains(&entry.path) {
+                if !selected.contains(entry.path()) {
                     continue;
                 }
                 if let Some(index) = entry.discovery_index {
@@ -142,7 +142,7 @@ impl FileBrowser {
                 };
                 let mut targets = Vec::new();
                 for entry in contents.entries.iter() {
-                    if !selected.contains(&entry.path) {
+                    if !selected.contains(entry.path()) {
                         continue;
                     }
                     if let Some(index) = entry.discovery_index {
@@ -267,10 +267,10 @@ impl FileBrowser {
                 let Some(index) = visible.entry.discovery_index else {
                     continue;
                 };
-                let context = if visible.entry.path.parent() == Some(current_directory) {
+                let context = if visible.entry.path().parent() == Some(current_directory) {
                     root_context.clone()
                 } else {
-                    let Some(parent) = visible.entry.path.parent() else {
+                    let Some(parent) = visible.entry.path().parent() else {
                         continue;
                     };
                     let Some(expanded) = pane.expanded_directories.get(parent).filter(|expanded| {
@@ -884,7 +884,7 @@ mod tests {
                 .tab()
                 .entries
                 .iter()
-                .map(|entry| entry.name.to_string_lossy().into_owned())
+                .map(|entry| entry.name().to_string_lossy().into_owned())
                 .collect::<Vec<_>>(),
             ["z-small.dat", "a-large.dat"]
         );
@@ -1298,7 +1298,7 @@ mod tests {
             .tab()
             .entries
             .iter()
-            .find(|entry| entry.path == target)
+            .find(|entry| entry.path() == target)
             .and_then(|entry| entry.discovery_index)
             .expect("the fixture entry has a discovery index");
         (directory, browser, target, index)

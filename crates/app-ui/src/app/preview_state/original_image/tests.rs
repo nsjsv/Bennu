@@ -24,7 +24,7 @@ fn preview_thumbnail_refresh_skips_same_edge_window_resize() {
     };
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::Thumbnail {
-            path: image_entry.path.clone(),
+            path: image_entry.path().to_path_buf(),
             handle: iced::widget::image::Handle::from_path("/tmp/vector-thumb.png"),
             width: 320,
             height: 240,
@@ -48,7 +48,7 @@ fn preview_thumbnail_refresh_keeps_current_image_visible() {
     };
     browser.preview_engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
         ImagePreviewContent::Thumbnail {
-            path: image_entry.path,
+            path: image_entry.path().to_path_buf(),
             handle: iced::widget::image::Handle::from_path("/tmp/vector-thumb.png"),
             width: 320,
             height: 240,

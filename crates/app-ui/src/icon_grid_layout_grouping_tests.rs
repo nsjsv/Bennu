@@ -108,7 +108,7 @@ fn grouped_root_flow_accumulates_header_heights_and_reveal_math() {
     };
     let visible = layout.visible_entries(shifted);
     assert_eq!(visible.len(), 1);
-    assert_eq!(visible[0].entry.path, Path::new("/workspace/z.txt"));
+    assert_eq!(visible[0].entry.path(), Path::new("/workspace/z.txt"));
 }
 
 #[test]
@@ -144,7 +144,7 @@ fn grouped_root_places_directory_cells_and_placeholders_first_without_headers() 
     ));
     assert!(matches!(
         &directory_rows.cells[1],
-        IconGridCell::Entry(cell) if cell.entry.path == Path::new("/workspace/root")
+        IconGridCell::Entry(cell) if cell.entry.path() == Path::new("/workspace/root")
     ));
     assert!(matches!(flow[1], IconGridFlowSegment::GroupHeader(_)));
 
@@ -253,13 +253,13 @@ fn grouped_root_interaction_targets_skip_group_headers() {
         layout.interactive_entry_paths(),
         entries
             .iter()
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path().to_path_buf())
             .collect::<Vec<_>>()
     );
     let down = layout
         .keyboard_target(Some(Path::new("/workspace/a.txt")), IconGridDirection::Down)
         .unwrap();
-    assert_eq!(down.entry.path, Path::new("/workspace/z.txt"));
+    assert_eq!(down.entry.path(), Path::new("/workspace/z.txt"));
 }
 
 #[test]

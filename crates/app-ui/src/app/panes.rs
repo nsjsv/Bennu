@@ -33,7 +33,7 @@ pub(crate) struct BrowserPaneView<'a> {
     pub(crate) selected: Option<&'a PathBuf>,
     pub(crate) selected_paths: &'a HashSet<PathBuf>,
     pub(crate) deepest_open_column_directory: Option<&'a PathBuf>,
-    pub(crate) hovered_entry: Option<&'a PathBuf>,
+    pub(crate) hovered_entry: Option<&'a Path>,
     pub(crate) expanded_directories: &'a HashMap<PathBuf, ExpandedDirectory>,
     pub(crate) column_viewports: &'a HashMap<PathBuf, ColumnViewport>,
     pub(crate) list_viewport: Option<ColumnViewport>,
@@ -48,7 +48,7 @@ pub(crate) struct BrowserPaneView<'a> {
     pub(crate) address_transition_fraction: f32,
     pub(crate) address_exit_snapshot: Option<&'a str>,
     pub(crate) directory_collection_phase: DirectoryCollectionPhase,
-    pub(crate) renaming: Option<&'a PathBuf>,
+    pub(crate) renaming: Option<&'a Path>,
     pub(crate) rename_input: &'a str,
     pub(crate) rename_hint: Option<RenameRejection>,
     pub(crate) file_drag: Option<&'a FileDragState>,
@@ -65,7 +65,7 @@ impl<'a> BrowserPaneView<'a> {
         let Some(index) = entry.discovery_index else {
             return entry.metadata.clone();
         };
-        let discovery = entry.path.parent().and_then(|parent| {
+        let discovery = entry.path().parent().and_then(|parent| {
             if Some(parent) == self.current_directory() {
                 self.directory_discovery
             } else {
@@ -235,7 +235,7 @@ impl FileBrowser {
             selected: tab.selected.as_ref(),
             selected_paths: &tab.selected_paths,
             deepest_open_column_directory: tab.deepest_open_column_directory.as_ref(),
-            hovered_entry: self.hovered_entry.as_ref().filter(|_| is_active),
+            hovered_entry: self.hovered_entry.as_deref().filter(|_| is_active),
             expanded_directories: &tab.expanded_directories,
             column_viewports: &pane.column_viewports,
             list_viewport: pane.list_viewport,
@@ -249,7 +249,7 @@ impl FileBrowser {
             address_transition_fraction,
             address_exit_snapshot,
             directory_collection_phase: tab.directory_collection_phase,
-            renaming: self.renaming.as_ref().filter(|_| is_active),
+            renaming: self.renaming.as_deref().filter(|_| is_active),
             rename_input: if is_active { &self.rename_input } else { "" },
             rename_hint: if is_active { self.rename_hint() } else { None },
             file_drag: self.file_drag.as_ref().filter(|_| is_active),

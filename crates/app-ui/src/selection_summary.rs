@@ -44,7 +44,7 @@ pub(crate) fn summarize_selected_entries<'a>(
 ) -> PaneSelectionSummary {
     let mut summary = PaneSelectionSummary::default();
     for entry in candidates {
-        if !selected_paths.contains(&entry.path) {
+        if !selected_paths.contains(entry.path()) {
             continue;
         }
         match entry.kind {
@@ -62,25 +62,22 @@ pub(crate) fn summarize_selected_entries<'a>(
 mod tests {
     use super::*;
 
-    use std::ffi::OsString;
     use std::path::PathBuf;
 
     use file_core::EntryMetadata;
 
     fn entry(path: &str, kind: FileKind, len: u64) -> DirectoryEntry {
-        DirectoryEntry {
-            path: PathBuf::from(path),
-            name: OsString::from(path),
+        DirectoryEntry::new(
+            PathBuf::from(path),
             kind,
-            metadata: EntryMetadata {
+            EntryMetadata {
                 len,
                 ..EntryMetadata::default()
             },
-            is_hidden: false,
-            is_symlink: false,
-            is_broken_symlink: false,
-            discovery_index: None,
-        }
+            false,
+            false,
+            false,
+        )
     }
 
     #[test]

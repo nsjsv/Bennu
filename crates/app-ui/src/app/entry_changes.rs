@@ -225,7 +225,7 @@ impl FileBrowser {
         lists.is_empty()
             || lists
                 .iter()
-                .all(|entries| !entries.iter().any(|entry| entry.path == path))
+                .all(|entries| !entries.iter().any(|entry| entry.path() == path))
     }
 
     /// 「目标条目必须可见」逐面板核对；空列表同上视为通过。
@@ -237,7 +237,7 @@ impl FileBrowser {
         lists.is_empty()
             || lists
                 .iter()
-                .all(|entries| entries.iter().any(|entry| entry.path == path))
+                .all(|entries| entries.iter().any(|entry| entry.path() == path))
     }
 }
 
@@ -284,7 +284,7 @@ impl FileBrowser {
             .flatten()
             .filter(|target| {
                 target.parent() == Some(directory)
-                    && !listed.iter().any(|entry| entry.path == *target)
+                    && !listed.iter().any(|entry| entry.path() == *target)
             })
             .map(Path::to_path_buf)
             .collect()

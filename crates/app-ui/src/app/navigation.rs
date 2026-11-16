@@ -575,7 +575,7 @@ impl FileBrowser {
         let index = entries
             .iter()
             .enumerate()
-            .map(|(position, entry)| (entry.path.clone(), position))
+            .map(|(position, entry)| (entry.path().to_path_buf(), position))
             .collect();
         self.entry_index = Some((entries, index));
     }
@@ -594,7 +594,7 @@ impl FileBrowser {
         // 索引过期或未命中主列表时退回线性查找，保证语义不变。
         tab.entries
             .iter()
-            .find(|entry| entry.path == path)
+            .find(|entry| entry.path() == path)
             .or_else(|| match tab.view_mode() {
                 BrowserViewMode::Icons => self
                     .icon_grid_expansion
@@ -604,7 +604,7 @@ impl FileBrowser {
                     .expanded_directories
                     .values()
                     .flat_map(|expanded| expanded.entries.iter())
-                    .find(|entry| entry.path == path),
+                    .find(|entry| entry.path() == path),
             })
     }
 
@@ -662,7 +662,7 @@ impl FileBrowser {
                 row_index: range.start + range_offset,
                 trailing_status_height: tab
                     .expanded_directories
-                    .get(&visible_entry.entry.path)
+                    .get(visible_entry.entry.path())
                     .map(|expanded| {
                         crate::visible_entries::visible_entry_status_row_height(
                             expanded, row_height,
@@ -915,11 +915,8 @@ mod tests {
             Some(expected_range.end - 1)
         );
         assert_eq!(
-            placeholder
-                .entries
-                .first()
-                .map(|entry| entry.entry.path.as_path()),
-            Some(previous_entries[expected_range.start].path.as_path())
+            placeholder.entries.first().map(|entry| entry.entry.path()),
+            Some(previous_entries[expected_range.start].path())
         );
         let placeholder_height = placeholder.before_height
             + placeholder
@@ -969,7 +966,7 @@ mod tests {
         ]
         .into();
         tab.expanded_directories.insert(
-            project.path.clone(),
+            project.path().to_path_buf(),
             ExpandedDirectory {
                 entries: Vec::new(),
                 directory_discovery: None,

@@ -31,7 +31,7 @@ fn search_detail<'a>(
     pane: BrowserPaneView<'a>,
     entry: &DirectoryEntry,
 ) -> Option<&'a SearchHitDetail> {
-    pane.location.search()?.detail(&entry.path)
+    pane.location.search()?.detail(entry.path())
 }
 
 /// 搜索结果里名字有搜到的字时，名字按加粗片段显示；其他时候 None，用普通名字。
@@ -99,7 +99,7 @@ pub(super) fn location_cell<'a>(
     width: f32,
 ) -> Element<'a, Message> {
     container(measured_middle_ellipsized_text(
-        location_text(&entry.path, home),
+        location_text(entry.path(), home),
         geometry.text_size,
     ))
     .width(list_column_width(width))

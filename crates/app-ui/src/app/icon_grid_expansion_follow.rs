@@ -96,5 +96,7 @@ impl FileBrowser {
 }
 
 fn root_entry_matches(entry: &DirectoryEntry, path: &Path, current_dir: &Path) -> bool {
-    entry.path == *path && entry.expands_as_directory() && entry.path.parent() == Some(current_dir)
+    entry.path() == path
+        && entry.expands_as_directory()
+        && entry.path().parent() == Some(current_dir)
 }

@@ -494,7 +494,7 @@ fn node_from(entry: DirectoryEntry) -> FolderNode {
         name: entry.name().to_string_lossy().into_owned(),
         len: entry.metadata.len,
         modified: entry.metadata.modified,
-        path: entry.path,
+        path: entry.path().to_path_buf(),
         kind,
         folder: (kind == FileKind::Directory).then(Box::default),
     }

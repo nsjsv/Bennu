@@ -534,8 +534,8 @@ fn list_entry_row<'a>(
     snippet_height: f32,
     selection_run_position: Option<crate::file_entry_presentation::SelectionRunPosition>,
 ) -> Element<'a, Message> {
-    let visual_state = FileEntryVisualState::from_entry_context(pane, &entry.path, false);
-    let modifier = browser.file_entry_content_modifier(&entry.path);
+    let visual_state = FileEntryVisualState::from_entry_context(pane, entry.path(), false);
+    let modifier = browser.file_entry_content_modifier(entry.path());
     let icon_tone = visual_state.icon_tone();
     let row_content = container(list_entry_cells(
         browser,
@@ -585,11 +585,20 @@ fn list_entry_row<'a>(
         };
 
     let row_area = mouse_area(row_container)
-        .on_enter(Message::EntryHovered(pane.id, entry.path.clone()))
-        .on_exit(Message::EntryHoverCleared(pane.id, entry.path.clone()))
-        .on_press(Message::FlatEntryClicked(pane.id, entry.path.clone()))
-        .on_release(Message::EntryReleased(pane.id, entry.path.clone()))
-        .on_right_press(Message::EntryRightClicked(pane.id, entry.path.clone()))
+        .on_enter(Message::EntryHovered(pane.id, entry.path().to_path_buf()))
+        .on_exit(Message::EntryHoverCleared(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
+        .on_press(Message::FlatEntryClicked(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
+        .on_release(Message::EntryReleased(pane.id, entry.path().to_path_buf()))
+        .on_right_press(Message::EntryRightClicked(
+            pane.id,
+            entry.path().to_path_buf(),
+        ))
         .interaction(iced::mouse::Interaction::Pointer);
 
     let row_area = if entry.expands_as_directory() && pane.location.folder_entries_are_live() {
@@ -603,7 +612,7 @@ fn list_entry_row<'a>(
             row_height * animation_progress.clamp(0.0, 1.0),
         ))
         .clip(true);
-    track_column_entry_bounds(animated_row, pane.id, entry.path.clone())
+    track_column_entry_bounds(animated_row, pane.id, entry.path().to_path_buf())
 }
 
 fn list_placeholder_entry_row<'a>(
@@ -613,7 +622,7 @@ fn list_placeholder_entry_row<'a>(
     placeholder: &'a DirectoryLoadingPlaceholderEntry,
 ) -> Element<'a, Message> {
     let entry = &placeholder.entry;
-    let modifier = browser.file_entry_content_modifier(&entry.path);
+    let modifier = browser.file_entry_content_modifier(entry.path());
     let row_content = container(list_placeholder_entry_cells(
         browser,
         geometry,
@@ -822,10 +831,10 @@ fn list_name_cell<'a>(
     icon_tone: FileEntryIconTone,
     width: f32,
 ) -> Element<'a, Message> {
-    let modifier = browser.file_entry_content_modifier(&entry.path);
+    let modifier = browser.file_entry_content_modifier(entry.path());
     let indent = Space::new().width(Length::Fixed(depth as f32 * geometry.indent_width));
     let toggle = list_directory_toggle(pane, geometry, entry);
-    let name: Element<'a, Message> = if pane.renaming == Some(&entry.path) {
+    let name: Element<'a, Message> = if pane.renaming == Some(entry.path()) {
         rename_field(
             inline_text_field(&tr!("File name"), pane.rename_input)
                 .id(rename_input_id())
@@ -874,7 +883,7 @@ fn list_directory_toggle<'a>(
 
     let rotation = pane
         .expanded_directories
-        .get(&entry.path)
+        .get(entry.path())
         .filter(|expanded| expanded.is_expanded)
         .map(|expanded| 90.0 * expanded.animation_progress.clamp(0.0, 1.0))
         .unwrap_or(0.0);
@@ -885,7 +894,10 @@ fn list_directory_toggle<'a>(
             .center_x(Length::Fixed(geometry.toggle_width))
             .center_y(Length::Fixed(geometry.toggle_width)),
     )
-    .on_press(Message::ListDirectoryToggled(pane.id, entry.path.clone()))
+    .on_press(Message::ListDirectoryToggled(
+        pane.id,
+        entry.path().to_path_buf(),
+    ))
     .interaction(iced::mouse::Interaction::Pointer)
     .into()
 }

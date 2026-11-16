@@ -498,13 +498,16 @@ impl PickerSession {
     }
 
     fn is_allowed(&self, entry: &DirectoryEntry) -> bool {
-        self.active_filter
-            .entry_allowed(&entry.name.to_string_lossy(), entry.kind, entry.is_hidden)
+        self.active_filter.entry_allowed(
+            &entry.name().to_string_lossy(),
+            entry.kind,
+            entry.is_hidden,
+        )
     }
 
     fn append_rows(&mut self, entries: &[DirectoryEntry], depth: usize) {
         for entry in entries {
-            let has_expansion = self.expansions.contains_key(&entry.path);
+            let has_expansion = self.expansions.contains_key(entry.path());
             self.rows.push(PickerRow {
                 entry: entry.clone(),
                 depth,
@@ -516,7 +519,7 @@ impl PickerSession {
             }
             let children =
                 self.expansions
-                    .get(&entry.path)
+                    .get(entry.path())
                     .and_then(|state| match &state.listing {
                         DirectoryListing::Ready(children) => Some(
                             children
@@ -544,7 +547,7 @@ impl PickerSession {
         if row.entry.kind != FileKind::Directory {
             return SessionEffect::None;
         }
-        let path = row.entry.path.clone();
+        let path = row.entry.path().to_path_buf();
         if let Some(state) = self.expansions.get_mut(&path) {
             if state.is_collapsing {
                 // 收起动画中再点 = 反悔：恢复向展开推进（与主应用
@@ -643,10 +646,10 @@ impl PickerSession {
         if self.view_mode() == PickerViewMode::Columns {
             let index = self
                 .column_entries_iter(0)
-                .position(|entry| entry.path == path)?;
+                .position(|entry| entry.path() == path)?;
             return Some(self.columns_entry_double_clicked(0, index));
         }
-        let index = self.rows.iter().position(|row| row.entry.path == path)?;
+        let index = self.rows.iter().position(|row| row.entry.path() == path)?;
         Some(self.activate_entry(index))
     }
 

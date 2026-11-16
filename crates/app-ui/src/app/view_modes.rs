@@ -511,9 +511,9 @@ impl FileBrowser {
                     .as_slice()
             };
             if !entries.iter().any(|entry| {
-                entry.path == *directory_path
+                entry.path() == *directory_path
                     && entry.expands_as_directory()
-                    && entry.path.parent() == Some(parent)
+                    && entry.path().parent() == Some(parent)
             }) || !tab
                 .expanded_directories
                 .get(directory_path)
@@ -535,7 +535,7 @@ impl FileBrowser {
                 .as_slice()
         };
         if !target_entries.iter().any(|entry| {
-            entry.path == target_selection && entry.path.parent() == Some(target_parent)
+            entry.path() == target_selection && entry.path().parent() == Some(target_parent)
         }) {
             return None;
         }
@@ -572,9 +572,9 @@ impl FileBrowser {
             return Task::none();
         };
         if !tab.entries.iter().any(|entry| {
-            entry.path == root_path
+            entry.path() == root_path
                 && entry.expands_as_directory()
-                && entry.path.parent() == Some(current_dir.as_path())
+                && entry.path().parent() == Some(current_dir.as_path())
         }) {
             return Task::none();
         }
@@ -709,9 +709,9 @@ impl FileBrowser {
                 .filter(|expanded| list_directory_is_followable(expanded))
                 .is_some_and(|expanded| {
                     expanded.entries.iter().any(|entry| {
-                        entry.path == next_path
+                        entry.path() == next_path
                             && entry.expands_as_directory()
-                            && entry.path.parent() == Some(waiting_for.as_path())
+                            && entry.path().parent() == Some(waiting_for.as_path())
                     })
                 });
             if !next_is_direct_directory {
@@ -779,7 +779,7 @@ impl FileBrowser {
         let tab = self.tab();
         tab.selected
             .as_ref()
-            .is_some_and(|selected| tab.entries.iter().any(|entry| entry.path == *selected))
+            .is_some_and(|selected| tab.entries.iter().any(|entry| entry.path() == *selected))
     }
 
     pub(super) fn list_directory_animation_is_active(&self) -> bool {

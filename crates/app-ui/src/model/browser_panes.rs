@@ -680,7 +680,7 @@ impl BrowserTab {
             &mut self.directory_order_phase,
         );
         Arc::make_mut(&mut self.entries)
-            .retain(|entry| !entry.path.starts_with(unavailable_directory));
+            .retain(|entry| !entry.path().starts_with(unavailable_directory));
         retain_optional_path_outside_subtree(&mut self.selected, unavailable_directory);
         self.selected_paths
             .retain(|path| !path.starts_with(unavailable_directory));
@@ -702,7 +702,7 @@ impl BrowserTab {
             if expanded_directory
                 .entries
                 .iter()
-                .any(|entry| entry.path.starts_with(unavailable_directory))
+                .any(|entry| entry.path().starts_with(unavailable_directory))
             {
                 detach_directory_discovery(
                     &mut expanded_directory.entries,
@@ -711,7 +711,7 @@ impl BrowserTab {
                 );
                 expanded_directory
                     .entries
-                    .retain(|entry| !entry.path.starts_with(unavailable_directory));
+                    .retain(|entry| !entry.path().starts_with(unavailable_directory));
             }
         }
         self.expanded_directories
@@ -792,7 +792,7 @@ pub(crate) fn retain_direct_entry_selection(
 
     let direct_paths = entries
         .iter()
-        .map(|entry| entry.path.as_path())
+        .map(|entry| entry.path())
         .collect::<HashSet<_>>();
     selected_paths.retain(|path| direct_paths.contains(path.as_path()));
     if !selected
@@ -802,8 +802,8 @@ pub(crate) fn retain_direct_entry_selection(
         *selected = entries
             .iter()
             .rev()
-            .find(|entry| selected_paths.contains(&entry.path))
-            .map(|entry| entry.path.clone());
+            .find(|entry| selected_paths.contains(entry.path()))
+            .map(|entry| entry.path().to_path_buf());
     }
     if selection_anchor
         .as_ref()

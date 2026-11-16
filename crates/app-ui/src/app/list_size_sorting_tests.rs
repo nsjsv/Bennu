@@ -112,7 +112,7 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
         browser.tab().expanded_directories[&parent]
             .entries
             .iter()
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path().to_path_buf())
             .collect::<Vec<_>>(),
         vec![child_small, child_large]
     );
@@ -123,7 +123,7 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
             .tab()
             .entries
             .iter()
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path().to_path_buf())
             .collect::<Vec<_>>(),
         vec![inactive_small, inactive_large]
     );

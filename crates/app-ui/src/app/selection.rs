@@ -749,7 +749,7 @@ impl FileBrowser {
             BrowserViewMode::Icons => pane
                 .entries
                 .iter()
-                .find(|entry| entry.path == path)
+                .find(|entry| entry.path() == path)
                 .map(|entry| entry.kind),
             BrowserViewMode::Columns | BrowserViewMode::List => pane
                 .entries
@@ -759,7 +759,7 @@ impl FileBrowser {
                         .values()
                         .flat_map(|expanded| expanded.entries.iter()),
                 )
-                .find(|entry| entry.path == path)
+                .find(|entry| entry.path() == path)
                 .map(|entry| entry.kind),
         };
 

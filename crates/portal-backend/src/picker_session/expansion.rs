@@ -101,7 +101,7 @@ impl PickerSession {
                 ancestors.pop();
             }
             row.height_progress = ancestors.last().map_or(1.0, |(_, progress)| *progress);
-            if let Some(state) = self.expansions.get(&row.entry.path) {
+            if let Some(state) = self.expansions.get(row.entry.path()) {
                 row.expand_progress = state.animation_progress;
                 ancestors.push((row.depth, state.animation_progress));
             } else {

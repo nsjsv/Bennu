@@ -299,7 +299,7 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
             .tab()
             .entries
             .iter()
-            .position(|entry| &entry.path == path)
+            .position(|entry| entry.path() == path)
             .expect("hovered path is in the directory")
     };
     assert_eq!(index_of(&before) / columns, 1);

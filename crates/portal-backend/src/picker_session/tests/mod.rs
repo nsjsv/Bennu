@@ -383,8 +383,8 @@ fn filter_rule_hides_non_matching_files_but_keeps_directories() {
         ],
     );
     assert_eq!(session.rows().len(), 2);
-    assert_eq!(session.rows()[0].entry.name.to_string_lossy(), "a.png");
-    assert_eq!(session.rows()[1].entry.name.to_string_lossy(), "dir");
+    assert_eq!(session.rows()[0].entry.name().to_string_lossy(), "a.png");
+    assert_eq!(session.rows()[1].entry.name().to_string_lossy(), "dir");
 }
 
 #[test]
@@ -456,7 +456,10 @@ fn expanding_a_directory_appends_indented_children() {
 
     session.apply_scan(scan_result(&child, Ok(vec![("inner.txt", FileKind::File)])));
     assert_eq!(session.rows().len(), 3);
-    assert_eq!(session.rows()[1].entry.name.to_string_lossy(), "inner.txt");
+    assert_eq!(
+        session.rows()[1].entry.name().to_string_lossy(),
+        "inner.txt"
+    );
     assert_eq!(session.rows()[1].depth, 1);
     assert_eq!(session.rows()[2].depth, 0);
 

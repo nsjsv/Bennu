@@ -67,7 +67,7 @@ impl IconGridExpansionState {
             let Some((index, _)) = entries
                 .iter()
                 .enumerate()
-                .find(|(_, entry)| entry.path == *next_path && entry.kind == FileKind::Directory)
+                .find(|(_, entry)| entry.path() == *next_path && entry.kind == FileKind::Directory)
             else {
                 self.follow_plan = None;
                 return IconGridExpansionFollowAdvance::Invalid;
@@ -97,7 +97,7 @@ impl IconGridExpansionState {
                         .contents
                         .entries
                         .iter()
-                        .any(|entry| entry.path == target_selection)
+                        .any(|entry| entry.path() == target_selection)
             });
         self.follow_plan = None;
         if target_is_interactive {
@@ -127,7 +127,7 @@ impl IconGridExpansionState {
                             .contents
                             .entries
                             .iter()
-                            .any(|entry| entry.path == selection)
+                            .any(|entry| entry.path() == selection)
                 })
                 .map(|(directory_path, _)| directory_path.clone())?
         };

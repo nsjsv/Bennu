@@ -15,7 +15,7 @@ use bennu_theme::styles::{
     open_child_row_style, selected_icon_svg_style, selected_row_style, subtle_border_color,
 };
 use file_core::entry::FileKind;
-use file_core::is_image_by_name;
+use file_core::MediaByName;
 use iced::widget::{container, image, mouse_area, row, scrollable, Space};
 use iced::{alignment, Element, Length, Theme};
 
@@ -136,8 +136,13 @@ fn lane_entry_row(
     let hovered = session.columns_hovered(lane) == Some(index);
     // 已打开子栏：本行目录正是下一栏的内容（主软件 active_child 同义）；
     // 视觉优先级与主软件 from_entry_context 一致：选中 > 悬停 > 已打开。
-    let open_child =
-        !selected && !hovered && session.columns_chain().get(lane + 1) == Some(&entry.path);
+    let open_child = !selected
+        && !hovered
+        && session
+            .columns_chain()
+            .get(lane + 1)
+            .map(std::path::PathBuf::as_path)
+            == Some(entry.path());
     let icon_tone = if selected {
         selected_icon_svg_style()
     } else {
@@ -146,19 +151,19 @@ fn lane_entry_row(
     // 图片行有就绪缩略图时用行内 PNG 替换类型图标（与列表行同尺寸；
     // image 默认 ContentFit::Contain 保持纵横比）。
     let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && is_image_by_name(&entry.path) {
-            match session.thumbnail_ready(&entry.path) {
+        if entry.kind == FileKind::File && matches!(entry.media_by_name(), MediaByName::Image(_)) {
+            match session.thumbnail_ready(entry.path()) {
                 Some(cached) => image(image::Handle::from_path(&cached.output))
                     .width(Length::Fixed(LANE_ICON_EDGE))
                     .height(Length::Fixed(LANE_ICON_EDGE))
                     .into(),
-                None => file_entry_icon_symbol(entry.kind, &entry.name)
+                None => file_entry_icon_symbol(entry.kind, entry.name())
                     .view(LANE_ICON_EDGE)
                     .style(icon_tone)
                     .into(),
             }
         } else {
-            file_entry_icon_symbol(entry.kind, &entry.name)
+            file_entry_icon_symbol(entry.kind, entry.name())
                 .view(LANE_ICON_EDGE)
                 .style(icon_tone)
                 .into()
@@ -181,7 +186,7 @@ fn lane_entry_row(
         // 中间省略与主软件同源（长名不换行不溢栏）：
         // measured_middle_ellipsized_text 是 bennu-theme 唯一实现。
         container(measured_middle_ellipsized_text(
-            entry.name.to_string_lossy().into_owned(),
+            entry.name().to_string_lossy().into_owned(),
             COLUMN_ENTRY_TEXT_SIZE,
         ))
         .width(Length::Fill),

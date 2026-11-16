@@ -5,7 +5,7 @@ use std::process::{Command, Output};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use file_core::image_decode::{decode_image, image_dimensions, DecodeBound, ImageDecodeError};
-use file_core::{ImageKind, RasterSource};
+use file_core::{media_by_name, ImageKind, MediaByName, RasterSource};
 use thiserror::Error;
 
 mod cache_format;
@@ -151,8 +151,10 @@ pub enum ThumbnailError {
     },
 }
 
-pub fn is_supported_thumbnail_path(path: impl AsRef<Path>) -> bool {
-    thumbnail_media_kind_for_path(path.as_ref()).is_some()
+/// 有条目时传条目上记着的类别（`DirectoryEntry::media_by_name`），只有路径时传
+/// `file_core::media_by_name(path)`。
+pub fn is_supported_thumbnail_media(media: MediaByName) -> bool {
+    thumbnail_media_kind(media).is_some()
 }
 
 /// freedesktop 缩略图规范的共享缓存目录，主程序和文件选择器都只从这里取。
@@ -174,7 +176,7 @@ struct CacheSlot {
 
 impl CacheSlot {
     fn for_request(cache_dir: &Path, request: &ThumbnailRequest) -> Result<Self, ThumbnailError> {
-        let media_kind = thumbnail_media_kind_for_path(&request.source).ok_or_else(|| {
+        let media_kind = thumbnail_media_kind(media_by_name(&request.source)).ok_or_else(|| {
             ThumbnailError::UnsupportedFormat {
                 path: request.source.clone(),
             }
@@ -371,7 +373,10 @@ pub async fn load_image_dimensions(source: impl AsRef<Path>) -> Result<(u32, u32
 
 /// 名字认不出类型、但用户在设置里加了后缀的，按普通像素图试。
 fn load_image_dimensions_blocking(path: PathBuf) -> Result<(u32, u32), ThumbnailError> {
-    match file_core::image_kind_by_name(&path).unwrap_or(ImageKind::Raster(RasterSource::Picture)) {
+    match media_by_name(&path)
+        .image_kind()
+        .unwrap_or(ImageKind::Raster(RasterSource::Picture))
+    {
         ImageKind::Vector => svg::load_svg_dimensions(&path),
         ImageKind::Raster(source) => {
             image_dimensions(&path, source).map_err(|source| ThumbnailError::DecodeImage {
@@ -489,14 +494,12 @@ fn bounded_video_thumbnailer_detail(detail: &str) -> String {
     bounded
 }
 
-/// 只看名字（列表里每个条目都要问，不能读文件）；名字定不下来的视频后缀也先算，生成时再看内容。
-fn thumbnail_media_kind_for_path(path: &Path) -> Option<ThumbnailMediaKind> {
-    if let Some(kind) = file_core::image_kind_by_name(path) {
-        Some(ThumbnailMediaKind::Image(kind))
-    } else if file_core::video_by_name(path) != file_core::VideoByName::No {
-        Some(ThumbnailMediaKind::Video)
-    } else {
-        None
+/// 名字定不下来的视频后缀也先算，生成时再看内容。
+fn thumbnail_media_kind(media: MediaByName) -> Option<ThumbnailMediaKind> {
+    match media {
+        MediaByName::Image(kind) => Some(ThumbnailMediaKind::Image(kind)),
+        MediaByName::Video | MediaByName::MaybeVideo => Some(ThumbnailMediaKind::Video),
+        MediaByName::Audio | MediaByName::Other => None,
     }
 }
 

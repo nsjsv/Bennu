@@ -177,9 +177,9 @@ impl ImagePreviewContent {
             ImagePreviewContent::Thumbnail { .. } => None,
             ImagePreviewContent::OriginalRaster { path, .. } => Some((
                 path,
-                file_core::image_kind_by_name(path).unwrap_or(file_core::ImageKind::Raster(
-                    file_core::RasterSource::Picture,
-                )),
+                file_core::media_by_name(path).image_kind().unwrap_or(
+                    file_core::ImageKind::Raster(file_core::RasterSource::Picture),
+                ),
             )),
             ImagePreviewContent::OriginalSvg { path, .. } => {
                 Some((path, file_core::ImageKind::Vector))

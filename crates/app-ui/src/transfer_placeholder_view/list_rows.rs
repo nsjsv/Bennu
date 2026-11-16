@@ -226,7 +226,7 @@ fn push_expansion_transfer_rows<'a>(
 ) {
     let Some(expanded) = pane
         .expanded_directories
-        .get(&entry.path)
+        .get(entry.path())
         .filter(|expanded| expanded.is_expanded || expanded.is_collapsing)
     else {
         return;
@@ -248,7 +248,7 @@ fn push_expansion_transfer_rows<'a>(
         browser,
         pane,
         &expanded.entries,
-        entry.path.as_path(),
+        entry.path(),
         transfer_sort_for_expanded(browser, expanded),
         depth + 1,
         child_progress,

@@ -150,8 +150,8 @@ pub(super) fn collect_interactive_paths(
         match segment {
             IconGridFlowSegment::Rows(rows) => {
                 for entry in rows_entries(&rows.cells) {
-                    if candidates.contains(entry.path.as_path()) {
-                        matches.insert(entry.path.clone());
+                    if candidates.contains(entry.path()) {
+                        matches.insert(entry.path().to_path_buf());
                     }
                 }
             }
@@ -183,7 +183,7 @@ pub(super) fn find_interactive_entry<'a>(
                     .min(rows.cells.len());
                 let Some(relative_index) = rows.cells[start..end]
                     .iter()
-                    .position(|cell| cell.entry().is_some_and(|entry| entry.path == path))
+                    .position(|cell| cell.entry().is_some_and(|entry| entry.path() == path))
                 else {
                     continue;
                 };

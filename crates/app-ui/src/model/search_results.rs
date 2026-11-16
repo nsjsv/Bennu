@@ -118,11 +118,11 @@ impl BrowserTab {
         };
         let is_removed =
             |path: &std::path::Path| removed.iter().any(|removed| path.starts_with(removed));
-        if !self.entries.iter().any(|entry| is_removed(&entry.path)) {
+        if !self.entries.iter().any(|entry| is_removed(entry.path())) {
             return false;
         }
         search.details.retain(|path, _| !is_removed(path));
-        Arc::make_mut(&mut self.entries).retain(|entry| !is_removed(&entry.path));
+        Arc::make_mut(&mut self.entries).retain(|entry| !is_removed(entry.path()));
         self.retain_direct_entry_selection();
         true
     }
@@ -136,20 +136,16 @@ impl BrowserTab {
         search.root.migrate_origin(migrations);
         let mut moved = Vec::new();
         for entry in Arc::make_mut(&mut self.entries) {
-            let migrated = path_after_completed_migrations(&entry.path, migrations);
-            if migrated == entry.path {
+            let migrated = path_after_completed_migrations(entry.path(), migrations);
+            if migrated == entry.path() {
                 continue;
             }
-            let previous = std::mem::replace(&mut entry.path, migrated);
-            entry.name = entry
-                .path
-                .file_name()
-                .unwrap_or_else(|| entry.path.as_os_str())
-                .to_os_string();
+            let previous = entry.path().to_path_buf();
+            entry.relocate(migrated);
             moved.push((
                 previous,
-                entry.path.clone(),
-                entry.name.to_string_lossy().into_owned(),
+                entry.path().to_path_buf(),
+                entry.name().to_string_lossy().into_owned(),
             ));
         }
         search.migrate_details(moved);
@@ -180,7 +176,7 @@ impl BrowserTab {
         let entries = hits.iter().map(entry_from_hit).collect::<Vec<_>>();
         let display_names = entries
             .iter()
-            .map(|entry| entry.name.to_string_lossy().into_owned())
+            .map(|entry| entry.name().to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         if placement == SearchHitsPlacement::Replace {
             search.details.clear();
@@ -194,7 +190,7 @@ impl BrowserTab {
         let excess = listing.len().saturating_sub(SEARCH_RESULT_TOTAL_LIMIT);
         if excess > 0 {
             for dropped in listing.drain(..excess) {
-                search.details.remove(&dropped.path);
+                search.details.remove(dropped.path());
             }
             search.note_truncated();
         }

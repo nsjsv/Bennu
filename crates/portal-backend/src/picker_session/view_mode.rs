@@ -89,7 +89,7 @@ impl PickerSession {
         self.selection
             .iter()
             .filter_map(|&index| self.rows.get(index))
-            .map(|row| row.entry.path.clone())
+            .map(|row| row.entry.path().to_path_buf())
             .collect()
     }
 
@@ -131,7 +131,7 @@ impl PickerSession {
                 .iter()
                 .filter_map(|&index| self.rows.get(index))
                 .filter(|row| row.depth == 0)
-                .map(|row| row.entry.path.clone())
+                .map(|row| row.entry.path().to_path_buf())
                 .collect()
         };
         if from_columns {
@@ -160,7 +160,7 @@ impl PickerSession {
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, row)| carried_paths.contains(&row.entry.path))
+            .filter(|(_, row)| carried_paths.iter().any(|path| path == row.entry.path()))
             .map(|(index, _)| index)
             .collect();
         self.selection_anchor = self.selection.first().copied();
@@ -171,7 +171,7 @@ impl PickerSession {
         self.pending_view_switch_reveal = self
             .selection
             .first()
-            .map(|&index| self.rows[index].entry.path.clone());
+            .map(|&index| self.rows[index].entry.path().to_path_buf());
         // 行几何随模式整体更换：核实滚动条溢出并刷新视口缓存（探针
         // 回信按新几何重算缩略图可见区间并完成主选中项揭示）。
         SessionEffect::VerifyScrollbarLayout
@@ -191,14 +191,14 @@ impl PickerSession {
         self.pending_view_switch_reveal = None;
         let selection: Vec<usize> = carried_paths
             .iter()
-            .filter_map(|path| self.column_entries_iter(0).position(|e| &e.path == path))
+            .filter_map(|path| self.column_entries_iter(0).position(|e| e.path() == path))
             .collect();
         let anchor = selection.first().copied();
         self.columns.set_selection(0, selection, anchor);
         if let (true, Some(anchor)) = (carried_paths.len() == 1, anchor) {
             if let Some(entry) = self.column_entry(0, anchor) {
                 if entry.kind == FileKind::Directory {
-                    let directory = entry.path.clone();
+                    let directory = entry.path().to_path_buf();
                     return self.columns_open_child(0, directory);
                 }
             }
@@ -211,7 +211,7 @@ impl PickerSession {
     /// 返回需要执行的绝对滚动偏移（已可见则 None）。
     pub(crate) fn complete_view_switch_reveal(&mut self) -> Option<f32> {
         let path = self.pending_view_switch_reveal.take()?;
-        let index = self.rows.iter().position(|row| row.entry.path == path)?;
+        let index = self.rows.iter().position(|row| row.entry.path() == path)?;
         match self.reveal_cursor_on(index) {
             SessionEffect::ScrollListTo { offset_y } => Some(offset_y),
             _ => None,

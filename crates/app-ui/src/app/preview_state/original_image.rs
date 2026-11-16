@@ -75,7 +75,7 @@ impl FileBrowser {
         let Some(request) = request_for_entry(&entry, max_edge) else {
             tracing::debug!(
                 target: "app_ui::preview",
-                path = ?entry.path,
+                path = ?entry.path(),
                 max_edge,
                 "preview thumbnail request skipped"
             );
@@ -86,19 +86,20 @@ impl FileBrowser {
         // 原图并行解码;预览档位缩略图只作展示替换,永不阻塞原图启动。
         if let Some(ready) = self
             .thumbnail_cache
-            .largest_ready_for_source(&entry.path)
+            .largest_ready_for_source(entry.path())
             .cloned()
         {
             tracing::debug!(
                 target: "app_ui::preview",
-                path = ?entry.path,
+                path = ?entry.path(),
                 max_edge = ready.max_edge,
                 "preview opens with cached thumbnail"
             );
             let ready_max_edge = ready.max_edge;
             original.placeholder_handle = Some(ready.handle.clone());
             self.preview_engine.preview = Some(PreviewState::Ready(thumbnail_preview_content(
-                entry.path, ready,
+                entry.path().to_path_buf(),
+                ready,
             )));
             // 已有缩略图明显小于预览档位时,并行生成预览档位缩略图升级展示
             // (release 实测参考图 1500x2104 冷生成 24-68ms,远低于 200ms 预算)。
@@ -115,7 +116,7 @@ impl FileBrowser {
 
         tracing::debug!(
             target: "app_ui::preview",
-            path = ?entry.path,
+            path = ?entry.path(),
             max_edge,
             "preview thumbnail queued"
         );
@@ -147,7 +148,8 @@ impl FileBrowser {
         };
         if let Some(ready) = self.thumbnail_cache.ready_for_request(&request).cloned() {
             self.preview_engine.preview = Some(PreviewState::Ready(thumbnail_preview_content(
-                entry.path, ready,
+                entry.path().to_path_buf(),
+                ready,
             )));
             return Task::none();
         }

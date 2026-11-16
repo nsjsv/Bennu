@@ -184,7 +184,7 @@ fn inactive_pane_thumbnail_range_uses_its_own_viewport() {
         browser.thumbnail_requests_for_pane_directory_range(inactive_id, inactive_dir.as_path());
 
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].source, image_entry.path);
+    assert_eq!(requests[0].source, image_entry.path());
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn inactive_pane_thumbnail_range_schedules_svg_request() {
         browser.thumbnail_requests_for_pane_directory_range(inactive_id, inactive_dir.as_path());
 
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].source, image_entry.path);
+    assert_eq!(requests[0].source, image_entry.path());
 }
 
 #[test]
@@ -369,8 +369,8 @@ fn icon_grid_schedules_visible_expansion_thumbnail_requests() {
         .into_iter()
         .map(|work| work.request.source)
         .collect::<HashSet<_>>();
-    assert!(queued_sources.contains(&main_image.path));
-    assert!(queued_sources.contains(&child_image.path));
+    assert!(queued_sources.contains(main_image.path()));
+    assert!(queued_sources.contains(child_image.path()));
     let child_request = request_for_entry(
         &child_image,
         crate::icon_grid_geometry::thumbnail_edge(browser.user_config.icons_icon_edge()),

@@ -278,7 +278,7 @@ impl PickerSession {
                 return selection
                     .iter()
                     .filter_map(|&index| self.column_entry(lane, index))
-                    .map(|entry| entry.path.clone())
+                    .map(|entry| entry.path().to_path_buf())
                     .collect();
             }
         }
@@ -292,7 +292,7 @@ impl PickerSession {
             .selection(lane)
             .iter()
             .filter_map(|&index| self.column_entry(lane, index))
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path().to_path_buf())
             .collect()
     }
 
@@ -318,7 +318,7 @@ impl PickerSession {
         self.columns.place_cursor(lane, index);
         self.columns_apply_click_semantics(lane, index, ctrl, shift, &entry);
         if entry.kind == FileKind::Directory {
-            self.columns_open_child(lane, entry.path.clone())
+            self.columns_open_child(lane, entry.path().to_path_buf())
         } else {
             self.columns.truncate_after(lane);
             SessionEffect::None
@@ -359,7 +359,7 @@ impl PickerSession {
             return SessionEffect::None;
         };
         if entry.kind == FileKind::Directory {
-            return self.columns_open_child(lane, entry.path.clone());
+            return self.columns_open_child(lane, entry.path().to_path_buf());
         }
         match self.kind {
             PickerKind::OpenFile {
@@ -541,7 +541,7 @@ impl PickerSession {
         let lane = self.columns.focused();
         let matched = self.column_entries_iter(lane).position(|entry| {
             entry
-                .name
+                .name()
                 .to_string_lossy()
                 .to_lowercase()
                 .contains(&needle)
@@ -562,7 +562,7 @@ impl PickerSession {
         let opened = self.columns.chain().get(parent_lane + 1).cloned();
         let opened_index = opened.and_then(|opened| {
             self.column_entries_iter(parent_lane)
-                .position(|entry| entry.path == opened)
+                .position(|entry| entry.path() == opened)
         });
         if let Some(index) = opened_index {
             self.columns.place_cursor(parent_lane, index);
@@ -584,7 +584,7 @@ impl PickerSession {
         if entry.kind != FileKind::Directory {
             return SessionEffect::None;
         }
-        let directory = entry.path.clone();
+        let directory = entry.path().to_path_buf();
         let effect = self.columns_open_child(lane, directory);
         self.columns.place_cursor(lane + 1, 0);
         effect

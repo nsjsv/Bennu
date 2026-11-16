@@ -1,3 +1,4 @@
+use file_core::media_by_name;
 use image::ImageEncoder;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt;
@@ -6,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use thumbnails::{
-    file_uri, is_supported_thumbnail_path, load_cached_thumbnail, load_image_dimensions,
+    file_uri, is_supported_thumbnail_media, load_cached_thumbnail, load_image_dimensions,
     load_or_generate_thumbnail, path_is_in_thumbnail_cache, thumbnail_cache_dir, ThumbnailError,
     ThumbnailRequest, ThumbnailSourceMetadata,
 };
@@ -330,7 +331,7 @@ fn supported_thumbnail_path_includes_images_and_videos() {
         "shot.cr2",
         "shot.nef",
     ] {
-        assert!(is_supported_thumbnail_path(path), "{path}");
+        assert!(is_supported_thumbnail_media(media_by_name(path)), "{path}");
     }
     for path in [
         "clip.MP4",
@@ -340,12 +341,12 @@ fn supported_thumbnail_path_includes_images_and_videos() {
         "show.flv",
         "clip.ts",
     ] {
-        assert!(is_supported_thumbnail_path(path), "{path}");
+        assert!(is_supported_thumbnail_media(media_by_name(path)), "{path}");
     }
     // 候选里有音频的 .ogg 归音频，不为它跑缩略图。
-    assert!(!is_supported_thumbnail_path("song.ogg"));
-    assert!(!is_supported_thumbnail_path("notes.txt"));
-    assert!(!is_supported_thumbnail_path("drawing.xcf"));
+    assert!(!is_supported_thumbnail_media(media_by_name("song.ogg")));
+    assert!(!is_supported_thumbnail_media(media_by_name("notes.txt")));
+    assert!(!is_supported_thumbnail_media(media_by_name("drawing.xcf")));
 }
 
 #[test]

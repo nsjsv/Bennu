@@ -245,7 +245,7 @@ impl FileBrowser {
                 );
                 tracing::debug!(
                     target: "app_ui::thumbnail",
-                    source = ?entry.path,
+                    source = ?entry.path(),
                     interaction = "selected",
                     "interaction thumbnail enqueue"
                 );
@@ -261,7 +261,7 @@ impl FileBrowser {
                 );
                 tracing::debug!(
                     target: "app_ui::thumbnail",
-                    source = ?entry.path,
+                    source = ?entry.path(),
                     interaction = "hovered",
                     "interaction thumbnail enqueue"
                 );
@@ -694,7 +694,7 @@ fn thumbnail_request_matches_pane(pane: &BrowserPane, request: &ThumbnailRequest
         BrowserViewMode::Icons => tab
             .entries
             .iter()
-            .find(|entry| entry.path == request.source),
+            .find(|entry| entry.path() == request.source),
         BrowserViewMode::Columns | BrowserViewMode::List => tab
             .entries
             .iter()
@@ -703,7 +703,7 @@ fn thumbnail_request_matches_pane(pane: &BrowserPane, request: &ThumbnailRequest
                     .values()
                     .flat_map(|expanded| expanded.entries.iter()),
             )
-            .find(|entry| entry.path == request.source),
+            .find(|entry| entry.path() == request.source),
     };
     entry.is_some_and(|entry| thumbnail_request_matches_entry(entry, request))
 }

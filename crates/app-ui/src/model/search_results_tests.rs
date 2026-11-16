@@ -67,7 +67,10 @@ fn search(tab: &BrowserTab) -> &SearchWorkspaceState {
 }
 
 fn entry_paths(tab: &BrowserTab) -> Vec<PathBuf> {
-    tab.entries.iter().map(|entry| entry.path.clone()).collect()
+    tab.entries
+        .iter()
+        .map(|entry| entry.path().to_path_buf())
+        .collect()
 }
 
 #[test]
@@ -172,7 +175,7 @@ fn later_pages_append_once_in_service_order() {
 
     assert_eq!(tab.entries.len(), SEARCH_RESULT_WINDOW * 2);
     assert_eq!(
-        tab.entries[SEARCH_RESULT_WINDOW].path,
+        tab.entries[SEARCH_RESULT_WINDOW].path(),
         hit(SEARCH_RESULT_WINDOW).path
     );
     assert!(!tab.accept_search_batch(second, page(1, vec![hit(9999)], None)));
@@ -224,7 +227,7 @@ fn results_beyond_the_total_limit_drop_the_oldest_with_their_details() {
     assert!(search.window.truncated);
     assert_eq!(search.details.len(), SEARCH_RESULT_TOTAL_LIMIT);
     let excess = total - SEARCH_RESULT_TOTAL_LIMIT;
-    assert_eq!(tab.entries[0].path, hit(excess).path);
+    assert_eq!(tab.entries[0].path(), hit(excess).path);
     assert!(search.detail(&hit(0).path).is_none());
 }
 
@@ -304,7 +307,7 @@ fn renamed_results_follow_their_new_path_and_name() {
 
     let moved = PathBuf::from("/workspace/new/my-report.txt");
     assert_eq!(entry_paths(&tab), vec![moved.clone()]);
-    assert_eq!(tab.entries[0].name, "my-report.txt");
+    assert_eq!(tab.entries[0].name(), "my-report.txt");
     assert!(tab.selected_paths.contains(&moved));
     assert_eq!(
         search(&tab).detail(&moved).unwrap().name_highlights,

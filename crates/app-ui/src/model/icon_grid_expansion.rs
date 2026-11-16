@@ -259,7 +259,7 @@ impl IconGridExpansionState {
                         .contents
                         .entries
                         .iter()
-                        .any(|entry| entry.path == path)
+                        .any(|entry| entry.path() == path)
             })
     }
 
@@ -294,7 +294,7 @@ impl IconGridExpansionState {
             .iter()
             .filter(|(directory, _)| self.node_is_interactive(directory))
             .flat_map(|(_, expanded)| expanded.contents.entries.iter())
-            .find(|entry| entry.path == path)
+            .find(|entry| entry.path() == path)
     }
 
     fn begin_directory_close(&mut self, path: &Path) -> Vec<PathBuf> {
@@ -527,7 +527,7 @@ impl IconGridExpansionState {
             .iter()
             .enumerate()
             .filter(|(_, entry)| entry.kind == FileKind::Directory)
-            .map(|(index, entry)| (entry.path.clone(), index))
+            .map(|(index, entry)| (entry.path().to_path_buf(), index))
             .collect::<HashMap<_, _>>();
         let child_paths = self
             .directories
@@ -708,7 +708,7 @@ impl IconGridExpansionState {
                     .contents
                     .entries
                     .iter()
-                    .all(|entry| entry.path.parent() == Some(path.as_path()))
+                    .all(|entry| entry.path().parent() == Some(path.as_path()))
         });
         directories_hold
             && self.pending_children.iter().all(|(parent, pending)| {
@@ -766,7 +766,7 @@ impl IconGridExpansionState {
                     .contents
                     .entries
                     .iter()
-                    .map(|entry| entry.path.clone())
+                    .map(|entry| entry.path().to_path_buf())
             })
             .collect()
     }

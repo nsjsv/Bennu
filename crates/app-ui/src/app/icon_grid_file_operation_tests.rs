@@ -119,7 +119,7 @@ fn completed_root_rename_migrates_temporary_icon_grid_tree() {
             .contents
             .entries
             .iter()
-            .map(|entry| entry.path.clone())
+            .map(|entry| entry.path().to_path_buf())
             .collect::<Vec<_>>(),
         vec![renamed.join("report.txt")]
     );
@@ -156,13 +156,13 @@ fn completed_root_rename_migrates_temporary_icon_grid_tree() {
             .contents
             .entries
             .first()
-            .map(|entry| entry.path.clone()),
+            .map(|entry| entry.path().to_path_buf()),
         Some(PathBuf::from("/workspace/renamed/report.txt")),
     );
     assert_eq!(
         state
             .entry(&PathBuf::from("/workspace/renamed/report.txt"))
-            .map(|entry| entry.path.clone()),
+            .map(|entry| entry.path().to_path_buf()),
         Some(PathBuf::from("/workspace/renamed/report.txt"))
     );
 }

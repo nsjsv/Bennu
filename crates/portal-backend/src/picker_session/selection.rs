@@ -17,7 +17,7 @@ impl PickerSession {
                 // SaveFile：文件点击 = 取其名（桌面惯例；空格预览目标
                 // 取 selection_anchor，无选中则静默无操作）。
                 if entry.kind == FileKind::File {
-                    self.name_input = entry.name.to_string_lossy().into_owned();
+                    self.name_input = entry.name().to_string_lossy().into_owned();
                     self.overwrite_targets.clear();
                 }
                 true
@@ -107,7 +107,8 @@ impl PickerSession {
             return SessionEffect::None;
         };
         if row.entry.kind == FileKind::Directory {
-            return self.begin_navigation(PickerLocation::Directory(row.entry.path.clone()));
+            return self
+                .begin_navigation(PickerLocation::Directory(row.entry.path().to_path_buf()));
         }
         // 文件双击 = 选中并立即确认（桌面选择器惯例）。
         match self.kind {
@@ -125,7 +126,7 @@ impl PickerSession {
                 SessionEffect::None
             }
             PickerKind::SaveFile { .. } => {
-                self.name_input = row.entry.name.to_string_lossy().into_owned();
+                self.name_input = row.entry.name().to_string_lossy().into_owned();
                 self.overwrite_targets.clear();
                 SessionEffect::None
             }

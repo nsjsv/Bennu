@@ -6,7 +6,8 @@ use bennu_localization::tr;
 use file_core::mime::{MimeDatabase, NameType, TEXT_PLAIN};
 use file_core::{
     list_archive_members_with_format, scan_directory, sniff_archive_extraction_format,
-    ArchiveListingEntry, DirectoryEntry, ExternalTool, FileError, FileKind, ScanOptions,
+    ArchiveListingEntry, DirectoryEntry, ExternalTool, FileError, FileKind, MediaByName,
+    ScanOptions,
 };
 
 use crate::audio_preview::{probe_audio_preview, AudioProbeError};
@@ -146,13 +147,14 @@ pub fn classify_preview_path(
     if rules.matches(Kind::Sqlite, path) {
         return Some(PreviewPathKind::Sqlite);
     }
-    if rules.matches(Kind::Image, path) || file_core::is_image_by_name(path) {
+    let media = file_core::media_by_name(path);
+    if rules.matches(Kind::Image, path) || matches!(media, MediaByName::Image(_)) {
         return Some(PreviewPathKind::Image);
     }
-    if rules.matches(Kind::Video, path) || file_core::is_video_by_name(path) {
+    if rules.matches(Kind::Video, path) || media == MediaByName::Video {
         return Some(PreviewPathKind::Video);
     }
-    if rules.matches(Kind::Audio, path) || file_core::is_audio_by_name(path) {
+    if rules.matches(Kind::Audio, path) || media == MediaByName::Audio {
         return Some(PreviewPathKind::Audio);
     }
     if rules.matches(Kind::Text, path) || may_be_text_by_name(path) {

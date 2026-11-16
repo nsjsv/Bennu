@@ -109,7 +109,7 @@ fn load_original_image_preview_blocking(
     }
     ensure_preview_file_size(path, max_file_bytes)?;
     // 名字认不出类型、但用户在设置里加了后缀的，按普通像素图试。
-    let source = match file_core::image_kind_by_name(path) {
+    let source = match file_core::media_by_name(path).image_kind() {
         Some(ImageKind::Vector) => return load_svg_preview(path, max_file_bytes, cancellation),
         Some(ImageKind::Raster(source)) => source,
         None => RasterSource::Picture,

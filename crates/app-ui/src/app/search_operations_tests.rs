@@ -155,7 +155,7 @@ fn deleted_results_and_results_inside_deleted_folders_leave_the_list() {
         .tab()
         .entries
         .iter()
-        .map(|entry| entry.path.clone())
+        .map(|entry| entry.path().to_path_buf())
         .collect::<Vec<_>>();
     assert_eq!(remaining, vec![fixture.first.clone()]);
     assert!(!fixture
@@ -184,7 +184,7 @@ fn opening_a_missing_result_reports_it_and_removes_it() {
         .tab()
         .entries
         .iter()
-        .all(|entry| entry.path != fixture.first));
+        .all(|entry| entry.path() != fixture.first));
     assert!(fixture.browser.global_error_notification.is_some());
 }
 

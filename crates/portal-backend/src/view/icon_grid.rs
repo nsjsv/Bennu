@@ -14,7 +14,7 @@ use bennu_theme::styles::{
     muted_icon_svg_style, selected_icon_svg_style, selected_row_style,
 };
 use file_core::entry::FileKind;
-use file_core::is_image_by_name;
+use file_core::MediaByName;
 use iced::widget::{column, container, image, mouse_area, row, scrollable};
 use iced::{alignment, Element, Length, Padding, Theme};
 
@@ -88,20 +88,20 @@ fn tile(
     // ContentFit::Contain 保持纵横比）。Handle::from_path 只持路径不驻
     // 留像素，每帧重建成本可忽略。
     let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && is_image_by_name(&entry.path) {
-            match session.thumbnail_ready(&entry.path) {
+        if entry.kind == FileKind::File && matches!(entry.media_by_name(), MediaByName::Image(_)) {
+            match session.thumbnail_ready(entry.path()) {
                 Some(cached) => image(image::Handle::from_path(&cached.output))
                     .width(Length::Fixed(ICON_EDGE as f32))
                     .height(Length::Fixed(ICON_EDGE as f32))
                     .into(),
                 // 未就绪/失败 backoff 期间保持类型图标占位。
-                None => file_entry_icon_symbol(entry.kind, &entry.name)
+                None => file_entry_icon_symbol(entry.kind, entry.name())
                     .view(ICON_EDGE as f32)
                     .style(icon_tone)
                     .into(),
             }
         } else {
-            file_entry_icon_symbol(entry.kind, &entry.name)
+            file_entry_icon_symbol(entry.kind, entry.name())
                 .view(ICON_EDGE as f32)
                 .style(icon_tone)
                 .into()
@@ -111,7 +111,7 @@ fn tile(
     // iced 0.14 container 默认左上对齐，水平居中必须显式设在容器上
     // （文字自身宽度 Shrink，文字级 align_x 无空间可居中）。
     let label = container(
-        readable_label(entry.name.to_string_lossy().into_owned()).size(label_size(ICON_EDGE)),
+        readable_label(entry.name().to_string_lossy().into_owned()).size(label_size(ICON_EDGE)),
     )
     .width(Length::Fill)
     .height(Length::Fixed(label_height(ICON_EDGE)))

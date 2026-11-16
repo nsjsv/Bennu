@@ -241,7 +241,7 @@ fn icons_entry_lookup_never_reads_hidden_persistent_children() {
     );
     browser.icon_grid_expansion = None;
 
-    assert!(browser.entry_for_path(&hidden.path).is_none());
+    assert!(browser.entry_for_path(hidden.path()).is_none());
 
     browser.icon_grid_expansion = Some(IconGridExpansionState::new(
         root_context(),
@@ -254,9 +254,9 @@ fn icons_entry_lookup_never_reads_hidden_persistent_children() {
     ));
     assert_eq!(
         browser
-            .entry_for_path(&hidden.path)
-            .map(|entry| &entry.path),
-        Some(&hidden.path),
+            .entry_for_path(hidden.path())
+            .map(|entry| entry.path()),
+        Some(hidden.path()),
     );
 }
 

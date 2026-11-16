@@ -107,6 +107,7 @@ pub(super) fn migrate_expanded_directories(
             if matches!(directory.status, ExpandedDirectoryStatus::Loading) {
                 return None;
             }
+            directory.status = directory.status.scan_abandoned();
             detach_directory_discovery(
                 &mut directory.entries,
                 &mut directory.directory_discovery,

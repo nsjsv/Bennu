@@ -284,11 +284,12 @@ impl FileBrowser {
         load_expanded_directory_command(request, self.options.clone(), cancellation)
     }
 
+    /// 已加载的面板刷新时旧条目一直显示、结果落地整体替换，所以不清条目、不动选择。
     fn reload_icon_grid_directory(&mut self, path: PathBuf) -> Task<Message> {
-        let Some((context, hidden_paths)) = self
+        let Some(context) = self
             .icon_grid_expansion
             .as_ref()
-            .map(|state| (state.context().clone(), state.entry_paths_in_subtree(&path)))
+            .map(|state| state.context().clone())
         else {
             return Task::none();
         };
@@ -299,14 +300,12 @@ impl FileBrowser {
         else {
             return Task::none();
         };
-        expanded.contents.status = ExpandedDirectoryStatus::Loading;
-        expanded.contents.entries.clear();
+        expanded.contents.status = expanded.contents.status.reloading();
         let (request, cancellation) = Self::next_expanded_directory_load_request(
             icon_grid_load_context(&context),
             path,
             &mut expanded.contents,
         );
-        self.remove_hidden_icon_grid_selection(&hidden_paths);
         load_expanded_directory_command(request, self.options.clone(), cancellation)
     }
 
@@ -473,7 +472,10 @@ impl FileBrowser {
         else {
             return Task::none();
         };
-        expanded.contents.entries.extend(entries);
+        // 分批只填第一次加载的空面板；刷新中的旧条目等结果落地整体替换。
+        if !expanded.contents.status.has_listing() {
+            expanded.contents.entries.extend(entries);
+        }
         Task::none()
     }
 
@@ -508,6 +510,20 @@ impl FileBrowser {
                 expanded.contents.status = ExpandedDirectoryStatus::Loaded;
                 expanded.contents.load_context = None;
                 expanded.contents.load_cancel = None;
+                let gone = self
+                    .icon_grid_expansion
+                    .as_ref()
+                    .and_then(|state| state.directory(&request.path))
+                    .map(|expanded| {
+                        self.interaction_targets_missing_from(
+                            &request.path,
+                            &expanded.contents.entries,
+                        )
+                    })
+                    .unwrap_or_default();
+                self.release_interactions_targeting(|target| {
+                    gone.iter().any(|path| path == target)
+                });
             }
             Err(DirectoryLoadFailure::DirectoryUnavailable { .. }) => {
                 self.reconcile_icon_grid_removed_paths(std::slice::from_ref(&request.path));

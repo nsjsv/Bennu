@@ -50,7 +50,7 @@ pub(crate) async fn discover_archive_directory(
     let mut entries = Vec::with_capacity(children.len());
     for (name, info) in children {
         let is_hidden = is_hidden_name(&name);
-        if is_hidden && !options.include_hidden {
+        if !options.includes_entry(is_hidden) {
             continue;
         }
         entries.push(DiscoveredDirectoryEntry::with_archive_member_metadata(

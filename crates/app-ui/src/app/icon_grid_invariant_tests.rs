@@ -280,40 +280,42 @@ fn icon_navigation_does_not_snapshot_hidden_persistent_rows() {
     assert!(browser.pane().directory_loading_placeholder.is_none());
 }
 
+/// 磁盘变化触发的刷新不是用户操作：旧条目一直留在布局里直到结果整体替换，
+/// 所以选择、预览、待重命名都不该被清掉。
 #[test]
-fn refreshing_icon_subtree_removes_selection_before_entries_leave_layout() {
-    let hidden = PathBuf::from("/workspace/root/hidden.txt");
+fn refreshing_icon_subtree_keeps_entries_and_interaction_until_replaced() {
+    let kept = PathBuf::from("/workspace/root/kept.txt");
     let mut browser = browser_with_root(expanded(
-        vec![entry("/workspace/root/hidden.txt", FileKind::File)],
+        vec![entry("/workspace/root/kept.txt", FileKind::File)],
         ExpandedDirectoryStatus::Loaded,
         ROOT_GENERATION,
     ));
-    browser.tab_mut().selected = Some(hidden.clone());
-    browser.tab_mut().selected_paths.insert(hidden.clone());
-    browser.tab_mut().selection_anchor = Some(hidden.clone());
-    browser.pending_created_entry_rename = Some(hidden.clone());
-    browser.preview_engine.preview = Some(crate::model::PreviewState::Loading(hidden));
+    browser.tab_mut().selected = Some(kept.clone());
+    browser.tab_mut().selected_paths.insert(kept.clone());
+    browser.tab_mut().selection_anchor = Some(kept.clone());
+    browser.pending_created_entry_rename = Some(kept.clone());
+    browser.preview_engine.preview = Some(crate::model::PreviewState::Loading(kept.clone()));
 
     let command = browser
         .reload_observed_icon_grid_directory(Path::new("/workspace/root"))
         .expect("interactive root refresh");
 
     assert!(command.units() > 0);
-    assert!(browser.tab().selected_paths.is_empty());
-    assert_eq!(browser.tab().selected, None);
-    assert_eq!(browser.tab().selection_anchor, None);
-    assert_eq!(browser.pending_created_entry_rename, None);
-    assert!(browser.preview_engine.preview.is_none());
+    assert!(browser.tab().selected_paths.contains(&kept));
+    assert_eq!(browser.tab().selected.as_ref(), Some(&kept));
+    assert_eq!(browser.tab().selection_anchor.as_ref(), Some(&kept));
+    assert_eq!(browser.pending_created_entry_rename.as_ref(), Some(&kept));
+    assert!(browser.preview_engine.preview.is_some());
     let root = browser
         .icon_grid_expansion
         .as_ref()
         .unwrap()
         .directory(Path::new("/workspace/root"))
         .unwrap();
-    assert!(root.contents.entries.is_empty());
+    assert_eq!(root.contents.entries.len(), 1);
     assert!(matches!(
         root.contents.status,
-        ExpandedDirectoryStatus::Loading,
+        ExpandedDirectoryStatus::Refreshing,
     ));
 }
 

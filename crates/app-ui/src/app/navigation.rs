@@ -14,8 +14,8 @@ use crate::model::{
     empty_directory_entry_snapshot, BrowserLocation, BrowserPaneId, BrowserViewMode,
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
     DirectoryLoadRequest, DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry,
-    DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus,
-    HistoryEntry, LocationKey, Message, NavigationMode,
+    DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, HistoryEntry,
+    LocationKey, Message, NavigationMode,
 };
 use crate::startup_trace;
 impl FileBrowser {
@@ -64,6 +64,7 @@ impl FileBrowser {
         }
         expanded.load_generation = expanded.load_generation.wrapping_add(1);
         expanded.load_context = None;
+        expanded.status = expanded.status.scan_abandoned();
     }
 
     pub(super) fn accept_directory_discovery_batch(
@@ -86,6 +87,11 @@ impl FileBrowser {
             pane.tab().current_directory(),
             pane.directory_load_generation,
         ) {
+            return Task::none();
+        }
+        // 分批只用来填从空开始的列表；刷新中的完整列表等结果落地整体替换，
+        // 往上追加会让新旧条目重复出现、计数翻倍。
+        if !pane.tab().directory_collection_phase.is_discovering() {
             return Task::none();
         }
         Arc::make_mut(&mut pane.tab_mut().entries).extend(entries);
@@ -147,8 +153,8 @@ impl FileBrowser {
 
         pane.directory_loading_placeholder = None;
         let tab = pane.tab_mut();
-        tab.location = BrowserLocation::Directory(path);
-        tab.entries = entries;
+        tab.location = BrowserLocation::Directory(path.clone());
+        tab.entries = Arc::clone(&entries);
         tab.directory_discovery = discovery;
         // 扫描读到的是启动那一刻的磁盘，期间到达的变化排在队里，落地后补上。
         replay_changes_queued_during_current_scan(tab, request.generation, &sort_options);
@@ -159,6 +165,8 @@ impl FileBrowser {
         tab.directory_collection_phase = DirectoryCollectionPhase::Ready;
         tab.directory_order_phase =
             directory_order_phase_after_collection(&sort_options, &tab.entries);
+        let gone = self.interaction_targets_missing_from(&path, &entries);
+        self.release_interactions_targeting(|target| gone.iter().any(|path| path == target));
         self.entries_replaced();
         if is_active {
             let entries = Arc::clone(&self.tab().entries);
@@ -358,7 +366,14 @@ impl FileBrowser {
             .pane_by_id_mut(pane_id)
             .expect("a reload targets an existing pane");
         pane.directory_loading_placeholder = None;
-        pane.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Discovering;
+        let tab = pane.tab_mut();
+        // 已显示完整列表时是刷新：旧列表一直留着，结果落地整体替换。
+        tab.directory_collection_phase = match tab.directory_collection_phase {
+            DirectoryCollectionPhase::Discovering => DirectoryCollectionPhase::Discovering,
+            DirectoryCollectionPhase::Ready | DirectoryCollectionPhase::Refreshing => {
+                DirectoryCollectionPhase::Refreshing
+            }
+        };
         self.retract_global_error(GlobalErrorSource::DirectoryLoad);
 
         let mut commands = self.refresh_expanded_directory_commands(pane_id);
@@ -469,11 +484,8 @@ impl FileBrowser {
             return Task::none();
         };
         if current_directory == path {
-            return if pane_id == self.active_pane_id() {
-                self.reload_current_preserving_list_directory_summaries()
-            } else {
-                self.schedule_directory_reload(pane_id)
-            };
+            // 磁盘上的变化不是用户操作：不收右键菜单、不清预览、不打断重命名。
+            return self.schedule_directory_reload(pane_id);
         }
         let load_context = self.expanded_directory_load_context(pane_id, path);
         let options = self.options.clone();
@@ -484,7 +496,7 @@ impl FileBrowser {
             // 这个窗格不显示该目录。
             return Task::none();
         };
-        expanded.status = ExpandedDirectoryStatus::Loading;
+        expanded.status = expanded.status.reloading();
         expanded.is_expanded = true;
         expanded.is_collapsing = false;
         expanded.animation_progress = 1.0;
@@ -721,7 +733,7 @@ impl FileBrowser {
             .expanded_directories;
         let paths = expanded_directories.keys().cloned().collect::<Vec<_>>();
         for expanded in expanded_directories.values_mut() {
-            expanded.status = ExpandedDirectoryStatus::Loading;
+            expanded.status = expanded.status.reloading();
             expanded.is_expanded = true;
             expanded.is_collapsing = false;
             expanded.animation_progress = 1.0;
@@ -786,6 +798,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::model::ExpandedDirectoryStatus;
 
     #[tokio::test]
     async fn streamed_hints_are_replaced_by_the_authoritative_discovery() {

@@ -93,7 +93,7 @@ pub(super) fn scan_trash_with_catalog(
                 .map(OsStr::to_os_string)
                 .unwrap_or_else(|| item_name.clone());
             let is_hidden = is_hidden_name(&display_name);
-            if is_hidden && !options.include_hidden {
+            if !options.includes_entry(is_hidden) {
                 continue;
             }
             let trash_path = location.files.path.join(&item_name);

@@ -7,7 +7,7 @@ use desktop_linux::{
     DesktopActivationRuntime, WaylandDndController, WaylandDndEvent, WaylandDndWindowHandle,
     X11DndController, X11DndEvent, X11DndWindowHandle,
 };
-use file_core::{watch_directory, ResolvedEntryChange};
+use file_core::{watch_directory, ResolvedEntryChange, ScanOptions};
 use file_operations::ForeignTaskWait;
 use iced::futures::SinkExt;
 use iced::Subscription;
@@ -113,8 +113,13 @@ fn desktop_activation_stream(
     })
 }
 
-pub(super) fn directory_watch_subscription(path: PathBuf) -> Subscription<Message> {
-    Subscription::run_with(path, directory_watch_stream)
+/// 监视一个显示中的目录。列表的隐藏规则进订阅身份：看不见的变化在这里就丢掉，
+/// 不发消息、不叫醒界面；切换「显示隐藏文件」时订阅随之换新。
+pub(super) fn directory_watch_subscription(
+    path: PathBuf,
+    include_hidden: bool,
+) -> Subscription<Message> {
+    Subscription::run_with((path, include_hidden), directory_watch_stream)
 }
 
 /// 任务库（含 WAL、回滚日志）有写入时报一次；开始监视时先报一次，
@@ -287,12 +292,24 @@ pub(super) fn x11_file_dnd_subscription(
     )
 }
 
-fn directory_watch_stream(path: &PathBuf) -> impl iced::futures::Stream<Item = Message> + 'static {
+fn directory_watch_stream(
+    (path, include_hidden): &(PathBuf, bool),
+) -> impl iced::futures::Stream<Item = Message> + 'static {
     let path = path.clone();
+    let listing = ScanOptions {
+        include_hidden: *include_hidden,
+        ..ScanOptions::default()
+    };
     iced::stream::channel(DIRECTORY_WATCH_CHANNEL_SIZE, async move |mut output| {
         match watch_directory(&path, DIRECTORY_WATCH_DEBOUNCE) {
             Ok(mut watcher) => {
-                while let Some(change) = watcher.recv().await {
+                while let Some(mut change) = watcher.recv().await {
+                    change
+                        .changes
+                        .retain(|change| change.affects_listing(&listing));
+                    if change.changes.is_empty() {
+                        continue;
+                    }
                     if output
                         .send(Message::ObservedDirectoryChanges(change))
                         .await

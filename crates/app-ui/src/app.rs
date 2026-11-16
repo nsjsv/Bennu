@@ -873,10 +873,11 @@ impl FileBrowser {
             ));
         }
 
+        let include_hidden = self.options.include_hidden;
         subscriptions.extend(
             self.watched_directories()
                 .into_iter()
-                .map(directory_watch_subscription),
+                .map(|directory| directory_watch_subscription(directory, include_hidden)),
         );
 
         if self.settings_window.is_some()
@@ -899,9 +900,10 @@ impl FileBrowser {
 
         if self.has_trash_tab() {
             subscriptions.extend(
+                // 回收站列表来自快照，任何变化都要重拉快照。
                 file_core::trash_bin::trash_watch_directories()
                     .into_iter()
-                    .map(directory_watch_subscription),
+                    .map(|directory| directory_watch_subscription(directory, true)),
             );
         }
 

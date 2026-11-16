@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 
 use crate::directory_metadata::DiscoveredDirectoryEntry;
+use crate::scan::{is_hidden_name, ScanOptions};
 use crate::FileError;
 
 /// 单窗口聚合后允许的最大条目变更数：超过即视为批量写入（解压、批量生成），
@@ -26,6 +27,25 @@ pub enum ResolvedEntryChange {
     },
     ContentChanged(DiscoveredDirectoryEntry),
     RescanRequired,
+}
+
+impl ResolvedEntryChange {
+    /// 这条变化会不会改动按 `options` 列出的列表。看不见的变化（不显示隐藏文件时
+    /// 隐藏条目的增删改）不必叫醒界面，更不能让它重扫。
+    pub fn affects_listing(&self, options: &ScanOptions) -> bool {
+        let listed = |path: &Path| {
+            path.file_name()
+                .is_some_and(|name| options.includes_entry(is_hidden_name(name)))
+        };
+        match self {
+            Self::Added(entry) | Self::ContentChanged(entry) => {
+                options.includes_entry(entry.is_hidden())
+            }
+            Self::Removed { path } => listed(path),
+            Self::Renamed { from, to } => listed(from) || options.includes_entry(to.is_hidden()),
+            Self::RescanRequired => true,
+        }
+    }
 }
 
 /// 一个受监视目录在一个防抖窗口内的聚合变更。
@@ -310,7 +330,7 @@ async fn resolve_raw_changes(folded: Vec<RawEntryChange>) -> Vec<ResolvedEntryCh
 async fn discovered_entry_at(path: &Path) -> Option<DiscoveredDirectoryEntry> {
     let metadata = tokio::fs::symlink_metadata(path).await.ok()?;
     let name = path.file_name()?.to_os_string();
-    let is_hidden = crate::scan::is_hidden_name(&name);
+    let is_hidden = is_hidden_name(&name);
     let file_type = metadata.file_type();
     let kind = if file_type.is_dir() {
         crate::entry::FileKind::Directory
@@ -433,5 +453,45 @@ mod tests {
             });
 
         assert!(matches!(outcome, Err(FileError::Watch { path, .. }) if path == missing));
+    }
+
+    /// 看不见的变化在监视源头就丢掉；看得见的一端（改名的任一端）要留着。
+    #[tokio::test]
+    async fn only_changes_to_listed_entries_affect_the_listing() {
+        let directory = tempfile::tempdir().unwrap();
+        let hidden = directory.path().join(".log");
+        let visible = directory.path().join("notes.txt");
+        std::fs::write(&hidden, b"h").unwrap();
+        std::fs::write(&visible, b"v").unwrap();
+        let hidden_entry = discovered_entry_at(&hidden).await.unwrap();
+        let visible_entry = discovered_entry_at(&visible).await.unwrap();
+        let excluded = ScanOptions::default();
+        let included = ScanOptions {
+            include_hidden: true,
+            ..ScanOptions::default()
+        };
+
+        let hidden_changes = [
+            ResolvedEntryChange::ContentChanged(hidden_entry.clone()),
+            ResolvedEntryChange::Added(hidden_entry.clone()),
+            ResolvedEntryChange::Removed {
+                path: hidden.clone(),
+            },
+        ];
+        for change in &hidden_changes {
+            assert!(!change.affects_listing(&excluded));
+            assert!(change.affects_listing(&included));
+        }
+        let hiding = ResolvedEntryChange::Renamed {
+            from: visible.clone(),
+            to: hidden_entry,
+        };
+        let revealing = ResolvedEntryChange::Renamed {
+            from: hidden,
+            to: visible_entry,
+        };
+        assert!(hiding.affects_listing(&excluded));
+        assert!(revealing.affects_listing(&excluded));
+        assert!(ResolvedEntryChange::RescanRequired.affects_listing(&excluded));
     }
 }

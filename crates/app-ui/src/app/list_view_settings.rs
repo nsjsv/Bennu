@@ -449,7 +449,7 @@ mod tests {
         assert_eq!(browser.options.sort_field, SortField::Size);
         assert_eq!(browser.options.sort_direction, SortDirection::Ascending);
         assert_eq!(browser.pane().directory_load_generation, 1);
-        assert!(browser.tab().directory_collection_phase.is_discovering());
+        assert!(browser.tab().directory_collection_phase.scan_in_flight());
         assert_eq!(
             browser
                 .tab()
@@ -459,22 +459,20 @@ mod tests {
                 .load_generation,
             1
         );
-        assert!(matches!(
-            browser
-                .tab()
-                .expanded_directories
-                .get(&active_dir)
-                .expect("active expanded directory")
-                .status,
-            ExpandedDirectoryStatus::Loading
-        ));
+        assert!(browser
+            .tab()
+            .expanded_directories
+            .get(&active_dir)
+            .expect("active expanded directory")
+            .status
+            .scan_in_flight());
 
         let inactive_pane = browser.pane_by_id(BrowserPaneId(1)).expect("inactive pane");
         assert_eq!(inactive_pane.directory_load_generation, 1);
         assert!(inactive_pane
             .tab()
             .directory_collection_phase
-            .is_discovering());
+            .scan_in_flight());
         assert_eq!(
             inactive_pane
                 .tab()
@@ -484,15 +482,13 @@ mod tests {
                 .load_generation,
             1
         );
-        assert!(matches!(
-            inactive_pane
-                .tab()
-                .expanded_directories
-                .get(&inactive_dir)
-                .expect("inactive expanded directory")
-                .status,
-            ExpandedDirectoryStatus::Loading
-        ));
+        assert!(inactive_pane
+            .tab()
+            .expanded_directories
+            .get(&inactive_dir)
+            .expect("inactive expanded directory")
+            .status
+            .scan_in_flight());
 
         for path in [&active_dir, &active_child, &inactive_dir, &inactive_child] {
             assert!(

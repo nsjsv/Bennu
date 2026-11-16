@@ -65,13 +65,22 @@ impl ListExpansionFollowSessionId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DirectoryCollectionPhase {
+    /// 列表从空开始填：分批结果陆续追加，空列表显示加载中。
     Discovering,
     Ready,
+    /// 列表是完整的，一次替换它的扫描在跑：照常显示和使用旧列表，分批结果不追加，
+    /// 结果落地时整体替换。界面上等同 Ready，增量变化上等同 Discovering（排队重放）。
+    Refreshing,
 }
 
 impl DirectoryCollectionPhase {
     pub(crate) fn is_discovering(self) -> bool {
         matches!(self, Self::Discovering)
+    }
+
+    /// 有扫描在跑：期间到达的变化要排队，落地后重放。
+    pub(crate) fn scan_in_flight(self) -> bool {
+        matches!(self, Self::Discovering | Self::Refreshing)
     }
 }
 
@@ -734,9 +743,41 @@ pub(crate) struct ExpandedDirectory {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ExpandedDirectoryStatus {
+    /// 还没有条目，第一次加载在跑。
     Loading,
     Loaded,
+    /// 条目是完整的，一次替换它们的扫描在跑：照常显示旧条目，结果落地整体替换。
+    Refreshing,
     Error,
+}
+
+impl ExpandedDirectoryStatus {
+    /// 有一份完整的条目可以显示（已加载，或刷新中的旧条目）。
+    pub(crate) fn has_listing(&self) -> bool {
+        matches!(self, Self::Loaded | Self::Refreshing)
+    }
+
+    /// 有扫描在跑：期间到达的变化要排队，落地后重放。
+    pub(crate) fn scan_in_flight(&self) -> bool {
+        matches!(self, Self::Loading | Self::Refreshing)
+    }
+
+    /// 要重新扫描时的状态：已有完整条目就是刷新，否则是首次加载。
+    pub(crate) fn reloading(&self) -> Self {
+        if self.has_listing() {
+            Self::Refreshing
+        } else {
+            Self::Loading
+        }
+    }
+
+    /// 扫描被取消、又没有新的接上：刷新退回已加载，旧条目仍然完整。
+    pub(crate) fn scan_abandoned(&self) -> Self {
+        match self {
+            Self::Refreshing => Self::Loaded,
+            other => other.clone(),
+        }
+    }
 }
 
 pub(crate) fn retain_direct_entry_selection(

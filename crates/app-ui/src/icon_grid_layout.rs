@@ -643,7 +643,7 @@ fn expanded_panel_content<'a>(
     match &directory.contents.status {
         ExpandedDirectoryStatus::Loading => (Arc::from(Vec::new()), IconGridPanelStatus::Loading),
         ExpandedDirectoryStatus::Error => (Arc::from(Vec::new()), IconGridPanelStatus::Error),
-        ExpandedDirectoryStatus::Loaded => {
+        ExpandedDirectoryStatus::Loaded | ExpandedDirectoryStatus::Refreshing => {
             // 展开子面板与根面板同一规则:目标为该目录的传入占位按该
             // 目录的排序合入;空目录但有占位时按有内容渲染,顶掉空态。
             // 子面板不分组,合并序保持条目原序,出现序即条目真实下标。

@@ -36,7 +36,10 @@ impl FileBrowser {
         else {
             return Task::none();
         };
-        if !expanded_load_request_matches_directory(&request, expanded) {
+        // 分批只填第一次加载的空列表；刷新中的旧条目等结果落地整体替换。
+        if !expanded_load_request_matches_directory(&request, expanded)
+            || expanded.status.has_listing()
+        {
             return Task::none();
         }
         expanded.entries.extend(entries);
@@ -144,6 +147,14 @@ impl FileBrowser {
 
         if let Some(loaded_child_count) = loaded_child_count {
             self.remember_loaded_list_directory_children(&request.path, loaded_child_count);
+            let gone = self
+                .pane_by_id(pane_id)
+                .and_then(|pane| pane.tab().expanded_directories.get(&request.path))
+                .map(|expanded| {
+                    self.interaction_targets_missing_from(&request.path, &expanded.entries)
+                })
+                .unwrap_or_default();
+            self.release_interactions_targeting(|target| gone.iter().any(|path| path == target));
         }
         if let Some(failure) = pending_failure {
             self.accept_expanded_directory_load_failure(pane_id, &request.path, failure);

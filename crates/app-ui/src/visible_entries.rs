@@ -31,10 +31,12 @@ pub(crate) fn visible_entry_status_row(
     match &expanded.status {
         ExpandedDirectoryStatus::Loading => None,
         ExpandedDirectoryStatus::Error => Some(VisibleEntryStatusRow::Error),
-        ExpandedDirectoryStatus::Loaded if expanded.entries.is_empty() => {
+        ExpandedDirectoryStatus::Loaded | ExpandedDirectoryStatus::Refreshing
+            if expanded.entries.is_empty() =>
+        {
             Some(VisibleEntryStatusRow::Empty)
         }
-        ExpandedDirectoryStatus::Loaded => None,
+        ExpandedDirectoryStatus::Loaded | ExpandedDirectoryStatus::Refreshing => None,
     }
 }
 
@@ -122,7 +124,7 @@ fn list_expansion_path_is_visible(
         if !ancestor.is_expanded && !ancestor.is_collapsing {
             return false;
         }
-        if !matches!(ancestor.status, ExpandedDirectoryStatus::Loaded) {
+        if !ancestor.status.has_listing() {
             return false;
         }
         parent = candidate.parent();
@@ -246,7 +248,7 @@ fn visit_visible_entry<'a>(
     else {
         return;
     };
-    if matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
+    if expanded.status.has_listing() {
         let child_progress = animation_progress * expanded.animation_progress.clamp(0.0, 1.0);
         for child in &expanded.entries {
             visit_visible_entry(
@@ -332,7 +334,7 @@ pub(crate) fn visible_child_paths(
     expanded_directories
         .get(directory)
         .filter(|expanded| expanded.is_expanded)
-        .filter(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loaded))
+        .filter(|expanded| expanded.status.has_listing())
         .map(|expanded| {
             expanded
                 .entries
@@ -385,7 +387,7 @@ fn push_visible_entry_in_range<'a>(
     else {
         return;
     };
-    if matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
+    if expanded.status.has_listing() {
         let child_progress = animation_progress * expanded.animation_progress.clamp(0.0, 1.0);
         for child in &expanded.entries {
             push_visible_entry_in_range(
@@ -416,7 +418,7 @@ fn visible_subtree_contains(
     else {
         return false;
     };
-    matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
+    expanded.status.has_listing()
         && expanded
             .entries
             .iter()
@@ -435,7 +437,7 @@ fn push_selectable_entry_path(
     else {
         return;
     };
-    if matches!(expanded.status, ExpandedDirectoryStatus::Loaded) {
+    if expanded.status.has_listing() {
         for child in &expanded.entries {
             push_selectable_entry_path(child, expanded_directories, paths);
         }

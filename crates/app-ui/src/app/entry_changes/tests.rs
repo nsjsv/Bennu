@@ -221,9 +221,33 @@ async fn hidden_additions_are_ignored_when_hidden_files_are_excluded() {
 
     std::fs::write(workspace.path().join(".hidden"), b"h").unwrap();
     let change = added(workspace.path().join(".hidden"));
-    drop(browser.apply_entry_changes(workspace.path(), &[change]));
+    let removal = removed(workspace.path().join(".gone"));
 
+    // 看不见的变化不是「没法应用」：返回 None 会退回整目录重扫，一个一直被写的
+    // 隐藏文件就会让列表不停地重扫、闪烁。
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[change, removal])
+        .is_some());
     assert_eq!(entry_paths(&browser), vec!["a.txt"]);
+}
+
+#[tokio::test]
+async fn hidden_changes_apply_incrementally_when_hidden_files_are_shown() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join("a.txt"), b"a").unwrap();
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.options.include_hidden = true;
+    browser.tab_mut().location = BrowserLocation::Directory(workspace.path().to_path_buf());
+    browser.tab_mut().directory_discovery = Some(discovery_for(workspace.path()).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
+
+    std::fs::write(workspace.path().join(".hidden"), b"h").unwrap();
+    let change = added(workspace.path().join(".hidden"));
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[change])
+        .is_some());
+
+    assert_eq!(entry_paths(&browser), vec![".hidden", "a.txt"]);
 }
 
 #[test]
@@ -748,4 +772,95 @@ async fn changes_during_an_expanded_directory_scan_are_applied_after_it_lands() 
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["a.txt", "b.txt"]);
     assert!(browser.tab().pending_changes.is_empty());
+}
+
+async fn ready_browser_at(directory: &Path) -> FileBrowser {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.tab_mut().location = BrowserLocation::Directory(directory.to_path_buf());
+    browser.tab_mut().directory_discovery = Some(discovery_for(directory).await);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Ready;
+    browser.set_entries(Arc::new(crate::model::display_entries_in_discovery_order(
+        browser.tab().directory_discovery.as_ref().unwrap(),
+    )));
+    browser
+}
+
+/// 磁盘变化触发的重扫是后台刷新：列表一直是旧的完整列表（中途的分批不往上追加），
+/// 右键菜单、重命名不被收掉；结果落地整体替换，只有指向已消失条目的那一个收起。
+#[tokio::test]
+async fn disk_change_rescan_keeps_the_list_and_releases_only_vanished_targets() {
+    let workspace = tempfile::tempdir().unwrap();
+    let a = workspace.path().join("a.txt");
+    let b = workspace.path().join("b.txt");
+    std::fs::write(&a, b"a").unwrap();
+    std::fs::write(&b, b"b").unwrap();
+    let mut browser = ready_browser_at(workspace.path()).await;
+    drop(browser.handle_entry_right_clicked(a.clone()));
+    browser.renaming = Some(b.clone());
+    assert!(browser.context_menu.is_some());
+
+    drop(
+        browser.reload_observed_directory(file_core::DirectoryEntryChanges {
+            directory: workspace.path().to_path_buf(),
+            changes: vec![ResolvedEntryChange::RescanRequired],
+        }),
+    );
+
+    assert_eq!(
+        browser.tab().directory_collection_phase,
+        DirectoryCollectionPhase::Refreshing
+    );
+    assert!(browser.context_menu.is_some());
+    assert_eq!(browser.renaming.as_ref(), Some(&b));
+    let request = DirectoryLoadRequest {
+        pane_id: browser.active_pane_id(),
+        path: workspace.path().to_path_buf(),
+        generation: browser.pane().directory_load_generation,
+    };
+    let partial = discovery_for(workspace.path()).await;
+    drop(browser.accept_directory_discovery_batch(
+        request.clone(),
+        file_core::DirectoryDiscoveryBatch {
+            path: workspace.path().to_path_buf(),
+            entries: partial.entries.as_ref().clone(),
+            warnings: Vec::new(),
+        },
+    ));
+    assert_eq!(entry_paths(&browser), vec!["a.txt", "b.txt"]);
+
+    std::fs::remove_file(&a).unwrap();
+    let landed = discovery_for(workspace.path()).await;
+    drop(browser.accept_directory_discovery(request, PrebuiltDirectoryDiscovery::build(landed)));
+
+    assert_eq!(entry_paths(&browser), vec!["b.txt"]);
+    assert_eq!(
+        browser.tab().directory_collection_phase,
+        DirectoryCollectionPhase::Ready
+    );
+    assert!(browser.context_menu.is_none());
+    assert_eq!(browser.renaming.as_ref(), Some(&b));
+}
+
+/// 增量删除同样只收起指向被删条目的菜单。
+#[tokio::test]
+async fn removing_the_menu_target_from_disk_closes_only_that_menu() {
+    let workspace = tempfile::tempdir().unwrap();
+    let a = workspace.path().join("a.txt");
+    std::fs::write(&a, b"a").unwrap();
+    std::fs::write(workspace.path().join("b.txt"), b"b").unwrap();
+    let mut browser = ready_browser_at(workspace.path()).await;
+    drop(browser.handle_entry_right_clicked(workspace.path().join("b.txt")));
+
+    std::fs::remove_file(&a).unwrap();
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[removed(a.clone())])
+        .is_some());
+    assert!(browser.context_menu.is_some());
+
+    let b = workspace.path().join("b.txt");
+    std::fs::remove_file(&b).unwrap();
+    assert!(browser
+        .apply_entry_changes(workspace.path(), &[removed(b)])
+        .is_some());
+    assert!(browser.context_menu.is_none());
 }

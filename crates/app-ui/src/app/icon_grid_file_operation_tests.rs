@@ -107,16 +107,22 @@ fn completed_root_rename_migrates_temporary_icon_grid_tree() {
     assert_eq!(state.root_path(), renamed);
     let context = state.context().clone();
     let generation = state.directory(&renamed).unwrap().contents.load_generation;
+    // 迁移已把条目改到新路径，刷新期间照常显示它们，结果落地整体替换。
     assert!(matches!(
         state.directory(&renamed).unwrap().contents.status,
-        ExpandedDirectoryStatus::Loading,
+        ExpandedDirectoryStatus::Refreshing,
     ));
-    assert!(state
-        .directory(&renamed)
-        .unwrap()
-        .contents
-        .entries
-        .is_empty());
+    assert_eq!(
+        state
+            .directory(&renamed)
+            .unwrap()
+            .contents
+            .entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>(),
+        vec![renamed.join("report.txt")]
+    );
 
     drop(browser.accept_complete_expanded_directory_fixture(
         ExpandedDirectoryLoadRequest {

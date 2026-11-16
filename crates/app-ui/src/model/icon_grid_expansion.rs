@@ -65,6 +65,7 @@ impl IconGridExpandedDirectory {
         }
         self.contents.load_generation = self.contents.load_generation.wrapping_add(1);
         self.contents.load_context = None;
+        self.contents.status = self.contents.status.scan_abandoned();
     }
 
     fn begin_closing(&mut self) {

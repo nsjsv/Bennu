@@ -28,6 +28,14 @@ pub struct ScanOptions {
     pub directories_first: bool,
 }
 
+impl ScanOptions {
+    /// 这个条目会不会出现在列表里。全量扫描、增量变化、归档和回收站都用这一条规则，
+    /// 否则增量与重扫得到的列表会不一样。
+    pub fn includes_entry(&self, is_hidden: bool) -> bool {
+        self.include_hidden || !is_hidden
+    }
+}
+
 impl Default for ScanOptions {
     fn default() -> Self {
         Self {
@@ -122,7 +130,7 @@ pub async fn discover_directory_with_progress(
         };
         let name = dir_entry.file_name();
         let is_hidden = is_hidden_name(&name);
-        if is_hidden && !options.include_hidden {
+        if !options.includes_entry(is_hidden) {
             continue;
         }
         let entry_path = dir_entry.path();

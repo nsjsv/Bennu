@@ -10,8 +10,8 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::model::{
-    display_entries_in_discovery_order, BrowserPane, BrowserPaneId, BrowserTab, ExpandedDirectory,
-    ExpandedDirectoryStatus, Message,
+    display_entries_in_discovery_order, BrowserPane, BrowserPaneId, BrowserTab, ContextMenuState,
+    ExpandedDirectory, ExpandedDirectoryStatus, Message,
 };
 
 /// 目录条目增量应用唯一入口：watcher 事件与文件操作事件都汇入这里。
@@ -23,9 +23,10 @@ use crate::model::{
 /// 未变化条目。目标正在被扫描时变化不碰旧列表，排进该标签的
 /// `pending_changes`，扫描落地后按到达顺序重放（见 `replay_changes_*`）。
 ///
-/// 返回 `None` 表示没有任何位置成功应用（含 RescanRequired），调用方退回
-/// 全量重扫兜底；个别位置失败（如 discovery 尚未加载到可应用状态）不阻塞
-/// 其它位置。
+/// 返回 `None` 表示没有任何位置显示着这个目录（含 RescanRequired、discovery
+/// 尚未加载），调用方退回全量重扫兜底；个别位置失败不阻塞其它位置。显示着
+/// 但变化看不见（被隐藏规则滤掉、删的本来就不在列表里）是 `Unchanged`，
+/// 不能当成「没法应用」去重扫——那会让一个一直被写的隐藏文件不停地整目录重扫。
 impl FileBrowser {
     pub(super) fn apply_entry_changes(
         &mut self,
@@ -45,7 +46,8 @@ impl FileBrowser {
         let removed_paths = removed_paths(changes);
         // 排序参数提前克隆一份：遍历窗格要独占借用 self.panes。
         let sort_options = self.options.clone();
-        let mut applied_any = false;
+        let mut placed_any = false;
+        let mut affected_any = false;
         // summaries 需要的直接子条目数必须来自刚应用成功的位置：显示该目录
         // 但 discovery 尚未加载的标签，其列表是陈旧的，不能作为计数来源。
         let mut applied_child_count = None;
@@ -59,7 +61,7 @@ impl FileBrowser {
                 // 窗格同一时刻只扫描活动标签；后台标签的 Discovering 只是还没
                 // 加载过，切回时会整个重扫，没有扫描可等。
                 let scan_generation = (tab.id == active_tab_id
-                    && tab.directory_collection_phase.is_discovering())
+                    && tab.directory_collection_phase.scan_in_flight())
                 .then_some(load_generation);
                 let placements = [
                     place_in_current_directory(
@@ -73,7 +75,10 @@ impl FileBrowser {
                     place_in_expanded_directory(tab, directory, changes, &sort_options),
                 ];
                 for placement in placements.into_iter().flatten() {
-                    applied_any = true;
+                    placed_any = true;
+                    if !matches!(placement, Placement::Unchanged) {
+                        affected_any = true;
+                    }
                     let Placement::Applied { child_count } = placement else {
                         continue;
                     };
@@ -85,9 +90,13 @@ impl FileBrowser {
             }
         }
 
-        if !applied_any {
+        if !placed_any {
             return None;
         }
+        if !affected_any {
+            return Some(Task::none());
+        }
+        self.release_interactions_targeting(|path| removed_paths.iter().any(|gone| gone == path));
         self.entries_replaced();
 
         // summaries：递归量失效重算（异步），直接子条目数用精确新值立即回填。
@@ -244,9 +253,49 @@ fn removed_paths(changes: &[ResolvedEntryChange]) -> Vec<PathBuf> {
 }
 
 /// 一份变化在某个标签里的去向。
-enum Placement {
+impl FileBrowser {
+    /// 右键菜单、重命名所指的条目没了就收起它们，别的交互不动。磁盘上的变化
+    /// 不是用户操作，不能像手动刷新那样把手上的东西全清掉。
+    pub(super) fn release_interactions_targeting(&mut self, vanished: impl Fn(&Path) -> bool) {
+        if matches!(
+            &self.context_menu,
+            Some(ContextMenuState::FileArea(menu)) if menu.target.as_deref().is_some_and(&vanished)
+        ) {
+            self.context_menu = None;
+        }
+        if self.renaming.as_deref().is_some_and(&vanished) {
+            self.renaming = None;
+        }
+    }
+
+    /// 一次扫描结果整体替换了 `directory` 的列表：右键菜单、重命名所指的条目里，
+    /// 位于该目录却不在新列表里的就是没了；其它目录里的目标与这次结果无关。
+    pub(super) fn interaction_targets_missing_from(
+        &self,
+        directory: &Path,
+        listed: &[DirectoryEntry],
+    ) -> Vec<PathBuf> {
+        let menu_target = match &self.context_menu {
+            Some(ContextMenuState::FileArea(menu)) => menu.target.as_deref(),
+            _ => None,
+        };
+        [menu_target, self.renaming.as_deref()]
+            .into_iter()
+            .flatten()
+            .filter(|target| {
+                target.parent() == Some(directory)
+                    && !listed.iter().any(|entry| entry.path == *target)
+            })
+            .map(Path::to_path_buf)
+            .collect()
+    }
+}
+
+pub(super) enum Placement {
     /// 已落到列表上；`child_count` 是应用后的直接子条目数（供摘要缓存回填）。
     Applied { child_count: usize },
+    /// 这里显示着该目录，但这批变化在列表上看不见。
+    Unchanged,
     /// 目标正在扫描，已排队，落地后重放。
     Queued,
 }
@@ -270,7 +319,6 @@ fn place_in_current_directory(
         return Some(Placement::Queued);
     }
     apply_to_current_directory(tab, changes, removed_paths, sort_options)
-        .map(|child_count| Placement::Applied { child_count })
 }
 
 /// 标签里已加载的展开目录（列视图父列、侧栏树、图标展开共用）；重新加载
@@ -282,7 +330,7 @@ fn place_in_expanded_directory(
     sort_options: &file_core::ScanOptions,
 ) -> Option<Placement> {
     let expanded = tab.expanded_directories.get(directory)?;
-    if matches!(expanded.status, ExpandedDirectoryStatus::Loading) {
+    if expanded.status.scan_in_flight() {
         let scan_generation = expanded.load_generation;
         tab.queue_changes_during_scan(directory, scan_generation, changes);
         return Some(Placement::Queued);
@@ -292,7 +340,6 @@ fn place_in_expanded_directory(
         changes,
         sort_options,
     )
-    .map(|child_count| Placement::Applied { child_count })
 }
 
 /// 当前目录扫描落地后，把它进行期间排队的变化按到达顺序重放到结果上。
@@ -311,15 +358,18 @@ pub(super) fn replay_changes_queued_during_current_scan(
     }
 }
 
-/// 标签当前目录的主列表，返回应用后的直接子条目数。
+/// 标签当前目录的主列表；没有 discovery（还没加载到可应用状态）时为 `None`。
 fn apply_to_current_directory(
     tab: &mut BrowserTab,
     changes: &[ResolvedEntryChange],
     removed_paths: &[PathBuf],
     sort_options: &file_core::ScanOptions,
-) -> Option<usize> {
-    let discovery =
-        apply_changes_to_discovery(tab.directory_discovery.as_mut(), changes, sort_options)?;
+) -> Option<Placement> {
+    let discovery = tab.directory_discovery.as_mut()?;
+    if !apply_changes_to_discovery(discovery, changes, sort_options) {
+        return Some(Placement::Unchanged);
+    }
+    let display = Arc::new(display_entries_in_discovery_order(discovery));
     // 被移走的源路径不能继续留在选中集合或锚点上。
     for path in removed_paths {
         tab.selected_paths.remove(path);
@@ -330,11 +380,9 @@ fn apply_to_current_directory(
             tab.selection_anchor = None;
         }
     }
-    let display = Arc::new(display_entries_in_discovery_order(&discovery));
     let child_count = display.len();
-    tab.directory_discovery = Some(discovery);
     tab.entries = display;
-    Some(child_count)
+    Some(Placement::Applied { child_count })
 }
 
 /// 展开目录的扫描落地后同样用它重放排队的变化。
@@ -342,27 +390,30 @@ pub(super) fn apply_changes_to_expanded(
     expanded: &mut ExpandedDirectory,
     changes: &[ResolvedEntryChange],
     sort_options: &file_core::ScanOptions,
-) -> Option<usize> {
-    let discovery =
-        apply_changes_to_discovery(expanded.directory_discovery.as_mut(), changes, sort_options)?;
-    expanded.entries = display_entries_in_discovery_order(&discovery);
-    expanded.directory_discovery = Some(discovery);
-    Some(expanded.entries.len())
+) -> Option<Placement> {
+    let discovery = expanded.directory_discovery.as_mut()?;
+    if !apply_changes_to_discovery(discovery, changes, sort_options) {
+        return Some(Placement::Unchanged);
+    }
+    expanded.entries = display_entries_in_discovery_order(discovery);
+    Some(Placement::Applied {
+        child_count: expanded.entries.len(),
+    })
 }
 
-/// 把一批变更应用到单个 discovery：增删改 `entries` 后整体重算 order。
-/// 整体重排是纯内存比较（与全量扫描同一排序函数），保证与权威扫描顺序一致。
+/// 把一批变更原地应用到单个 discovery：增删改 `entries` 后整体重算 order，
+/// 返回列表上是否真有变化。整体重排是纯内存比较（与全量扫描同一排序函数），
+/// 保证与权威扫描顺序一致。
 fn apply_changes_to_discovery(
-    discovery: Option<&mut DirectoryDiscovery>,
+    discovery: &mut DirectoryDiscovery,
     changes: &[ResolvedEntryChange],
     sort_options: &file_core::ScanOptions,
-) -> Option<DirectoryDiscovery> {
-    let discovery = discovery?;
+) -> bool {
     let mut changed = false;
     for change in changes {
         match change {
             ResolvedEntryChange::Added(entry) | ResolvedEntryChange::ContentChanged(entry) => {
-                if upsert_discovered_entry(discovery, entry) {
+                if upsert_discovered_entry(discovery, entry, sort_options) {
                     changed = true;
                 }
             }
@@ -370,7 +421,7 @@ fn apply_changes_to_discovery(
                 if remove_discovered_entry(discovery, from) {
                     changed = true;
                 }
-                if upsert_discovered_entry(discovery, to) {
+                if upsert_discovered_entry(discovery, to, sort_options) {
                     changed = true;
                 }
             }
@@ -382,22 +433,21 @@ fn apply_changes_to_discovery(
             ResolvedEntryChange::RescanRequired => {}
         }
     }
-    if !changed {
-        return None;
+    if changed {
+        discovery.order = Arc::new(sort_discovered_entry_indices(
+            &discovery.entries,
+            sort_options,
+        ));
     }
-    discovery.order = Arc::new(sort_discovered_entry_indices(
-        &discovery.entries,
-        sort_options,
-    ));
-    Some(discovery.clone())
+    changed
 }
 
 fn upsert_discovered_entry(
     discovery: &mut DirectoryDiscovery,
     entry: &DiscoveredDirectoryEntry,
+    options: &file_core::ScanOptions,
 ) -> bool {
-    // 隐藏过滤与全量扫描一致：不显示隐藏条目的视图不接受隐藏条目的增量。
-    if entry.is_hidden() {
+    if !options.includes_entry(entry.is_hidden()) {
         return false;
     }
     let entries = Arc::make_mut(&mut discovery.entries);

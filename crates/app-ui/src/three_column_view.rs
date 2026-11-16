@@ -572,8 +572,14 @@ fn column_content<'a>(pane: BrowserPaneView<'a>, directory: &Path) -> ColumnCont
                 ColumnContent::Pending
             }
             ExpandedDirectoryStatus::Loading => ColumnContent::Entries(&expanded.entries),
-            ExpandedDirectoryStatus::Loaded if expanded.entries.is_empty() => ColumnContent::Empty,
-            ExpandedDirectoryStatus::Loaded => ColumnContent::Entries(&expanded.entries),
+            ExpandedDirectoryStatus::Loaded | ExpandedDirectoryStatus::Refreshing
+                if expanded.entries.is_empty() =>
+            {
+                ColumnContent::Empty
+            }
+            ExpandedDirectoryStatus::Loaded | ExpandedDirectoryStatus::Refreshing => {
+                ColumnContent::Entries(&expanded.entries)
+            }
             ExpandedDirectoryStatus::Error => ColumnContent::Empty,
         },
         None => ColumnContent::Pending,

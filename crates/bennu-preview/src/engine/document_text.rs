@@ -62,6 +62,11 @@ impl super::PreviewEngine {
                 document.press();
                 document.request_text(document.document_cancellation())
             }
+            DocumentTextMessage::DoubleClicked { page, x, y } => {
+                document.pointer_moved(page, x, y);
+                document.double_click();
+                return Task::none();
+            }
             DocumentTextMessage::Released => {
                 document.release();
                 return Task::none();

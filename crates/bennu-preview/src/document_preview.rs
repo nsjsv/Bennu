@@ -2,6 +2,7 @@
 // 会话工作区）自 app-ui 下沉；宿主命令层仍在 app-ui（commands/document_preview），
 // 经 app-ui 侧 re-export 消费本模块类型。
 mod format;
+mod grapheme_edges;
 mod model;
 mod pdfinfo;
 mod resources;
@@ -26,6 +27,6 @@ pub use pdfinfo::{parse_pdfinfo_page_count, parse_pdfinfo_pages};
 pub use resources::{MAX_DOCUMENT_PAGE_EDGE, MAX_DOCUMENT_PAGE_PIXELS};
 pub use text_layer::{
     find_matches, parse_bbox_layout, word_near, DocumentSearch, DocumentSelection, DocumentText,
-    DocumentTextLayer, PageRect, PageText, TextMatch, TextWord,
+    DocumentTextLayer, PageRect, PageText, TextMatch, TextPosition, TextWord,
 };
 pub use workspace::{DocumentPreviewWorkspace, OfficeDocumentPreviewWorkspace};

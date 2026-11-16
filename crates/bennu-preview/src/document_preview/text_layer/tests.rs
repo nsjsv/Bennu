@@ -79,12 +79,52 @@ fn search_finds_phrases_across_words_and_respects_case() {
 #[test]
 fn selection_copies_words_with_line_and_page_breaks() {
     let text = sample();
-    let selection = DocumentSelection {
-        anchor: (1, 0),
-        focus: (0, 1),
+    let at = |page, word, grapheme| TextPosition {
+        page,
+        word,
+        grapheme,
     };
-    assert_eq!(selection.words_on_page(0, &text), Some((1, 3)));
-    assert_eq!(selection.words_on_page(1, &text), Some((0, 0)));
+    let selection = DocumentSelection {
+        anchor: at(1, 0, 5),
+        focus: at(0, 1, 0),
+    };
+    let words = |page| {
+        selection
+            .graphemes_on_page(page, &text)
+            .into_iter()
+            .map(|(word, _)| word)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(words(0), vec![1, 2, 3]);
+    assert_eq!(words(1), vec![0]);
     assert_eq!(selection.text(&text), "World&Co\nsecond line\n\nhello");
     assert_eq!(word_near(&text.pages[0], 0.4, 0.12), Some(1));
+}
+
+/// 两端落在词中间：只取选中的那几个字，选了一半的词后面不加空格。
+#[test]
+fn selection_copies_only_the_selected_part_of_end_words() {
+    let text = sample();
+    let at = |page, word, grapheme| TextPosition {
+        page,
+        word,
+        grapheme,
+    };
+    let across = DocumentSelection {
+        anchor: at(0, 1, 2),
+        focus: at(0, 2, 3),
+    };
+    assert_eq!(across.text(&text), "rld&Co\nsec");
+    let inside = DocumentSelection {
+        anchor: at(0, 1, 4),
+        focus: at(0, 1, 1),
+    };
+    assert_eq!(inside.graphemes_on_page(0, &text), vec![(1, 1..4)]);
+    assert_eq!(inside.text(&text), "orl");
+    let empty = DocumentSelection {
+        anchor: at(0, 1, 2),
+        focus: at(0, 1, 2),
+    };
+    assert!(empty.graphemes_on_page(0, &text).is_empty());
+    assert_eq!(empty.text(&text), "");
 }

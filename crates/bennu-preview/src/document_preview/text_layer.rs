@@ -1,7 +1,10 @@
 //! 文档的文字层：pdftotext 给出每页每个词的位置（点，已按页面旋转换成显示方向），换算成
 //! 页内比例存着，搜索高亮、拖选复制都用它。整份文档只抽一次，第一次搜索或拖选时才抽。
 
+use std::ops::Range;
 use std::sync::Arc;
+
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::text_document::{SearchDirection, SearchSummary};
 
@@ -108,15 +111,40 @@ impl DocumentSearch {
     }
 }
 
-/// 拖选：按下的那个词和现在指着的那个词（页，词），中间的都选中。
+/// 选区的一端：第几页第几个词，词里第几个字之前（按字素数：0 是词首，字数是词尾）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TextPosition {
+    pub page: usize,
+    pub word: usize,
+    pub grapheme: usize,
+}
+
+/// 拖选：按下的地方和现在指着的地方，中间的字都选中；两端在同一处时什么都没选。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DocumentSelection {
-    pub anchor: (usize, usize),
-    pub focus: (usize, usize),
+    pub anchor: TextPosition,
+    pub focus: TextPosition,
 }
 
 impl DocumentSelection {
-    fn ordered(&self) -> ((usize, usize), (usize, usize)) {
+    /// 整个词：双击。
+    pub fn word(page: usize, word: usize, text: &DocumentText) -> Option<Self> {
+        let graphemes = grapheme_count(&text.pages.get(page)?.words.get(word)?.text);
+        Some(Self {
+            anchor: TextPosition {
+                page,
+                word,
+                grapheme: 0,
+            },
+            focus: TextPosition {
+                page,
+                word,
+                grapheme: graphemes,
+            },
+        })
+    }
+
+    fn ordered(&self) -> (TextPosition, TextPosition) {
         if self.anchor <= self.focus {
             (self.anchor, self.focus)
         } else {
@@ -124,56 +152,91 @@ impl DocumentSelection {
         }
     }
 
-    /// 这一页被选中的词（含首尾），没有返回 None。
-    pub fn words_on_page(&self, page: usize, text: &DocumentText) -> Option<(usize, usize)> {
-        let ((first_page, first_word), (last_page, last_word)) = self.ordered();
-        if page < first_page || page > last_page {
-            return None;
-        }
-        let count = text.pages.get(page)?.words.len();
-        if count == 0 {
-            return None;
-        }
-        let start = if page == first_page { first_word } else { 0 };
-        let end = if page == last_page {
-            last_word
-        } else {
-            count - 1
+    /// 这一页每个被选中的词，和词里选中的字（字素下标，左闭右开，不空）。
+    pub fn graphemes_on_page(
+        &self,
+        page: usize,
+        text: &DocumentText,
+    ) -> Vec<(usize, Range<usize>)> {
+        let (start, end) = self.ordered();
+        let Some(words) = text.pages.get(page).map(|page| &page.words) else {
+            return Vec::new();
         };
-        (start <= end).then_some((start, end.min(count - 1)))
+        if page < start.page || page > end.page || words.is_empty() {
+            return Vec::new();
+        }
+        let first = if page == start.page { start.word } else { 0 };
+        let last = if page == end.page {
+            end.word.min(words.len() - 1)
+        } else {
+            words.len() - 1
+        };
+        (first..=last)
+            .filter_map(|index| {
+                let count = grapheme_count(&words[index].text);
+                let from = if page == start.page && index == start.word {
+                    start.grapheme.min(count)
+                } else {
+                    0
+                };
+                let to = if page == end.page && index == end.word {
+                    end.grapheme.min(count)
+                } else {
+                    count
+                };
+                (from < to).then_some((index, from..to))
+            })
+            .collect()
     }
 
-    /// 复制出来的文字：词之间空格，行末换行，页之间空一行。
+    /// 复制出来的文字：词之间空格，行末换行，页之间空一行；词选了一半就只取那一半。
     pub fn text(&self, text: &DocumentText) -> String {
-        let ((first_page, _), (last_page, _)) = self.ordered();
+        let (start, end) = self.ordered();
         let mut copied = String::new();
-        for page in first_page..=last_page {
-            let Some((start, end)) = self.words_on_page(page, text) else {
+        for page in start.page..=end.page {
+            let selected = self.graphemes_on_page(page, text);
+            if selected.is_empty() {
                 continue;
-            };
+            }
             if !copied.is_empty() && !copied.ends_with('\n') {
                 copied.push('\n');
             }
-            if page != first_page {
+            if page != start.page {
                 copied.push('\n');
             }
-            for word in &text.pages[page].words[start..=end] {
-                copied.push_str(&word.text);
-                copied.push(if word.ends_line { '\n' } else { ' ' });
+            for (index, range) in selected {
+                let word = &text.pages[page].words[index];
+                copied.push_str(grapheme_slice(&word.text, range.clone()));
+                if range.end == grapheme_count(&word.text) {
+                    copied.push(if word.ends_line { '\n' } else { ' ' });
+                }
             }
         }
         copied.trim_end().to_owned()
     }
 }
 
-/// 指着的地方离哪个词最近（在词里就是那个词）。
-/// 指在哪个词上（落在词的框里）；指在空白处是 `None`。
-pub fn word_under(page: &PageText, x: f32, y: f32) -> Option<usize> {
-    page.words
-        .iter()
-        .position(|word| word.bounds.distance_to(x, y) == 0.0)
+pub fn grapheme_count(text: &str) -> usize {
+    text.graphemes(true).count()
 }
 
+fn grapheme_slice(text: &str, range: Range<usize>) -> &str {
+    let mut boundaries = text
+        .grapheme_indices(true)
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(text.len()));
+    let from = boundaries.nth(range.start).unwrap_or(text.len());
+    let to = if range.end > range.start {
+        boundaries
+            .nth(range.end - range.start - 1)
+            .unwrap_or(text.len())
+    } else {
+        from
+    };
+    &text[from..to]
+}
+
+/// 指着的地方离哪个词最近（在词里就是那个词）。
 pub fn word_near(page: &PageText, x: f32, y: f32) -> Option<usize> {
     page.words
         .iter()

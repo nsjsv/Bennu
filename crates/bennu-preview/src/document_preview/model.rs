@@ -211,6 +211,12 @@ pub enum DocumentTextMessage {
         x: f32,
         y: f32,
     },
+    /// 双击在第几页的哪：选中那个词。
+    DoubleClicked {
+        page: usize,
+        x: f32,
+        y: f32,
+    },
     Released,
     /// Ctrl+C。
     CopyRequested,

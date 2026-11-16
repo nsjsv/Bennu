@@ -6,9 +6,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::{DocumentPreviewRequestKey, PagedDocumentPreview};
 use crate::commands::document_preview::DocumentTextRequest;
+use crate::document_preview::grapheme_edges::{grapheme_edges, nearest_edge};
 use crate::document_preview::text_layer::{
-    word_near, word_under, DocumentSearch, DocumentSelection, DocumentText, DocumentTextLayer,
-    PageRect,
+    grapheme_count, word_near, DocumentSearch, DocumentSelection, DocumentText, DocumentTextLayer,
+    PageRect, TextPosition,
 };
 use crate::text_document::{SearchDirection, SearchSummary};
 
@@ -22,8 +23,6 @@ pub(super) struct TextState {
     selection: Option<DocumentSelection>,
     /// 指针最近在哪页哪（页内比例）：按下时从这里起选。
     pointer: Option<(usize, f32, f32)>,
-    /// 按在哪：按在空白处时，拖到字上才从离这里最近的词开始选。
-    pressed_at: Option<(usize, f32, f32)>,
     selecting: bool,
 }
 
@@ -34,7 +33,6 @@ impl Default for TextState {
             search: None,
             selection: None,
             pointer: None,
-            pressed_at: None,
             selecting: false,
         }
     }
@@ -159,28 +157,31 @@ impl PagedDocumentPreview {
         if !self.text.selecting {
             return;
         }
-        if self.text.selection.is_some() {
-            if let Some(word) = self.word_at_pointer() {
-                if let Some(selection) = self.text.selection.as_mut() {
-                    selection.focus = word;
-                }
-            }
-        } else if let Some(focus) = self.word_under_pointer() {
-            // 从空白处拖到了字上：从离按下处最近的词选到这里。
-            let anchor = self.word_near_press().unwrap_or(focus);
-            self.text.selection = Some(DocumentSelection { anchor, focus });
+        if let (Some(focus), Some(selection)) = (self.position_at_pointer(), self.text.selection) {
+            self.text.selection = Some(DocumentSelection { focus, ..selection });
         }
     }
 
-    /// 按在字上：从这个词开始选（只点一下也算选了它）；按在空白处：清掉选区，拖到字上时再选。
+    /// 按下：在离指着处最近的字边界放下起点，什么都还没选（按在空白处就是清掉选区）；拖着走才选。
     /// 文字还没抽好时什么也不选（按下会去抽）。
     pub fn press(&mut self) {
-        self.text.pressed_at = self.text.pointer;
-        self.text.selection = self.word_under_pointer().map(|word| DocumentSelection {
-            anchor: word,
-            focus: word,
-        });
+        self.text.selection = self
+            .position_at_pointer()
+            .map(|position| DocumentSelection {
+                anchor: position,
+                focus: position,
+            });
         self.text.selecting = matches!(self.text.layer, DocumentTextLayer::Ready(_));
+    }
+
+    /// 双击：选中指着的那个词。
+    pub fn double_click(&mut self) {
+        let DocumentTextLayer::Ready(text) = &self.text.layer else {
+            return;
+        };
+        if let Some((page, word)) = self.word_at_pointer() {
+            self.text.selection = DocumentSelection::word(page, word, text);
+        }
     }
 
     pub fn release(&mut self) {
@@ -192,7 +193,7 @@ impl PagedDocumentPreview {
         self.text.selecting
     }
 
-    /// 选中的文字；只点了一下没拖（选中一个词又松开在原处）也算选了那个词。
+    /// 选中的文字；只点了一下没拖（两端在同一处）就是没选。
     pub fn selected_text(&self) -> Option<String> {
         let DocumentTextLayer::Ready(text) = &self.text.layer else {
             return None;
@@ -227,40 +228,55 @@ impl PagedDocumentPreview {
                 );
             }
         }
-        if let Some((start, end)) = self
-            .text
-            .selection
-            .and_then(|selection| selection.words_on_page(page, text))
-        {
-            marks.extend(
-                words[start..=end]
-                    .iter()
-                    .map(|word| (word.bounds, PageMarkKind::Selection)),
-            );
+        if let Some(selection) = self.text.selection {
+            for (index, range) in selection.graphemes_on_page(page, text) {
+                let word = &words[index];
+                let count = grapheme_count(&word.text);
+                // 整个词选中就是词框；只选了一段（选区两端那两个词）才去量字宽。
+                let bounds = if range.start == 0 && range.end == count {
+                    word.bounds
+                } else {
+                    let edges = grapheme_edges(&word.text);
+                    let width = word.bounds.right - word.bounds.left;
+                    PageRect {
+                        left: word.bounds.left + edges[range.start] * width,
+                        right: word.bounds.left + edges[range.end] * width,
+                        ..word.bounds
+                    }
+                };
+                marks.push((bounds, PageMarkKind::Selection));
+            }
         }
         marks
     }
 
     fn word_at_pointer(&self) -> Option<(usize, usize)> {
-        self.word_near_point(self.text.pointer?)
-    }
-
-    fn word_near_press(&self) -> Option<(usize, usize)> {
-        self.word_near_point(self.text.pressed_at?)
-    }
-
-    fn word_near_point(&self, (page, x, y): (usize, f32, f32)) -> Option<(usize, usize)> {
+        let (page, x, y) = self.text.pointer?;
         let DocumentTextLayer::Ready(text) = &self.text.layer else {
             return None;
         };
         Some((page, word_near(text.pages.get(page)?, x, y)?))
     }
 
-    fn word_under_pointer(&self) -> Option<(usize, usize)> {
-        let (page, x, y) = self.text.pointer?;
+    /// 离指着处最近的字边界：先找最近的词，再按这个词的字宽找词里最近的边界（在词左边就是词首，
+    /// 在右边就是词尾）。
+    fn position_at_pointer(&self) -> Option<TextPosition> {
+        let (page, word) = self.word_at_pointer()?;
+        let (_, x, _) = self.text.pointer?;
         let DocumentTextLayer::Ready(text) = &self.text.layer else {
             return None;
         };
-        Some((page, word_under(text.pages.get(page)?, x, y)?))
+        let found = &text.pages[page].words[word];
+        let width = found.bounds.right - found.bounds.left;
+        let fraction = if width > 0.0 {
+            (x - found.bounds.left) / width
+        } else {
+            0.0
+        };
+        Some(TextPosition {
+            page,
+            word,
+            grapheme: nearest_edge(&grapheme_edges(&found.text), fraction),
+        })
     }
 }

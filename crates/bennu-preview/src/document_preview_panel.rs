@@ -102,6 +102,13 @@ where
                     y: point.y / height,
                 })
             })
+            .on_double_click(move |point| {
+                text_message(DocumentTextMessage::DoubleClicked {
+                    page: page_index,
+                    x: point.x / width,
+                    y: point.y / height,
+                })
+            })
             .on_release(text_message(DocumentTextMessage::Released))
             .interaction(interaction);
         let page = if document.is_selecting() {

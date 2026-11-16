@@ -1,5 +1,5 @@
 //! Compute the damage between frames.
-use crate::core::{Point, Rectangle};
+use crate::core::Rectangle;
 
 /// Diffs the damage regions given some previous and current primitives.
 pub fn diff<T>(
@@ -44,35 +44,101 @@ pub fn list<T>(
 
 /// Groups the given damage regions that are close together inside the given
 /// bounds.
-pub fn group(mut damage: Vec<Rectangle>, bounds: Rectangle) -> Vec<Rectangle> {
+///
+/// Bennu 补丁：每块区域都要把所有层重走一遍（设裁剪遮罩、重填跨过它的矩形），
+/// 一块区域的固定开销远大于它多出来的像素。上游只按「离原点的距离」排序后
+/// 与前一块贪心合并：两列一起变（列表的图标和行尾箭头）在这个顺序里交错，
+/// 永远合不上，滚动一帧碎成一百多块。现在一块区域能和任何一组合并就并进去，
+/// 合并后剩下的组超过几块就合成外框。
+pub fn group(damage: Vec<Rectangle>, bounds: Rectangle) -> Vec<Rectangle> {
     const AREA_THRESHOLD: f32 = 20_000.0;
+    const MAX_GROUPS: usize = 4;
 
-    damage.sort_by(|a, b| {
-        a.center()
-            .distance(Point::ORIGIN)
-            .total_cmp(&b.center().distance(Point::ORIGIN))
-    });
+    let mut groups: Vec<Rectangle> = Vec::new();
 
-    let mut output = Vec::new();
-    let mut scaled = damage
+    for region in damage
         .into_iter()
         .filter_map(|region| region.intersection(&bounds))
-        .filter(|region| region.width >= 1.0 && region.height >= 1.0);
+        .filter(|region| region.width >= 1.0 && region.height >= 1.0)
+    {
+        let mut merged = region;
 
-    if let Some(mut current) = scaled.next() {
-        for region in scaled {
-            let union = current.union(&region);
-
-            if union.area() - current.area() - region.area() <= AREA_THRESHOLD {
-                current = union;
-            } else {
-                output.push(current);
-                current = region;
-            }
+        // 并完的组可能又能和别的组合并，一直吸收到没有划算的为止。
+        while let Some(index) = groups.iter().position(|group| {
+            merged.union(group).area() - merged.area() - group.area()
+                <= AREA_THRESHOLD
+        }) {
+            merged = merged.union(&groups.swap_remove(index));
         }
 
-        output.push(current);
+        groups.push(merged);
     }
 
-    output
+    if groups.len() > MAX_GROUPS {
+        return groups
+            .into_iter()
+            .reduce(|bounding, group| bounding.union(&group))
+            .into_iter()
+            .collect();
+    }
+
+    groups
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: f32, y: f32, width: f32, height: f32) -> Rectangle {
+        Rectangle {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn two_columns_changing_together_stay_a_handful_of_regions() {
+        let bounds = rect(0.0, 0.0, 1600.0, 1200.0);
+        // 多栏视图滚动一帧：每行一个图标、一个行尾箭头。
+        let damage = (0..40)
+            .flat_map(|row| {
+                let y = 40.0 + row as f32 * 26.0;
+                [rect(236.0, y, 22.0, 22.0), rect(539.0, y, 16.0, 16.0)]
+            })
+            .collect();
+
+        let groups = group(damage, bounds);
+
+        assert!(groups.len() <= 4, "{groups:?}");
+        for row in 0..40 {
+            let y = 40.0 + row as f32 * 26.0;
+            for changed in [rect(236.0, y, 22.0, 22.0), rect(539.0, y, 16.0, 16.0)] {
+                assert!(groups.iter().any(|group| changed.is_within(group)));
+            }
+        }
+    }
+
+    #[test]
+    fn far_apart_changes_stay_separate() {
+        let bounds = rect(0.0, 0.0, 1600.0, 1200.0);
+        let groups = group(
+            vec![rect(10.0, 10.0, 20.0, 20.0), rect(1500.0, 1100.0, 20.0, 20.0)],
+            bounds,
+        );
+
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn regions_outside_the_bounds_are_dropped_and_clipped() {
+        let bounds = rect(0.0, 0.0, 100.0, 100.0);
+        let groups = group(
+            vec![rect(-50.0, -50.0, 10.0, 10.0), rect(90.0, 90.0, 40.0, 40.0)],
+            bounds,
+        );
+
+        assert_eq!(groups, vec![rect(90.0, 90.0, 10.0, 10.0)]);
+    }
 }

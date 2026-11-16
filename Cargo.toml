@@ -76,5 +76,12 @@ panic = "abort"
 # iced-rs/iced graphics/src/text.rs）。vendor 补丁与上游一致。
 # 另一处本地补丁：段落里 Tab 按 4 个空格宽排（paragraph.rs 的 TAB_WIDTH；
 # cosmic-text 默认 8，文本预览里 Makefile 等的缩进过宽），上游没有这个设置项。
+#
+# tiny-skia 软件渲染（没有真显卡时用它）的三处本地补丁，否则多栏视图滚动一屏
+# 文件夹一帧要 300ms 以上：iced_graphics 的 damage::group 不再把两列一起变的
+# 区域碎成上百块（能并就并，块多了合成外框）；iced_tiny_skia 的 ClipMask 换裁剪
+# 矩形时只擦旧填新，不再每次清整张窗口大小的遮罩；越出裁剪区的矩形只填可见、
+# 不含圆角的那一块。后两处有与上游画法逐字节比对的测试，合并有不漏区域的测试。
 [patch.crates-io]
 iced_graphics = { path = "vendor/iced_graphics" }
+iced_tiny_skia = { path = "vendor/iced_tiny_skia" }

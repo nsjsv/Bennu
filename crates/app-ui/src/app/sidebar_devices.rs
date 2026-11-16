@@ -22,8 +22,11 @@ impl FileBrowser {
         &mut self,
         result: StorageDeviceSnapshot,
     ) -> Task<Message> {
-        self.sidebar_devices.accept_loaded(result);
-        Task::none()
+        if self.sidebar_devices.accept_loaded(result) {
+            sidebar_devices_command()
+        } else {
+            Task::none()
+        }
     }
 
     pub(super) fn refresh_sidebar_devices(&mut self) -> Task<Message> {

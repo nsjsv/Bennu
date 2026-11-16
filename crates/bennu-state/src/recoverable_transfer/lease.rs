@@ -41,20 +41,38 @@ fn lock_file_name(database_path: &Path, suffix: &str) -> OsString {
 }
 
 pub(super) fn try_acquire_lock(lock_path: PathBuf) -> StoreResult<Option<File>> {
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(lock_path)?;
+    let lock_file = open_lock_file(lock_path)?;
     match rustix::fs::flock(
         &lock_file,
         rustix::fs::FlockOperation::NonBlockingLockExclusive,
     ) {
         Ok(()) => Ok(Some(lock_file)),
         Err(error) if error == rustix::io::Errno::WOULDBLOCK => Ok(None),
-        Err(error) => Err(StoreError::Io(std::io::Error::from_raw_os_error(
-            error.raw_os_error(),
-        ))),
+        Err(error) => Err(lock_error(error)),
     }
+}
+
+/// 阻塞到锁的持有者放手（进程退出时内核自动放），拿到后随即放掉。
+pub(super) fn wait_for_lock_release(lock_path: PathBuf) -> StoreResult<()> {
+    let lock_file = open_lock_file(lock_path)?;
+    loop {
+        match rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::LockExclusive) {
+            Ok(()) => return Ok(()),
+            Err(rustix::io::Errno::INTR) => {}
+            Err(error) => return Err(lock_error(error)),
+        }
+    }
+}
+
+fn open_lock_file(lock_path: PathBuf) -> StoreResult<File> {
+    Ok(OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)?)
+}
+
+fn lock_error(error: rustix::io::Errno) -> StoreError {
+    StoreError::Io(std::io::Error::from_raw_os_error(error.raw_os_error()))
 }

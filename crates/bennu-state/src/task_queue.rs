@@ -349,6 +349,24 @@ impl TaskQueueStore {
         Ok(tasks)
     }
 
+    /// 未终态任务的 id。只读状态列、不解析任务内容：库每次被写都可能来问，
+    /// 而一个大复制任务的清单能有几十 MB。
+    pub fn read_unfinished_task_ids(&self) -> StoreResult<Vec<u64>> {
+        let connection = self.database.read();
+        let mut statement = connection.prepare(
+            "SELECT id FROM task_queue WHERE status NOT IN (?1, ?2, ?3) ORDER BY id ASC",
+        )?;
+        let ids = statement.query_map(
+            params![
+                StoredTaskStatus::Failed.as_str(),
+                StoredTaskStatus::Completed.as_str(),
+                StoredTaskStatus::Canceled.as_str(),
+            ],
+            |row| row.get::<_, i64>(0),
+        )?;
+        ids.map(|id| sqlite_id_to_u64(id?)).collect()
+    }
+
     pub fn update_status(&self, id: u64, status: StoredTaskStatus) -> StoreResult<()> {
         let connection = self.database.write();
         connection.execute(

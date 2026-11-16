@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use smithay_client_toolkit::reexports::calloop::channel::{self, Channel, Sender};
 use thiserror::Error;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 const MAX_FILE_DRAG_ICON_EDGE: u32 = 512;
 static NEXT_CONTROLLER_ID: AtomicU64 = AtomicU64::new(1);
@@ -120,13 +120,13 @@ pub enum WaylandDndCommand {
 #[derive(Debug)]
 pub struct WaylandDndController {
     id: u64,
-    command_sender: UnboundedSender<WaylandDndCommand>,
-    command_receiver: Mutex<Option<UnboundedReceiver<WaylandDndCommand>>>,
+    command_sender: Sender<WaylandDndCommand>,
+    command_receiver: Mutex<Option<Channel<WaylandDndCommand>>>,
 }
 
 impl WaylandDndController {
     pub fn new() -> Arc<Self> {
-        let (command_sender, command_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (command_sender, command_receiver) = channel::channel();
         Arc::new(Self {
             id: NEXT_CONTROLLER_ID.fetch_add(1, Ordering::Relaxed),
             command_sender,
@@ -158,7 +158,7 @@ impl WaylandDndController {
         Ok(session_id)
     }
 
-    pub(super) fn take_command_receiver(&self) -> Option<UnboundedReceiver<WaylandDndCommand>> {
+    pub(super) fn take_command_receiver(&self) -> Option<Channel<WaylandDndCommand>> {
         self.command_receiver.lock().ok()?.take()
     }
 }

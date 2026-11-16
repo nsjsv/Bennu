@@ -89,7 +89,7 @@ fn controller_sends_identified_file_drag_command_to_worker_receiver() {
         .start_file_drag(vec![path.clone()], test_drag_icon())
         .unwrap();
 
-    let mut command_receiver = controller.take_command_receiver().unwrap();
+    let command_receiver = controller.take_command_receiver().unwrap();
     let command = command_receiver.try_recv().unwrap();
     match command {
         WaylandDndCommand::StartFileDrag {

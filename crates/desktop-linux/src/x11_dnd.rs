@@ -14,6 +14,7 @@ use std::thread;
 
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::file_dnd_runtime::{file_dnd_runtime, FileDndRuntime};
 pub use runtime::X11DndError;
 
 static NEXT_TARGET_SESSION_ID: AtomicU64 = AtomicU64::new(1);
@@ -125,19 +126,17 @@ pub fn spawn_x11_file_dnd(
     window_handle: X11DndWindowHandle,
     controller: Arc<X11DndController>,
     event_sender: UnboundedSender<X11DndEvent>,
-    shutdown_receiver: std::sync::mpsc::Receiver<()>,
-) -> Result<thread::JoinHandle<()>, X11DndError> {
+) -> Result<FileDndRuntime, X11DndError> {
+    let (runtime, shutdown) = file_dnd_runtime();
     thread::Builder::new()
         .name("x11-file-dnd".to_owned())
         .spawn(move || {
-            if let Err(error) = runtime::run_x11_file_dnd(
-                window_handle,
-                controller,
-                event_sender.clone(),
-                shutdown_receiver,
-            ) {
+            if let Err(error) =
+                runtime::run_x11_file_dnd(window_handle, controller, event_sender.clone(), shutdown)
+            {
                 let _ = event_sender.send(X11DndEvent::RuntimeFailed(error.to_string()));
             }
         })
-        .map_err(|source| X11DndError::ThreadSpawn { source })
+        .map_err(|source| X11DndError::ThreadSpawn { source })?;
+    Ok(runtime)
 }

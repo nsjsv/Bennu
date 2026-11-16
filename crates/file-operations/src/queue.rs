@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,7 +22,9 @@ use crate::progress::{
 };
 
 mod persistence;
-use persistence::{queued_operation_from_stored, queued_operation_to_stored};
+use persistence::{
+    queued_operation_from_stored, queued_operation_to_stored, stored_operation_is_resumable,
+};
 mod persistence_worker;
 pub use persistence_worker::{
     execute_file_operation_persistence, run_file_operation_persistence,
@@ -413,8 +415,9 @@ pub struct FileOperationQueue {
     pending_deletions: BTreeSet<u64>,
     is_panel_open: bool,
     store: Option<TaskQueueStore>,
-    /// 下次允许扫 store 认领外来任务的时刻(监督节流)。
-    next_store_scan: Option<std::time::Instant>,
+    /// 别的进程拿着锁的可恢复任务（stored id → 等待代数），见 supervision。
+    foreign_tasks: BTreeMap<u64, u64>,
+    next_foreign_wait_generation: u64,
 }
 
 impl Default for FileOperationQueue {
@@ -434,7 +437,8 @@ impl FileOperationQueue {
             pending_deletions: BTreeSet::new(),
             is_panel_open: false,
             store: None,
-            next_store_scan: None,
+            foreign_tasks: BTreeMap::new(),
+            next_foreign_wait_generation: 0,
         }
     }
 
@@ -1119,7 +1123,7 @@ impl FileOperationQueue {
 mod runtime;
 pub use runtime::PersistedShutdownFileOperation;
 mod supervision;
-pub use supervision::SUPERVISION_INTERVAL;
+pub use supervision::{ForeignTaskWait, SUPERVISION_INTERVAL};
 
 fn storage_error(error: impl std::fmt::Display) -> String {
     format!("File operation queue storage failed: {error}")

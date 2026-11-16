@@ -1325,19 +1325,62 @@ fn supervised_queue(directory: &std::path::Path) -> (FileOperationQueue, u64) {
 }
 
 #[test]
+fn only_a_running_recoverable_driver_needs_supervision_ticks() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+    let mut idle = FileOperationQueue::new();
+    attach_store(&mut idle, store);
+    // 空闲时不该有任何定时器把界面叫醒。
+    assert!(!idle.needs_driver_supervision());
+
+    let other = tempfile::tempdir().unwrap();
+    let (mut running, task_id) = supervised_queue(other.path());
+    assert!(running.needs_driver_supervision());
+    running.toggle_pause(task_id);
+    assert_persisted(&mut running);
+    assert!(!running.needs_driver_supervision());
+}
+
+/// 瞬时任务没有锁，看到它未终态时分不清持有进程是死是活；重新扫描任务库
+/// 绝不能把另一个活进程正在做的瞬时任务判成失败或接过来。
+#[test]
+fn rescanning_the_store_leaves_another_process_transient_task_alone() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+    let mut owner = FileOperationQueue::new();
+    attach_store(&mut owner, store.clone());
+    let mut survivor = FileOperationQueue::new();
+    attach_store(&mut survivor, store.clone());
+    enqueue_persisted(&mut owner, sample_operation());
+    let stored_before = store.read_tasks().unwrap();
+    assert_eq!(stored_before.len(), 1);
+    assert!(!super::stored_status_is_terminal(stored_before[0].status));
+
+    assert!(survivor.adopt_foreign_tasks().is_none());
+    assert_persisted(&mut survivor);
+
+    assert!(survivor.tasks().is_empty());
+    assert!(survivor.foreign_task_waits().is_empty());
+    assert_eq!(
+        store.read_tasks().unwrap()[0].status,
+        stored_before[0].status
+    );
+}
+
+#[test]
 fn silent_driver_is_restarted_with_a_new_generation() {
     let directory = tempfile::tempdir().unwrap();
     let (mut queue, task_id) = supervised_queue(directory.path());
     let launched_at = Instant::now();
 
     // 未超时:监督不动驱动者。
-    assert!(queue.supervise(launched_at).is_none());
+    queue.supervise_drivers(launched_at);
     assert_eq!(queue.tasks()[0].driver_generation, 0);
     assert!(queue.tasks()[0].driver_running);
 
     // 超时:换代重启,旧代终态被拒,新代可再次签发。
     let after_timeout = launched_at + super::supervision::DRIVER_SIGNAL_TIMEOUT;
-    assert!(queue.supervise(after_timeout).is_none());
+    queue.supervise_drivers(after_timeout);
     assert_eq!(queue.tasks()[0].driver_generation, 1);
     assert!(!queue.tasks()[0].driver_running);
     assert!(!queue.driver_generation_is_current(task_id, 0));
@@ -1357,7 +1400,7 @@ fn paused_driver_is_not_restarted_for_silence() {
     assert_persisted(&mut queue);
 
     let after_timeout = launched_at + super::supervision::DRIVER_SIGNAL_TIMEOUT;
-    assert!(queue.supervise(after_timeout).is_none());
+    queue.supervise_drivers(after_timeout);
     // 暂停是驱动者合法的静默:不得换代,已签发的驱动者保持原样。
     assert_eq!(queue.tasks()[0].driver_generation, 0);
     assert!(queue.tasks()[0].driver_running);
@@ -1375,7 +1418,7 @@ fn silent_canceling_driver_is_restarted_without_losing_cancel_intent() {
 
     // 取消中任务的驱动者静默超时:同样必须换代重启,否则取消协议永远无法收敛。
     let after_timeout = launched_at + super::supervision::DRIVER_SIGNAL_TIMEOUT;
-    assert!(queue.supervise(after_timeout).is_none());
+    queue.supervise_drivers(after_timeout);
     assert_eq!(queue.tasks()[0].driver_generation, 1);
     assert!(!queue.tasks()[0].driver_running);
     // 换代不得丢失取消意图:新 token 保持已取消,重启的驱动者直接收敛取消。
@@ -1396,7 +1439,7 @@ fn transient_operation_driver_is_never_restarted() {
     assert!(queue.poll_driver_launch().is_some());
 
     let after_timeout = Instant::now() + super::supervision::DRIVER_SIGNAL_TIMEOUT;
-    assert!(queue.supervise(after_timeout).is_none());
+    queue.supervise_drivers(after_timeout);
     // 瞬时操作不可重放,监督绝不重启它的驱动者。
     assert_eq!(queue.tasks()[0].driver_generation, 0);
     assert!(queue.tasks()[0].driver_running);

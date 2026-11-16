@@ -53,7 +53,10 @@ impl FileBrowser {
                 self.accept_sidebar_locations(sidebar_locations)
             }
             Message::SidebarDevicesLoaded(devices) => self.accept_sidebar_devices(devices),
-            Message::SidebarDevicesRefreshRequested => self.refresh_sidebar_devices(),
+            Message::StorageChanged => Task::batch([
+                self.refresh_sidebar_devices(),
+                self.refresh_network_mount_states(),
+            ]),
             Message::SidebarDeviceHovered(id) => self.handle_sidebar_device_hovered(id),
             Message::SidebarDeviceHoverCleared(id) => self.handle_sidebar_device_hover_cleared(id),
             Message::SidebarDevicePressed(id) => self.handle_sidebar_device_pressed(id),
@@ -165,7 +168,24 @@ impl FileBrowser {
                 self.accept_file_operation_finished(task_id, completion)
             }
             Message::OperationSupervisionTick => {
-                if let Some(error) = self.operation_queue.supervise(std::time::Instant::now()) {
+                self.operation_queue
+                    .supervise_drivers(std::time::Instant::now());
+                self.launch_ready_driver()
+            }
+            Message::OperationStoreChanged => {
+                if let Some(error) = self.operation_queue.adopt_foreign_tasks() {
+                    self.show_global_error(error);
+                }
+                self.launch_ready_driver()
+            }
+            Message::ForeignTaskReleased(stored_task_id, generation, outcome) => {
+                if let Err(error) = outcome {
+                    self.show_global_error(error);
+                }
+                if let Some(error) = self
+                    .operation_queue
+                    .accept_foreign_task_release(stored_task_id, generation)
+                {
                     self.show_global_error(error);
                 }
                 self.launch_ready_driver()

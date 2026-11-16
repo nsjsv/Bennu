@@ -1,5 +1,5 @@
-use std::path::PathBuf;
-use std::sync::mpsc;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,7 +7,8 @@ use desktop_linux::{
     DesktopActivationRuntime, WaylandDndController, WaylandDndEvent, WaylandDndWindowHandle,
     X11DndController, X11DndEvent, X11DndWindowHandle,
 };
-use file_core::watch_directory;
+use file_core::{watch_directory, ResolvedEntryChange};
+use file_operations::ForeignTaskWait;
 use iced::futures::SinkExt;
 use iced::Subscription;
 
@@ -20,7 +21,8 @@ use bennu_theme::{read_matugen_colors_file, AppearanceMode};
 
 const DIRECTORY_WATCH_DEBOUNCE: Duration = Duration::from_millis(250);
 const DIRECTORY_WATCH_CHANNEL_SIZE: usize = 8;
-const SIDEBAR_DEVICE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+/// 一次提交会连着改库文件和 WAL；合并成一次重新看。
+const OPERATION_STORE_WATCH_DEBOUNCE: Duration = Duration::from_secs(1);
 
 pub(crate) fn run(
     application_launch_request: ApplicationLaunchRequest,
@@ -115,6 +117,112 @@ pub(super) fn directory_watch_subscription(path: PathBuf) -> Subscription<Messag
     Subscription::run_with(path, directory_watch_stream)
 }
 
+/// 任务库（含 WAL、回滚日志）有写入时报一次；开始监视时先报一次，
+/// 补上监视建立之前别的进程已经写下的任务。
+pub(super) fn operation_store_subscription(database_path: PathBuf) -> Subscription<Message> {
+    Subscription::run_with(database_path, operation_store_stream)
+}
+
+fn operation_store_stream(
+    database_path: &PathBuf,
+) -> impl iced::futures::Stream<Item = Message> + 'static {
+    let database_path = database_path.clone();
+    iced::stream::channel(1, async move |mut output| {
+        if output.send(Message::OperationStoreChanged).await.is_err() {
+            return;
+        }
+        let (Some(directory), Some(database_name)) =
+            (database_path.parent(), database_path.file_name())
+        else {
+            return iced::futures::future::pending().await;
+        };
+        match watch_directory(directory, OPERATION_STORE_WATCH_DEBOUNCE) {
+            Ok(mut watcher) => {
+                while let Some(observed) = watcher.recv().await {
+                    let touches_database = observed
+                        .changes
+                        .iter()
+                        .any(|change| change_touches_database(change, database_name));
+                    if touches_database
+                        && output.send(Message::OperationStoreChanged).await.is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+            Err(error) => tracing::warn!(
+                target: "app_ui::operation_supervision",
+                event = "operation_store_watch_unavailable",
+                path = %directory.display(),
+                %error,
+                "tasks left by other Bennu processes will be adopted at the next start"
+            ),
+        }
+        iced::futures::future::pending().await
+    })
+}
+
+/// 同目录里还有本进程自己建的任务锁文件，那些变化与别的进程的任务无关。
+fn change_touches_database(change: &ResolvedEntryChange, database_name: &OsStr) -> bool {
+    let is_database_file = |path: &Path| {
+        path.file_name().is_some_and(|name| {
+            name == database_name
+                || ["-wal", "-journal"].iter().any(|suffix| {
+                    let mut journal = database_name.to_owned();
+                    journal.push(suffix);
+                    name == journal
+                })
+        })
+    };
+    match change {
+        ResolvedEntryChange::Added(entry) | ResolvedEntryChange::ContentChanged(entry) => {
+            is_database_file(entry.path())
+        }
+        ResolvedEntryChange::Removed { path } => is_database_file(path),
+        ResolvedEntryChange::Renamed { from, to } => {
+            is_database_file(from) || is_database_file(to.path())
+        }
+        ResolvedEntryChange::RescanRequired => true,
+    }
+}
+
+/// 阻塞等一条外来任务的锁被放手。等待放在独立线程里，而不是 tokio 的阻塞线程池：
+/// 持锁进程可能一直不退出，阻塞线程池会在运行时关闭时等它，拖住 Bennu 退出。
+pub(super) fn foreign_task_wait_subscription(wait: ForeignTaskWait) -> Subscription<Message> {
+    Subscription::run_with(wait, foreign_task_wait_stream)
+}
+
+fn foreign_task_wait_stream(
+    wait: &ForeignTaskWait,
+) -> impl iced::futures::Stream<Item = Message> + 'static {
+    let wait = wait.clone();
+    iced::stream::channel(1, async move |mut output| {
+        let (released, release) = tokio::sync::oneshot::channel();
+        let waiter = wait.clone();
+        let spawned = std::thread::Builder::new()
+            .name("foreign-task-wait".to_owned())
+            .spawn(move || {
+                let _ = released.send(waiter.wait_for_release());
+            });
+        let outcome = match spawned {
+            Ok(_) => release
+                .await
+                .unwrap_or_else(|_| Err("foreign task wait stopped".to_owned())),
+            Err(error) => Err(format!(
+                "could not start waiting for a foreign task: {error}"
+            )),
+        };
+        let _ = output
+            .send(Message::ForeignTaskReleased(
+                wait.stored_task_id,
+                wait.generation,
+                outcome,
+            ))
+            .await;
+        iced::futures::future::pending().await
+    })
+}
+
 pub(super) fn matugen_colors_subscription(path: PathBuf) -> Subscription<Message> {
     Subscription::run_with(path, matugen_colors_stream)
 }
@@ -140,9 +248,17 @@ fn system_mode(prefers_dark: bool) -> AppearanceMode {
     }
 }
 
-pub(super) fn sidebar_device_refresh_subscription() -> Subscription<Message> {
-    iced::time::every(SIDEBAR_DEVICE_REFRESH_INTERVAL)
-        .map(|_| Message::SidebarDevicesRefreshRequested)
+/// 设备、挂载、网络位置有变化时报一次；没有变化时不醒、不发消息。
+pub(super) fn storage_change_subscription() -> Subscription<Message> {
+    Subscription::run(storage_change_stream)
+}
+
+fn storage_change_stream() -> impl iced::futures::Stream<Item = Message> {
+    use iced::futures::StreamExt;
+    desktop_linux::storage_changes()
+        .map(|()| Message::StorageChanged)
+        // 两路信号源都连不上时流会结束；结束会被 iced 重新拉起反复重连，所以挂住。
+        .chain(iced::futures::stream::pending())
 }
 
 pub(super) fn wayland_file_dnd_subscription(
@@ -284,20 +400,20 @@ fn wayland_file_dnd_stream(
     let state = state.clone();
     iced::stream::channel(16, async move |mut output| {
         let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
-        let _shutdown_guard = FileDndShutdown::new(shutdown_sender);
-
-        if let Err(error) = desktop_linux::spawn_wayland_file_dnd(
+        // 句柄活到流结束：订阅撤掉时流被丢弃，句柄随之 drop，拖放线程退出。
+        let _runtime = match desktop_linux::spawn_wayland_file_dnd(
             state.window_handle,
             state.controller,
             event_sender,
-            shutdown_receiver,
         ) {
-            let _ = output
-                .send(Message::WaylandDndRuntimeFailed(error.to_string()))
-                .await;
-            return;
-        }
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = output
+                    .send(Message::WaylandDndRuntimeFailed(error.to_string()))
+                    .await;
+                return;
+            }
+        };
 
         while let Some(event) = event_receiver.recv().await {
             let message = match event {
@@ -349,23 +465,23 @@ fn x11_file_dnd_stream(
     iced::stream::channel(16, async move |mut output| {
         let runtime_id = state.controller.id();
         let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
-        let (shutdown_sender, shutdown_receiver) = mpsc::channel();
-        let _shutdown_guard = FileDndShutdown::new(shutdown_sender);
-
-        if let Err(error) = desktop_linux::spawn_x11_file_dnd(
+        // 同 Wayland：句柄随流 drop，拖放线程退出。
+        let _runtime = match desktop_linux::spawn_x11_file_dnd(
             state.window_handle,
             state.controller,
             event_sender,
-            shutdown_receiver,
         ) {
-            let _ = output
-                .send(Message::X11Dnd(X11DndMessage::RuntimeEvent {
-                    runtime_id,
-                    event: X11DndEvent::RuntimeFailed(error.to_string()),
-                }))
-                .await;
-            return;
-        }
+            Ok(runtime) => runtime,
+            Err(error) => {
+                let _ = output
+                    .send(Message::X11Dnd(X11DndMessage::RuntimeEvent {
+                        runtime_id,
+                        event: X11DndEvent::RuntimeFailed(error.to_string()),
+                    }))
+                    .await;
+                return;
+            }
+        };
 
         while let Some(event) = event_receiver.recv().await {
             if output
@@ -380,26 +496,6 @@ fn x11_file_dnd_stream(
             }
         }
     })
-}
-
-struct FileDndShutdown {
-    sender: Option<mpsc::Sender<()>>,
-}
-
-impl FileDndShutdown {
-    fn new(sender: mpsc::Sender<()>) -> Self {
-        Self {
-            sender: Some(sender),
-        }
-    }
-}
-
-impl Drop for FileDndShutdown {
-    fn drop(&mut self) {
-        if let Some(sender) = self.sender.take() {
-            let _ = sender.send(());
-        }
-    }
 }
 
 #[cfg(test)]

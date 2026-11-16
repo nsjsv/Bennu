@@ -289,12 +289,10 @@ fn real_x11_proxy_properties_publish_and_teardown_in_protocol_order() {
 
     let controller = X11DndController::new(1);
     let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (shutdown_sender, shutdown_receiver) = std::sync::mpsc::channel();
-    let worker = spawn_x11_file_dnd(
+    let runtime = spawn_x11_file_dnd(
         X11DndWindowHandle::new(main, screen_num),
         controller,
         event_sender,
-        shutdown_receiver,
     )
     .expect("spawn X11 runtime");
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -335,14 +333,15 @@ fn real_x11_proxy_properties_publish_and_teardown_in_protocol_order() {
         Some(XDND_VERSION)
     );
 
-    shutdown_sender.send(()).expect("shutdown runtime");
-    worker.join().expect("join runtime");
-    assert!(read_property(&conn, main, atoms.xdnd_proxy)
-        .expect("main proxy removed")
-        .is_none());
-    assert!(read_property(&conn, main, atoms.xdnd_aware)
-        .expect("main aware restored")
-        .is_none());
+    drop(runtime);
+    wait_until("runtime teardown removes the main window proxy", || {
+        read_property(&conn, main, atoms.xdnd_proxy)
+            .expect("main proxy removed")
+            .is_none()
+            && read_property(&conn, main, atoms.xdnd_aware)
+                .expect("main aware restored")
+                .is_none()
+    });
     conn.destroy_window(main).expect("destroy main window");
     conn.flush().expect("flush teardown");
 }
@@ -377,12 +376,10 @@ fn real_x11_source_covers_identity_normal_incr_and_exactly_once() {
 
     let controller = X11DndController::new(1);
     let (event_sender, mut event_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (shutdown_sender, shutdown_receiver) = std::sync::mpsc::channel();
-    let worker = spawn_x11_file_dnd(
+    let runtime = spawn_x11_file_dnd(
         X11DndWindowHandle::new(main, screen_num),
         controller,
         event_sender,
-        shutdown_receiver,
     )
     .expect("spawn X11 runtime");
     wait_runtime_event(&mut event_receiver, |event| {
@@ -726,8 +723,12 @@ fn real_x11_source_covers_identity_normal_incr_and_exactly_once() {
     ));
     assert_no_duplicate_failure(&mut event_receiver, destroyed_id);
 
-    shutdown_sender.send(()).expect("shutdown runtime");
-    worker.join().expect("join runtime");
+    drop(runtime);
+    wait_until("runtime teardown removes the main window proxy", || {
+        read_property(&main_conn, main, atoms.xdnd_proxy)
+            .expect("main proxy removed")
+            .is_none()
+    });
     main_conn.destroy_window(main).expect("destroy main");
     source_conn.flush().expect("flush source teardown");
     main_conn.flush().expect("flush main teardown");
@@ -814,6 +815,15 @@ fn send_selection_failure(conn: &RustConnection, request: SelectionRequestEvent)
     .check()
     .expect("send failed SelectionNotify reply");
     conn.flush().expect("flush failed SelectionNotify");
+}
+
+/// 运行时线程只在事件上醒来、没有可 join 的句柄；收尾结果只能从 X 服务器上观察。
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !done() {
+        assert!(Instant::now() < deadline, "{what} did not happen");
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 fn wait_runtime_event(

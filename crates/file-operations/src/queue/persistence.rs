@@ -165,6 +165,21 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
     }
 }
 
+/// 与 [`queued_operation_from_stored`] 认的是同一类（带当前日志版本的复制/移动），
+/// 但只看不拿：重新扫描任务库时不必为了判断而复制整份传输清单。
+pub(super) fn stored_operation_is_resumable(operation: &StoredOperation) -> bool {
+    matches!(
+        operation,
+        StoredOperation::Copy {
+            recovery_version: Some(TRANSFER_JOURNAL_VERSION),
+            ..
+        } | StoredOperation::Move {
+            recovery_version: Some(TRANSFER_JOURNAL_VERSION),
+            ..
+        }
+    )
+}
+
 pub(super) fn queued_operation_from_stored(
     operation: StoredOperation,
 ) -> Option<QueuedFileOperation> {

@@ -1,8 +1,8 @@
 use super::*;
 use crate::FileOperationStatus;
 
-/// 监督认领的不变量:其他实例死亡后遗留的非终态任务(runner 租约空闲),
-/// 由幸存实例的监督 tick 认领,并从 journal 断点(直移 rename 已发生、
+/// 认领的不变量:其他实例死亡后遗留的非终态任务(runner 租约空闲),
+/// 由幸存实例在任务库变化时重新扫描认领,并从 journal 断点(直移 rename 已发生、
 /// TargetCommitted 未落盘)继续推到终态,而不是永远停在"处理中"。
 #[tokio::test]
 async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
@@ -41,8 +41,8 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
     drop(running);
     drop(owner);
 
-    // 幸存实例:内存为空,监督 tick 扫 store 认领并推进到 Running。
-    assert!(survivor.supervise(std::time::Instant::now()).is_none());
+    // 幸存实例:内存为空,重新扫描任务库认领并推进到 Running。
+    assert!(survivor.adopt_foreign_tasks().is_none());
     assert_persisted(&mut survivor);
     assert_eq!(survivor.tasks().len(), 1);
     assert_eq!(survivor.tasks()[0].status, FileOperationStatus::Running);
@@ -78,4 +78,57 @@ async fn supervision_adopts_a_foreign_nonterminal_task_with_a_free_lease() {
         .unwrap()
         .journal_entries
         .is_empty());
+}
+
+/// 锁还被别的进程拿着时不能抢,只登记等待;持锁方一放手等待就醒,
+/// 认领走同一条按锁仲裁的恢复路径。过期代数的醒来消息不起作用。
+#[tokio::test]
+async fn foreign_task_is_adopted_as_soon_as_its_lease_is_released() {
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("source");
+    tokio::fs::write(&source, b"wait-for-me").await.unwrap();
+    let store = TaskQueueStore::new(directory.path().join("state.sqlite")).unwrap();
+    let mut owner = FileOperationQueue::new();
+    attach_store(&mut owner, store.clone());
+    let mut survivor = FileOperationQueue::new();
+    attach_store(&mut survivor, store.clone());
+    let FileOperationEnqueueOutcome::Queued { .. } = owner.enqueue(QueuedFileOperation::Copy {
+        transfers: vec![QueuedTransfer::new(source, directory.path().join("target"))],
+        verification: FileOperationVerification::BasicMetadata,
+    }) else {
+        panic!("recoverable copy should enqueue");
+    };
+    assert_persisted(&mut owner);
+    let stored_task_id = owner.tasks()[0].stored_id.unwrap();
+
+    assert!(survivor.adopt_foreign_tasks().is_none());
+    assert!(survivor.tasks().is_empty());
+    let waits = survivor.foreign_task_waits();
+    assert_eq!(waits.len(), 1);
+    assert_eq!(waits[0].stored_task_id, stored_task_id);
+    // 再扫一次不会重复登记,也不会换代(订阅保持同一个等待)。
+    assert!(survivor.adopt_foreign_tasks().is_none());
+    assert_eq!(
+        survivor.foreign_task_waits()[0].generation,
+        waits[0].generation
+    );
+
+    let wait = waits[0].clone();
+    let waiter = std::thread::spawn(move || wait.wait_for_release());
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    assert!(!waiter.is_finished(), "owner still holds the lease");
+    drop(owner);
+    waiter.join().unwrap().unwrap();
+
+    assert!(survivor
+        .accept_foreign_task_release(stored_task_id, waits[0].generation + 1)
+        .is_none());
+    assert!(survivor.tasks().is_empty());
+    assert!(survivor
+        .accept_foreign_task_release(stored_task_id, waits[0].generation)
+        .is_none());
+    assert_persisted(&mut survivor);
+    assert_eq!(survivor.tasks().len(), 1);
+    assert_eq!(survivor.tasks()[0].stored_id, Some(stored_task_id));
+    assert!(survivor.foreign_task_waits().is_empty());
 }

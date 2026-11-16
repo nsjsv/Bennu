@@ -78,7 +78,10 @@ impl FileOperationQueue {
             .try_acquire_recoverable_task_runner(id)
         {
             Ok(Some(runner_lease)) => runner_lease,
-            Ok(None) => return None,
+            Ok(None) => {
+                self.wait_for_foreign_task(id);
+                return None;
+            }
             Err(error) => return Some(storage_error(error)),
         };
 

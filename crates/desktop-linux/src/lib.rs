@@ -2,6 +2,7 @@ mod desktop_entries;
 mod desktop_notifications;
 pub use display_renderer;
 pub mod file_clipboard;
+mod file_dnd_runtime;
 mod file_manager_activation;
 mod gio_runtime;
 mod gvfs_devices;
@@ -10,6 +11,7 @@ pub mod network_mounts;
 pub mod network_secrets;
 pub mod open;
 pub mod open_with;
+mod storage_changes;
 mod storage_device_visibility;
 pub mod storage_devices;
 mod system_appearance;
@@ -27,6 +29,7 @@ pub use file_clipboard::{
     FileClipboardOperation, FileClipboardPayloadError, FileClipboardSelection,
     GNOME_COPIED_FILES_MIME, URI_LIST_MIME,
 };
+pub use file_dnd_runtime::FileDndRuntime;
 pub use file_manager_activation::{
     DesktopActivationEvent, DesktopActivationRuntime, DesktopLaunchWindowPolicy, DesktopStartupId,
     FileManagerActivationClaim, FileManagerActivationError, LocalPropertyTargets,
@@ -52,6 +55,7 @@ pub use open_with::{
     open_path_with_application, open_with_applications, OpenWithApplication,
     OpenWithApplicationList, OpenWithError, OpenWithLaunchMode,
 };
+pub use storage_changes::storage_changes;
 pub use storage_devices::{
     eject_or_power_off_storage_device, load_storage_devices, mount_storage_device,
     unmount_storage_device, StorageDevice, StorageDeviceAccess, StorageDeviceError,

@@ -62,7 +62,6 @@ impl FileBrowser {
     ) -> Task<Message> {
         match message {
             NetworkConnectionMessage::AddRequested => self.open_network_connection_editor(),
-            NetworkConnectionMessage::StatusRefreshRequested => self.refresh_network_mount_states(),
             NetworkConnectionMessage::MountStatesLoaded(Ok(states)) => {
                 self.network_connections.accept_loaded(states);
                 Task::none()

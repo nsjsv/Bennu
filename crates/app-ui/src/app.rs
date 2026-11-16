@@ -130,9 +130,9 @@ use crate::app::column_resize::ColumnResizeDrag;
 use crate::app::convert::ConvertState;
 use crate::app::events::global_event_message;
 use crate::app::runtime::{
-    desktop_activation_subscription, directory_watch_subscription, matugen_colors_subscription,
-    sidebar_device_refresh_subscription, system_mode_subscription, wayland_file_dnd_subscription,
-    x11_file_dnd_subscription,
+    desktop_activation_subscription, directory_watch_subscription, foreign_task_wait_subscription,
+    matugen_colors_subscription, operation_store_subscription, storage_change_subscription,
+    system_mode_subscription, wayland_file_dnd_subscription, x11_file_dnd_subscription,
 };
 use crate::app::sidebar_bookmarks::SidebarBookmarkMotionState;
 use crate::app::sidebar_resize::SidebarResizeDrag;
@@ -178,7 +178,6 @@ const DOUBLE_CLICK_THRESHOLD: Duration = Duration::from_millis(500);
 const POINTER_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
 const PREVIEW_TREE_ANIMATION_INTERVAL: Duration = bennu_theme::animation::FRAME_INTERVAL_60HZ;
 const OPERATION_PROGRESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(80);
-const NETWORK_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(30);
 const SEARCH_SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const APPLICATION_LOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -853,7 +852,7 @@ impl FileBrowser {
                     .map(|(generation, _)| Message::GlobalErrorNotificationElapsed(generation)),
             );
         }
-        subscriptions.push(sidebar_device_refresh_subscription());
+        subscriptions.push(storage_change_subscription());
         subscriptions.push(matugen_colors_subscription(
             config::matugen_theme_file_path(),
         ));
@@ -906,19 +905,23 @@ impl FileBrowser {
             );
         }
 
-        if !self.network_connections.entries.is_empty() {
-            subscriptions.push(time::every(NETWORK_STATUS_REFRESH_INTERVAL).map(|_| {
-                Message::NetworkConnection(
-                    crate::network_connections::NetworkConnectionMessage::StatusRefreshRequested,
-                )
-            }));
+        // 驱动者监督 tick:只在有可恢复任务在跑时检测信号超时的驱动者并换代重启。
+        if self.operation_queue.needs_driver_supervision() {
+            subscriptions.push(
+                time::every(::file_operations::SUPERVISION_INTERVAL)
+                    .map(|_| Message::OperationSupervisionTick),
+            );
         }
-
-        // 驱动者监督 tick:检测信号超时的驱动者并换代重启,顺带认领其他
-        // 实例遗留的非终态任务(见 operation_queue::supervision)。
-        subscriptions.push(
-            time::every(::file_operations::SUPERVISION_INTERVAL)
-                .map(|_| Message::OperationSupervisionTick),
+        // 认领其他进程留下的任务:任务库有写入时重新看,拿不到锁的阻塞等它被放手
+        // (见 file_operations 的 supervision)。
+        if let Some(database) = self.operation_queue.state_database() {
+            subscriptions.push(operation_store_subscription(database.path().to_path_buf()));
+        }
+        subscriptions.extend(
+            self.operation_queue
+                .foreign_task_waits()
+                .into_iter()
+                .map(foreign_task_wait_subscription),
         );
 
         subscriptions.push(self.terminal_output_subscription());

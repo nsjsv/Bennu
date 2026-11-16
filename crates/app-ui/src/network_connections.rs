@@ -10,7 +10,6 @@ use iced::Point;
 #[derive(Debug, Clone)]
 pub(crate) enum NetworkConnectionMessage {
     AddRequested,
-    StatusRefreshRequested,
     MountStatesLoaded(Result<Vec<(NetworkConnectionId, NetworkMountState)>, String>),
     Hovered(NetworkConnectionId),
     HoverCleared(NetworkConnectionId),

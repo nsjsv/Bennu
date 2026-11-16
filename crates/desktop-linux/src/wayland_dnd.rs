@@ -17,7 +17,7 @@ pub use target_session::WaylandFileDropTargetSessionId;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,13 +26,15 @@ use smithay_client_toolkit::data_device_manager::{
     data_device::DataDevice, data_offer::DragOffer, data_source::DragSource, DataDeviceManagerState,
 };
 use smithay_client_toolkit::output::OutputState;
+use smithay_client_toolkit::reexports::calloop::channel::{self, Channel};
+use smithay_client_toolkit::reexports::calloop::timer::{TimeoutAction, Timer};
 use smithay_client_toolkit::reexports::calloop::{EventLoop, LoopHandle, PostAction};
 use smithay_client_toolkit::reexports::calloop_wayland_source::WaylandSource;
 use smithay_client_toolkit::registry::RegistryState;
 use smithay_client_toolkit::seat::SeatState;
 use smithay_client_toolkit::shm::{slot::SlotPool, Shm};
 use thiserror::Error;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedSender;
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::globals::registry_queue_init;
 use wayland_client::protocol::{
@@ -45,6 +47,7 @@ use self::drag_icon::{WaylandDragIconSurface, INITIAL_DRAG_ICON_POOL_BYTES};
 use crate::file_clipboard::{
     FileClipboardPayloadError, FileClipboardSelection, GNOME_COPIED_FILES_MIME, URI_LIST_MIME,
 };
+use crate::file_dnd_runtime::{file_dnd_runtime, FileDndRuntime};
 
 const FILE_DRAG_SOURCE_MIME_TYPES: &[&str] = &[
     INTERNAL_FILE_DRAG_MIME,
@@ -181,21 +184,19 @@ pub fn spawn_wayland_file_dnd(
     window_handle: WaylandDndWindowHandle,
     controller: Arc<WaylandDndController>,
     event_sender: UnboundedSender<WaylandDndEvent>,
-    shutdown_receiver: mpsc::Receiver<()>,
-) -> Result<thread::JoinHandle<()>, WaylandDndError> {
+) -> Result<FileDndRuntime, WaylandDndError> {
+    let (runtime, shutdown) = file_dnd_runtime();
     thread::Builder::new()
         .name("wayland-file-dnd".to_owned())
         .spawn(move || {
-            if let Err(error) = run_wayland_file_dnd(
-                window_handle,
-                controller,
-                event_sender.clone(),
-                shutdown_receiver,
-            ) {
+            if let Err(error) =
+                run_wayland_file_dnd(window_handle, controller, event_sender.clone(), shutdown)
+            {
                 let _ = event_sender.send(WaylandDndEvent::RuntimeFailed(error.to_string()));
             }
         })
-        .map_err(|source| WaylandDndError::ThreadSpawn { source })
+        .map_err(|source| WaylandDndError::ThreadSpawn { source })?;
+    Ok(runtime)
 }
 
 struct WaylandFileDnd {
@@ -265,9 +266,9 @@ fn run_wayland_file_dnd(
     window_handle: WaylandDndWindowHandle,
     controller: Arc<WaylandDndController>,
     event_sender: UnboundedSender<WaylandDndEvent>,
-    shutdown_receiver: mpsc::Receiver<()>,
+    shutdown: Channel<()>,
 ) -> Result<(), WaylandDndError> {
-    let mut command_receiver = controller
+    let commands = controller
         .take_command_receiver()
         .ok_or_else(|| setup_error("command-receiver", "command receiver was already taken"))?;
     let (conn, surface) = unsafe { wayland_connection_from_raw_handle(window_handle) }?;
@@ -312,19 +313,23 @@ fn run_wayland_file_dnd(
         "Wayland file drag-and-drop worker started"
     );
 
-    loop {
-        match shutdown_receiver.try_recv() {
-            Ok(()) | Err(mpsc::TryRecvError::Disconnected) => break,
-            Err(mpsc::TryRecvError::Empty) => {}
-        }
-        dnd.receive_commands(&mut command_receiver, &qh);
-        event_loop
-            .dispatch(Duration::from_millis(16), &mut dnd)
-            .map_err(|error| setup_error("dispatch", error))?;
-        dnd.receive_commands(&mut command_receiver, &qh);
-    }
-
-    Ok(())
+    let command_qh = qh.clone();
+    event_loop
+        .handle()
+        .insert_source(commands, move |event, _, dnd| {
+            if let channel::Event::Msg(command) = event {
+                dnd.receive_command(command, &command_qh);
+            }
+        })
+        .map_err(|error| setup_error("command-channel", error))?;
+    let signal = event_loop.get_signal();
+    event_loop
+        .handle()
+        .insert_source(shutdown, move |_, _, _| signal.stop())
+        .map_err(|error| setup_error("shutdown-channel", error))?;
+    event_loop
+        .run(None, &mut dnd, |_| {})
+        .map_err(|error| setup_error("dispatch", error))
 }
 
 unsafe fn wayland_connection_from_raw_handle(
@@ -353,40 +358,46 @@ fn setup_error(stage: &'static str, error: impl std::fmt::Display) -> WaylandDnd
 }
 
 impl WaylandFileDnd {
-    fn receive_commands(
-        &mut self,
-        command_receiver: &mut UnboundedReceiver<WaylandDndCommand>,
-        qh: &QueueHandle<Self>,
-    ) {
-        while let Ok(command) = command_receiver.try_recv() {
-            match command {
-                WaylandDndCommand::StartFileDrag {
+    fn receive_command(&mut self, command: WaylandDndCommand, qh: &QueueHandle<Self>) {
+        match command {
+            WaylandDndCommand::StartFileDrag {
+                session_id,
+                paths,
+                icon,
+            } => {
+                tracing::debug!(
+                    %session_id,
+                    path_count = paths.len(),
+                    "Wayland file drag request received"
+                );
+                let requested_at = Instant::now();
+                // 请求要等一次可用的指针按下才能开始。定时器只负责到点叫醒线程；
+                // 到点时是不是同一个请求、是否真的过期，由 expire 自己按时间判断，
+                // 所以被替换或已开始的请求留下的定时器醒来也只是空跑一次。
+                self.loop_handle
+                    .insert_source(
+                        Timer::from_deadline(requested_at + DRAG_REQUEST_TTL),
+                        |_, _, dnd| {
+                            dnd.expire_pending_file_drag();
+                            TimeoutAction::Drop
+                        },
+                    )
+                    .expect("calloop timers register without touching the poller");
+                let request = PendingFileDrag {
                     session_id,
                     paths,
                     icon,
-                } => {
-                    tracing::debug!(
-                        %session_id,
-                        path_count = paths.len(),
-                        "Wayland file drag request received"
+                    requested_at,
+                };
+                if let Some(replaced) = self.pending_file_drag.replace(request) {
+                    self.reject_file_drag_request(
+                        replaced,
+                        "Wayland file drag request was replaced before it started",
                     );
-                    let request = PendingFileDrag {
-                        session_id,
-                        paths,
-                        icon,
-                        requested_at: Instant::now(),
-                    };
-                    if let Some(replaced) = self.pending_file_drag.replace(request) {
-                        self.reject_file_drag_request(
-                            replaced,
-                            "Wayland file drag request was replaced before it started",
-                        );
-                    }
-                    self.start_pending_file_drag(qh);
                 }
+                self.start_pending_file_drag(qh);
             }
         }
-        self.expire_pending_file_drag();
     }
 
     fn ensure_seat_object(&mut self, qh: &QueueHandle<Self>, seat: &WlSeat) -> usize {
@@ -454,7 +465,7 @@ impl WaylandFileDnd {
         if self
             .pending_file_drag
             .as_ref()
-            .is_some_and(|request| request.requested_at.elapsed() > DRAG_REQUEST_TTL)
+            .is_some_and(|request| request.requested_at.elapsed() >= DRAG_REQUEST_TTL)
         {
             let expired = self.pending_file_drag.take().expect("expired drag request");
             self.reject_file_drag_request(
@@ -529,7 +540,7 @@ impl WaylandFileDnd {
         let request_is_fresh = self
             .pending_file_drag
             .as_ref()
-            .is_none_or(|request| request.requested_at.elapsed() <= DRAG_REQUEST_TTL);
+            .is_none_or(|request| request.requested_at.elapsed() < DRAG_REQUEST_TTL);
         if request_is_fresh {
             return;
         }

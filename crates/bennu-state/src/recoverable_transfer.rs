@@ -56,6 +56,7 @@ mod model;
 
 use lease::{
     recoverable_restore_coordinator_lock_path, recoverable_task_runner_lock_path, try_acquire_lock,
+    wait_for_lock_release,
 };
 pub use lease::{
     ClaimedRecoverableTask, RecoverableRestoreCoordinatorLease, RecoverableTaskRunnerLease,
@@ -161,6 +162,12 @@ impl TaskQueueStore {
     ) -> StoreResult<Option<RecoverableTaskRunnerLease>> {
         try_acquire_lock(recoverable_task_runner_lock_path(self.db_path(), task_id))
             .map(|lock_file| lock_file.map(|_lock_file| RecoverableTaskRunnerLease { _lock_file }))
+    }
+
+    /// 阻塞到别的进程放掉这条任务的锁（它退出或任务结束）。只用来叫醒认领方：
+    /// 醒来后认领仍走 [`Self::try_acquire_recoverable_task_runner`]，与其他进程按锁仲裁。
+    pub fn wait_for_recoverable_task_runner_release(&self, task_id: u64) -> StoreResult<()> {
+        wait_for_lock_release(recoverable_task_runner_lock_path(self.db_path(), task_id))
     }
 
     pub fn try_acquire_recoverable_restore_coordinator(

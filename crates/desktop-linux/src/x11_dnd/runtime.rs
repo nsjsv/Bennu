@@ -11,9 +11,11 @@ use super::{
     X11DndController, X11DndDropPosition, X11DndEvent, X11DndFileDrop, X11DndWindowHandle,
     X11FileDropTargetEvent, X11FileDropTargetSessionId,
 };
-use std::sync::mpsc;
+use smithay_client_toolkit::reexports::calloop::channel::Channel;
+use smithay_client_toolkit::reexports::calloop::generic::Generic;
+use smithay_client_toolkit::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
+use std::os::fd::AsFd;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedSender;
@@ -25,7 +27,6 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
-const EVENT_LOOP_INTERVAL: Duration = Duration::from_millis(5);
 const SELECTION_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Debug, Error)]
 pub enum X11DndError {
@@ -116,7 +117,7 @@ pub(super) fn run_x11_file_dnd(
     window_handle: X11DndWindowHandle,
     controller: Arc<X11DndController>,
     event_sender: UnboundedSender<X11DndEvent>,
-    shutdown_receiver: mpsc::Receiver<()>,
+    shutdown: Channel<()>,
 ) -> Result<(), X11DndError> {
     let (conn, default_screen) =
         x11rb::connect(None).map_err(|error| X11DndError::request("connect", error))?;
@@ -159,7 +160,7 @@ pub(super) fn run_x11_file_dnd(
     };
     let _ = runtime.event_sender.send(X11DndEvent::RuntimeReady);
 
-    let loop_result = runtime.run_loop(shutdown_receiver);
+    let loop_result = runtime.run_loop(shutdown);
     runtime
         .lifecycle
         .unpublish_main_proxy(&runtime.conn, &runtime.atoms);
@@ -173,12 +174,32 @@ pub(super) fn run_x11_file_dnd(
 }
 
 impl X11FileDndRuntime {
-    fn run_loop(&mut self, shutdown_receiver: mpsc::Receiver<()>) -> Result<(), X11DndError> {
+    fn run_loop(&mut self, shutdown: Channel<()>) -> Result<(), X11DndError> {
+        let mut event_loop = EventLoop::<bool>::try_new()
+            .map_err(|error| X11DndError::request("event-loop", error))?;
+        // x11rb 等回复时也会把事件读进自己的缓冲，这些事件不会让 fd 再次可读；
+        // 所以 fd 可读只用来叫醒线程，事件一律在每次醒来后从 x11rb 排空。
+        let connection = self
+            .conn
+            .stream()
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|error| X11DndError::request("connection-fd", error))?;
+        event_loop
+            .handle()
+            .insert_source(
+                Generic::new(connection, Interest::READ, Mode::Level),
+                |_, _, _| Ok(PostAction::Continue),
+            )
+            .map_err(|error| X11DndError::request("connection-source", error))?;
+        event_loop
+            .handle()
+            .insert_source(shutdown, |_, _, shutdown_requested| {
+                *shutdown_requested = true;
+            })
+            .map_err(|error| X11DndError::request("shutdown-channel", error))?;
+        let mut shutdown_requested = false;
         loop {
-            match shutdown_receiver.try_recv() {
-                Ok(()) | Err(mpsc::TryRecvError::Disconnected) => return Ok(()),
-                Err(mpsc::TryRecvError::Empty) => {}
-            }
             while let Some(event) = self
                 .conn
                 .poll_for_event()
@@ -194,8 +215,19 @@ impl X11FileDndRuntime {
                 }
                 self.handle_event(event)?;
             }
+            self.conn
+                .flush()
+                .map_err(|error| X11DndError::request("flush", error))?;
+            let selection_timeout = self.selection.as_ref().map(|selection| {
+                (selection.started_at + SELECTION_TIMEOUT).saturating_duration_since(Instant::now())
+            });
+            event_loop
+                .dispatch(selection_timeout, &mut shutdown_requested)
+                .map_err(|error| X11DndError::request("dispatch", error))?;
+            if shutdown_requested {
+                return Ok(());
+            }
             self.expire_selection();
-            thread::sleep(EVENT_LOOP_INTERVAL);
         }
     }
 

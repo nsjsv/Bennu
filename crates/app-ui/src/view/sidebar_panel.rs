@@ -143,7 +143,7 @@ fn append_sidebar_devices<'a>(
 ) -> Column<'a, Message> {
     if browser.sidebar_devices.devices.is_empty()
         && browser.sidebar_devices.provider_failures.is_empty()
-        && !browser.sidebar_devices.is_loading
+        && !browser.sidebar_devices.is_loading()
     {
         return sidebar;
     }
@@ -157,7 +157,7 @@ fn append_sidebar_devices<'a>(
         sidebar_device_provider_failure_message(&browser.sidebar_devices.provider_failures)
     {
         sidebar = sidebar.push(sidebar_message_row(message));
-    } else if browser.sidebar_devices.devices.is_empty() && browser.sidebar_devices.is_loading {
+    } else if browser.sidebar_devices.devices.is_empty() && browser.sidebar_devices.is_loading() {
         sidebar = sidebar.push(sidebar_message_row(tr!("Loading devices...")));
     }
 

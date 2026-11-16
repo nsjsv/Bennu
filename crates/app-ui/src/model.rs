@@ -328,7 +328,8 @@ pub(crate) enum Message {
     TerminalPanel(crate::terminal_panel::TerminalPanelMessage),
     SidebarLocationsLoaded(Vec<SidebarLocation>),
     SidebarDevicesLoaded(StorageDeviceSnapshot),
-    SidebarDevicesRefreshRequested,
+    /// 设备、挂载或网络位置变了：重新加载侧栏设备和网络位置状态。
+    StorageChanged,
     SidebarDeviceHovered(StorageDeviceId),
     SidebarDeviceHoverCleared(StorageDeviceId),
     SidebarDevicePressed(StorageDeviceId),
@@ -384,6 +385,10 @@ pub(crate) enum Message {
     FileOperationPersistenceFinished(file_operations::FileOperationPersistenceOutcome),
     OperationProgressAnimationTick,
     OperationSupervisionTick,
+    /// 任务库有写入（或刚开始监视）：看看别的进程是否留下或拿着可恢复任务。
+    OperationStoreChanged,
+    /// 别的进程放掉了一条任务的锁：(stored id, 等待代数, 等待本身的结果)。
+    ForeignTaskReleased(u64, u64, Result<(), String>),
     FileDragSpringOpenTick,
     BreadcrumbDropTargetHovered(BrowserPaneId, PathBuf),
     BreadcrumbDropTargetHoverCleared(BrowserPaneId, PathBuf),

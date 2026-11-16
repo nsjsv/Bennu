@@ -19,11 +19,21 @@ pub(crate) struct SidebarDeviceContextMenuState {
     pub(crate) position: iced::Point,
 }
 
+/// 设备列表只在有变化时重新加载，没有下一次轮询来补漏：加载途中又来的变化
+/// 不能丢，只能记下来，等这次跑完立刻再跑一次。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum DeviceListLoad {
+    #[default]
+    Idle,
+    Running,
+    RunningStale,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SidebarDeviceState {
     pub(crate) devices: Vec<SidebarDeviceEntry>,
     pub(crate) provider_failures: Vec<StorageDeviceProviderFailure>,
-    pub(crate) is_loading: bool,
+    load: DeviceListLoad,
     pub(crate) pending_action: Option<SidebarDeviceActionRequest>,
     next_action_generation: u64,
 }
@@ -31,27 +41,43 @@ pub(crate) struct SidebarDeviceState {
 impl SidebarDeviceState {
     pub(crate) fn loading() -> Self {
         Self {
-            is_loading: true,
+            load: DeviceListLoad::Running,
             ..Self::default()
         }
     }
 
-    pub(crate) fn accept_loaded(&mut self, snapshot: StorageDeviceSnapshot) {
+    pub(crate) fn is_loading(&self) -> bool {
+        self.load != DeviceListLoad::Idle
+    }
+
+    /// 返回 true 表示加载途中又有变化，调用方要马上再加载一次。
+    pub(crate) fn accept_loaded(&mut self, snapshot: StorageDeviceSnapshot) -> bool {
         self.devices = snapshot
             .devices
             .into_iter()
             .map(SidebarDeviceEntry::from_storage_device)
             .collect();
         self.provider_failures = snapshot.provider_failures;
-        self.is_loading = false;
+        let reload = self.load == DeviceListLoad::RunningStale;
+        self.load = if reload {
+            DeviceListLoad::Running
+        } else {
+            DeviceListLoad::Idle
+        };
+        reload
     }
 
+    /// 返回 true 表示调用方要发起加载；已有加载在跑时只记下「跑完再来一次」。
     pub(crate) fn begin_refresh(&mut self) -> bool {
-        if self.is_loading {
-            false
-        } else {
-            self.is_loading = true;
-            true
+        match self.load {
+            DeviceListLoad::Idle => {
+                self.load = DeviceListLoad::Running;
+                true
+            }
+            DeviceListLoad::Running | DeviceListLoad::RunningStale => {
+                self.load = DeviceListLoad::RunningStale;
+                false
+            }
         }
     }
 
@@ -133,6 +159,19 @@ mod tests {
         assert!(!state.accept_action_finished(&first));
         assert_eq!(state.pending_action, Some(second));
     }
+    #[test]
+    fn change_during_a_load_triggers_exactly_one_more_load() {
+        let mut state = SidebarDeviceState::loading();
+        assert!(!state.begin_refresh());
+        assert!(!state.begin_refresh());
+
+        assert!(state.accept_loaded(StorageDeviceSnapshot::default()));
+        assert!(state.is_loading());
+        assert!(!state.accept_loaded(StorageDeviceSnapshot::default()));
+        assert!(!state.is_loading());
+        assert!(state.begin_refresh());
+    }
+
     #[test]
     fn partial_provider_failure_keeps_devices_and_failure() {
         let storage = StorageDeviceSnapshot {

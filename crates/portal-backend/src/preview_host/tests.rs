@@ -24,7 +24,6 @@ use crate::dbus_file_chooser::PickerResolution;
 use crate::picker_request::{PickerKind, PickerRequestSpec};
 use crate::picker_session::scan::{DirectoryScanOutcome, DirectoryScanResult};
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion};
-use crate::preview_scroll::PreviewScrollRegion;
 use crate::PickerDaemon;
 
 use super::content::preview_thumbnail_edge_for_size;
@@ -259,24 +258,17 @@ fn window_close_replaces_session_state() {
 
 #[test]
 fn esc_close_clears_session_and_host_bookkeeping() {
-    // Esc 分层的域内收尾：会话/请求窗/滚动管线全部复位。
+    // Esc 分层的域内收尾：会话/请求窗全部复位。
     let mut host = host();
     let _ = host.request_preview(None, Some(&file_selection(Path::new("/tmp/a.txt"), 16)));
     let preview_window = host.engine.preview_window.unwrap();
     host.focused_window = Some(preview_window);
-    let _ = host.scroll.handle_wheel_scrolled(
-        PreviewScrollRegion::Directory,
-        false,
-        iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-    );
-    assert!(host.scroll.is_animating());
 
     let _ = host.close_focused_preview();
     assert!(host.engine.preview_window.is_none());
     assert!(host.engine.preview.is_none());
     assert!(host.request_window.is_none());
     assert_eq!(host.focused_window, None);
-    assert!(!host.scroll.is_animating());
 }
 
 #[test]

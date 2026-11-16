@@ -3,8 +3,8 @@
 use super::open::{JumpPlace, RowBatch};
 use super::rows::RowStart;
 use super::{
-    RowsRequest, TextPreviewDocument, TextRead, ViewerJump, PREFETCH_ROWS, WINDOW_MAX_BYTES,
-    WINDOW_MAX_ROWS,
+    RowsRequest, TextPreviewDocument, TextRead, TextViewport, ViewerJump, PREFETCH_ROWS,
+    WINDOW_MAX_BYTES, WINDOW_MAX_ROWS,
 };
 
 impl TextPreviewDocument {
@@ -73,6 +73,24 @@ impl TextPreviewDocument {
         let first = self.row_index_containing(viewport.first_row)?;
         let last = self.row_index_containing(viewport.last_row)?;
         Some((first, self.rows.len().saturating_sub(last + 1)))
+    }
+
+    /// 查看器滚动途中要不要把这个可见范围告诉引擎：引擎还不知道这个窗口里的范围（刚跳转）、
+    /// 离窗口没到文件头尾的一端不到预读行数（要补读）、或离引擎知道的范围已经半个预读量
+    /// （窗口超限时按它挑丢哪一头，不能差太远）。停下来、光标或贴底变了另由查看器报告。
+    pub fn wants_viewport(&self, viewport: TextViewport) -> bool {
+        let rows = self.rows.len();
+        let index = |row| self.row_index_containing(row);
+        let (Some(known), Some(first), Some(last)) = (
+            self.viewport.and_then(|known| index(known.first_row)),
+            index(viewport.first_row),
+            index(viewport.last_row),
+        ) else {
+            return true;
+        };
+        first.abs_diff(known) >= PREFETCH_ROWS / 2
+            || (!self.at_start && first < PREFETCH_ROWS)
+            || (!self.at_end && rows.saturating_sub(last + 1) < PREFETCH_ROWS)
     }
 
     pub(super) fn extension_reads(&mut self) -> Vec<TextRead> {

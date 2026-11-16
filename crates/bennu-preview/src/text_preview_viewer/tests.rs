@@ -4,7 +4,7 @@ use iced::widget::text_editor;
 use iced::{Point, Rectangle};
 
 use super::*;
-use crate::text_document::{document_from_bytes, TextJump};
+use crate::text_document::{document_from_bytes, TextJump, TextViewport};
 
 /// 布局 480 × 400（文字视口高 384）的查看器状态。
 fn synced_state(document: &TextPreviewDocument) -> TextPreviewViewerState {
@@ -788,4 +788,80 @@ fn a_dark_palette_on_a_new_document_still_lays_out_the_text() {
         assert!(!state.retained_rows.is_empty(), "visible rows are laid out");
     }
     assert_eq!(state.palette, HighlightPalette::Dark);
+}
+
+/// 滚轮在查看器里惯性滚完：途中不向引擎报告可见范围（每条报告都是一条应用消息，
+/// 会让所有窗口重建），停下后报一次。
+#[test]
+fn wheel_scrolls_inside_the_viewer_and_reports_the_range_once_settled() {
+    let mut document = document_from_bytes(lines(400), TextJump::Start);
+    let mut state = synced_state(&document);
+    // 引擎收下报告的范围（宿主照此转交）。
+    let deliver = |state: &mut TextPreviewViewerState, document: &mut TextPreviewDocument| {
+        let mut delivered = 0;
+        for event in std::mem::take(&mut state.pending_events) {
+            if let TextViewerEvent::ViewportChanged(viewport) = event {
+                let _ = document.accept_viewport(viewport);
+                delivered += 1;
+            }
+        }
+        delivered
+    };
+    queue_viewport_report(&mut state, &document);
+    deliver(&mut state, &mut document);
+    let mut clipboard = RecordingClipboard::default();
+    let wheel = Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
+    });
+    assert!(
+        send(
+            &mut state,
+            &document,
+            wheel,
+            at(100.0, 100.0),
+            &mut clipboard
+        )
+        .captured
+    );
+
+    let start = std::time::Instant::now();
+    let mut reports = 0;
+    for frame in 1..400 {
+        let now = start + std::time::Duration::from_millis(16 * frame);
+        let tick = Event::Window(iced::window::Event::RedrawRequested(now));
+        let outcome = send(
+            &mut state,
+            &document,
+            tick,
+            at(100.0, 100.0),
+            &mut clipboard,
+        );
+        queue_viewport_report(&mut state, &document);
+        reports += deliver(&mut state, &mut document);
+        if outcome.redraw.is_none() {
+            break;
+        }
+    }
+    assert!(!state.inertia.is_active());
+    assert!(state.anchor > 0);
+    assert_eq!(reports, 1);
+}
+
+/// 滚动途中只在引擎用得上时报告：刚换了窗口、靠近还没读到文件头尾的一端、或离上次
+/// 报告的范围太远。
+#[test]
+fn the_document_wants_the_range_only_when_it_may_act_on_it() {
+    let mut document = document_from_bytes(lines(200_000), TextJump::Start);
+    let rows: Vec<u64> = document.rows().iter().map(|row| row.start).collect();
+    let viewport = |first: usize| TextViewport {
+        first_row: rows[first],
+        last_row: rows[first + 30],
+        at_bottom: false,
+        cursor: None,
+    };
+    assert!(document.wants_viewport(viewport(0)));
+    let _ = document.accept_viewport(viewport(0));
+    assert!(!document.wants_viewport(viewport(10)));
+    assert!(document.wants_viewport(viewport(120)));
+    assert!(document.wants_viewport(viewport(rows.len() - 100)));
 }

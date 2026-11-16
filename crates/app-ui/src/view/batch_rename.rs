@@ -1,4 +1,4 @@
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use iced::widget::{
     button, column, container, mouse_area, row, scrollable, text, Column, Row, Space,
@@ -674,12 +674,13 @@ fn preview_rows(state: &BatchRenameState) -> Element<'_, Message> {
     }
 
     let scroll_region = ScrollbarRegion::BatchRenamePreview;
-    let scroller = scrollable(smooth_scroll_content(rows, scroll_region.clone()))
+    let smooth = smooth_scroll(&scroll_region);
+    let scroller = scrollable(smooth.capture(rows))
         .id(smooth_scroll_id(&scroll_region))
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
         .height(Length::Fixed(BATCH_RENAME_PREVIEW_HEIGHT));
-    let scroller = enhanced_scrollbar(scroller, ScrollbarAxis::Vertical);
+    let scroller = smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical));
 
     // 表头/行单元文本一律单行测量(Wrapping::None)+ cell clip 水平裁剪:
     // iced 默认 Word 换行,窄面板压窄列时会把行高撑到两倍以上(无头布局

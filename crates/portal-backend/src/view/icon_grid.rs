@@ -23,7 +23,7 @@ use crate::picker_session::{
     PickerRow, PickerSession, SessionMessage, SessionScrollRegion, ICON_GRID_EDGE,
 };
 
-use super::{readable_label, smooth_scroll_region};
+use super::{readable_label, smooth_scroll_for};
 
 /// 大图固定档：portal 不做图标尺寸调节（prd out of scope）。
 const ICON_EDGE: u32 = ICON_GRID_EDGE;
@@ -54,18 +54,15 @@ pub(super) fn icon_grid_body(
     }
 
     let region = SessionScrollRegion::List;
-    let scroller = scrollable(smooth_scroll_region(
-        container(grid).padding(ICON_GRID_CONTENT_PADDING),
-        region,
-        session.scroll_shift_pressed(),
-    ))
-    .id(scroll_id(session.request_path(), region))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction())
-    .style(enhanced_scrollbar_style)
-    .on_scroll(scrollbar_on_scroll(region));
-    enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
+    let smooth = smooth_scroll_for(region);
+    let scroller = scrollable(smooth.capture(container(grid).padding(ICON_GRID_CONTENT_PADDING)))
+        .id(scroll_id(session.request_path(), region))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .on_scroll(scrollbar_on_scroll(region));
+    smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical))
 }
 
 /// 单个 tile：96px 图标/缩略图槽 + 最多 3 行居中文件名，交互与列表行

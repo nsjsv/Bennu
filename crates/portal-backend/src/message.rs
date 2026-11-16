@@ -6,14 +6,13 @@
 
 use std::sync::Arc;
 
-use iced::{keyboard, mouse, window};
+use iced::{keyboard, window};
 
 use bennu_preview::preview_message::PreviewMessage;
 use bennu_theme::window_controls::WindowControlKind;
 
 use crate::dbus_file_chooser::BridgeEvent;
 use crate::picker_session::SessionMessage;
-use crate::preview_scroll::PreviewScrollRegion;
 
 impl From<PreviewMessage> for Message {
     fn from(message: PreviewMessage) -> Self {
@@ -83,12 +82,6 @@ pub(crate) enum Message {
         window: window::Id,
         width: f32,
         height: f32,
-    },
-    /// 预览窗滚动管线（机制同选择窗滚动消息，区域枚举/id 换预览命名
-    /// 空间；视口回传内层事件是 PreviewMessage，缓存后回流引擎）。
-    PreviewWheelScrolled {
-        region: PreviewScrollRegion,
-        delta: mouse::ScrollDelta,
     },
     /// SQLite 表格列宽拖拽结束（面板闭包注入）。
     PreviewSqliteDragFinished,

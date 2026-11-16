@@ -308,13 +308,17 @@ fn tree_scroller<Message>(
 where
     Message: 'static + Clone,
 {
-    let scroller = scroll
-        .scrollable(listing.into())
-        .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .height(Length::Fill);
+    let scroller = scroll.scrollable(listing.into(), |scroller| {
+        enhanced_scrollbar(
+            scroller
+                .direction(enhanced_vertical_scrollbar_direction())
+                .style(enhanced_scrollbar_style)
+                .height(Length::Fill),
+            ScrollbarAxis::Vertical,
+        )
+    });
 
-    column![enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)]
+    column![scroller]
 }
 
 fn visible_preview_tree_entries(entries: &[PreviewTreeEntry]) -> Vec<&PreviewTreeEntry> {

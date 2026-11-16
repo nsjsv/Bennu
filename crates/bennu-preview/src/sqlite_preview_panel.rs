@@ -180,21 +180,22 @@ where
     if matching_count == 0 {
         list = list.push(readable_text(tr!("No tables match")).width(Length::Fill));
     }
-    let scroller = scroll
-        .scrollable(list.into())
+    let scroller = scroll.scrollable(list.into(), |scroller| {
+        enhanced_scrollbar(
+            scroller
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .direction(enhanced_vertical_scrollbar_direction())
+                .style(enhanced_scrollbar_style),
+            ScrollbarAxis::Vertical,
+        )
+    });
+
+    column![filter_input, scroller]
+        .spacing(6)
         .width(Length::Fill)
         .height(Length::Fill)
-        .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style);
-
-    column![
-        filter_input,
-        enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
-    ]
-    .spacing(6)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .into()
+        .into()
 }
 
 fn sql_tab<'a, Message>(
@@ -263,13 +264,15 @@ where
     for values in rows {
         grid = grid.push(grid_data_row(values));
     }
-    let scroller = scroll
-        .scrollable(grid.into())
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .direction(enhanced_both_scrollbar_direction())
-        .style(enhanced_scrollbar_style);
-    let scroller = enhanced_scrollbar_both(scroller);
+    let scroller = scroll.scrollable(grid.into(), |scroller| {
+        enhanced_scrollbar_both(
+            scroller
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .direction(enhanced_both_scrollbar_direction())
+                .style(enhanced_scrollbar_style),
+        )
+    });
 
     if truncated {
         column![

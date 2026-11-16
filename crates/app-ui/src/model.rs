@@ -687,7 +687,8 @@ pub(crate) enum Message {
     RenderingGpuPreferenceSelected(RenderingGpuPreference),
     RendererRestartRequested,
     RendererRestartNoticeDismissed,
-    SmoothScrollWheel(ScrollbarRegion, mouse::ScrollDelta),
+    /// 浏览内容区上的 Ctrl+滚轮：调密度档（普通滚轮在滚动控件里自己滚，不经过应用）。
+    ViewDensityWheel(ScrollbarRegion, mouse::ScrollDelta),
     WindowChromeAnimationTick,
     ColumnBrowserScrolled(BrowserPaneId, f32, f32),
     ColumnScrolled(BrowserPaneId, PathBuf, f32, f32),

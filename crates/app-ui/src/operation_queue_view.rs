@@ -1,7 +1,7 @@
 use iced::widget::{button, column, container, row, scrollable, svg, Svg};
 use iced::{Alignment, Element, Length};
 
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::transfer::{TransferTask, TransferTasks};
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
@@ -109,14 +109,15 @@ pub(crate) fn operation_queue_panel<'a>(
     }
 
     let scroll_region = ScrollbarRegion::OperationQueue;
-    let scroller = scrollable(smooth_scroll_content(tasks, scroll_region.clone()))
+    let smooth = smooth_scroll(&scroll_region);
+    let scroller = scrollable(smooth.capture(tasks))
         .id(smooth_scroll_id(&scroll_region))
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style);
     let scroller = container(scroller)
         .width(Length::Fill)
         .max_height(TASK_LIST_MAX_HEIGHT);
-    let scroller = enhanced_scrollbar(scroller, ScrollbarAxis::Vertical);
+    let scroller = smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical));
     let content = column![header, scroller].spacing(10);
 
     container(content)

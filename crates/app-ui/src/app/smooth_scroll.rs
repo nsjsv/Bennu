@@ -2,68 +2,22 @@
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use iced::{mouse, Element, Task};
+use bennu_theme::smooth_scroll::{SmoothScroll, SmoothScrollAxis};
+use iced::{mouse, Task};
 
 use super::FileBrowser;
 use crate::model::{Message, ScrollbarRegion};
 
-// Mos 惯性状态机、滚轮换算与捕获滚轮事件的包装 widget 均已下沉到共享
-// crate `bennu-theme::smooth_scroll`（portal-backend 复用同一实现）；
-// 这里重导出公共项，调用点保持原名零改动。
-pub(crate) use bennu_theme::smooth_scroll::{
-    wheel_delta_for_axis, SmoothScrollArea, SmoothScrollAxis, SmoothScrollDelta, WheelScrollDelta,
-    WheelScrollMode,
-};
-
-// FileBrowser 全局只挂主软件的区域枚举：类型别名把共享状态机钉到具体
-// Region，`MosScrollState` 在调用点保持原名与原推导路径。
-pub(crate) type MosScrollState = bennu_theme::smooth_scroll::MosScrollState<ScrollbarRegion>;
-
 impl FileBrowser {
-    pub(crate) fn smooth_scroll_shift_pressed(&self) -> bool {
-        self.keyboard_modifiers.shift()
-    }
-
-    pub(super) fn handle_smooth_scroll_wheel(
+    /// 浏览内容区的 Ctrl+滚轮：每个非零事件走一档密度，边界档位静默保持；立即走用户偏好保存队列。
+    pub(super) fn handle_view_density_wheel(
         &mut self,
         region: ScrollbarRegion,
         delta: mouse::ScrollDelta,
     ) -> Task<Message> {
-        // Ctrl+滚轮在浏览内容区统一走密度档位路径；其他区域保持原滚动语义。
-        if self.keyboard_modifiers.control() {
-            if let Some(target) = view_density_target(&region) {
-                return self.adjust_view_density(target, delta);
-            }
-        }
-
-        let Some(scroll_delta) = self.smooth_scroll_delta_for_region(&region, delta) else {
+        let Some(target) = view_density_target(&region) else {
             return Task::none();
         };
-
-        match scroll_delta.mode {
-            WheelScrollMode::MosAnimated => {
-                self.smooth_scroll
-                    .push_wheel_delta(region, scroll_delta.delta);
-                Task::none()
-            }
-            WheelScrollMode::Direct => {
-                self.smooth_scroll.stop();
-                iced::widget::operation::scroll_by(
-                    smooth_scroll_id(&region),
-                    scroll_frame_offset(scroll_delta.delta),
-                )
-            }
-        }
-    }
-
-    // Ctrl+滚轮调档的唯一状态入口：每个非零事件走一档，停止旧惯性，
-    // 立即走用户偏好保存队列；边界档位静默保持，不产生滚动位移。
-    fn adjust_view_density(
-        &mut self,
-        target: ViewDensityTarget,
-        delta: mouse::ScrollDelta,
-    ) -> Task<Message> {
-        self.smooth_scroll.stop();
         let Some(step) = view_density_step_from_wheel(delta) else {
             return Task::none();
         };
@@ -88,56 +42,17 @@ impl FileBrowser {
             self.schedule_thumbnail_refresh(),
         ])
     }
-
-    pub(super) fn smooth_scroll_animation_is_active(&self) -> bool {
-        self.smooth_scroll.is_active()
-    }
-
-    pub(super) fn advance_smooth_scroll_animation(&mut self) -> Task<Message> {
-        let scroll_task = self
-            .smooth_scroll
-            .next_frame_delta()
-            .map(|(region, delta)| {
-                iced::widget::operation::scroll_by(
-                    smooth_scroll_id(&region),
-                    scroll_frame_offset(delta),
-                )
-            });
-
-        if !self.smooth_scroll.is_active() {
-            self.smooth_scroll.stop();
-        }
-
-        scroll_task.unwrap_or_else(Task::none)
-    }
-
-    fn smooth_scroll_delta_for_region(
-        &self,
-        region: &ScrollbarRegion,
-        delta: mouse::ScrollDelta,
-    ) -> Option<WheelScrollDelta> {
-        wheel_delta_for_region(region, self.keyboard_modifiers.shift(), delta)
-    }
 }
 
-pub(crate) fn smooth_scroll_content<'a>(
-    content: impl Into<Element<'a, Message>>,
-    region: ScrollbarRegion,
-) -> Element<'a, Message> {
-    smooth_scroll_content_with_shift(content, region, false)
-}
-
-pub(crate) fn smooth_scroll_content_with_shift<'a>(
-    content: impl Into<Element<'a, Message>>,
-    region: ScrollbarRegion,
-    shift_pressed: bool,
-) -> Element<'a, Message> {
-    Element::new(SmoothScrollArea::new(
-        content,
-        smooth_scroll_axis(&region),
-        shift_pressed,
-        move |delta| Message::SmoothScrollWheel(region.clone(), delta),
-    ))
+/// 一个滚动区的惯性滚动（滚轮在控件里按帧推进，不经过应用）：先 `capture` 内容、放进
+/// `scrollable`，再 `drive` 这个滚动区。有密度档的浏览区 Ctrl+滚轮交给应用调档。
+pub(crate) fn smooth_scroll<'a>(region: &ScrollbarRegion) -> SmoothScroll<'a, Message> {
+    let scroll = bennu_theme::smooth_scroll::smooth_scroll(smooth_scroll_axis(region));
+    if view_density_target(region).is_none() {
+        return scroll;
+    }
+    let region = region.clone();
+    scroll.on_ctrl_wheel(move |delta| Message::ViewDensityWheel(region.clone(), delta))
 }
 
 pub(crate) fn smooth_scroll_id(region: &ScrollbarRegion) -> iced::widget::Id {
@@ -187,16 +102,6 @@ fn smooth_scroll_axis(region: &ScrollbarRegion) -> SmoothScrollAxis {
     }
 }
 
-fn wheel_delta_for_region(
-    region: &ScrollbarRegion,
-    shift_pressed: bool,
-    delta: mouse::ScrollDelta,
-) -> Option<WheelScrollDelta> {
-    // 区域 → 轴向的换算在 smooth_scroll_axis：Column 用
-    // VerticalIgnoringShift 表达 "shift 横滚冒泡到外层" 的区域语义。
-    wheel_delta_for_axis(smooth_scroll_axis(region), shift_pressed, delta)
-}
-
 // 浏览内容区到密度档位的映射：侧栏、地址栏、预览和设置不参与密度缩放。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViewDensityTarget {
@@ -238,13 +143,6 @@ fn view_density_step_from_wheel(
     }
 }
 
-fn scroll_frame_offset(delta: SmoothScrollDelta) -> iced::widget::scrollable::AbsoluteOffset {
-    iced::widget::scrollable::AbsoluteOffset {
-        x: delta.x,
-        y: delta.y,
-    }
-}
-
 pub(crate) fn path_hash(path: &Path) -> String {
     let mut hasher = blake3::Hasher::new();
     #[cfg(unix)]
@@ -267,9 +165,17 @@ mod tests {
 
     use super::*;
     use crate::model::BrowserPaneId;
-    // 换算常量随状态机下沉到共享层；app-ui 代码已不直接消费，仅
-    // region 换算用例引用。
-    use bennu_theme::smooth_scroll::MOS_SCROLL_STEP;
+    use bennu_theme::smooth_scroll::{
+        wheel_delta_for_axis, SmoothScrollDelta, WheelScrollDelta, WheelScrollMode, MOS_SCROLL_STEP,
+    };
+
+    fn wheel_delta_for_region(
+        region: &ScrollbarRegion,
+        shift_pressed: bool,
+        delta: mouse::ScrollDelta,
+    ) -> Option<WheelScrollDelta> {
+        wheel_delta_for_axis(smooth_scroll_axis(region), shift_pressed, delta)
+    }
 
     #[test]
     fn horizontal_region_ignores_unshifted_vertical_wheel() {
@@ -336,13 +242,5 @@ mod tests {
                 mode: WheelScrollMode::MosAnimated,
             })
         );
-    }
-
-    #[test]
-    fn frame_offset_preserves_relative_scroll_delta() {
-        let offset = scroll_frame_offset(SmoothScrollDelta { x: -3.0, y: 6.0 });
-
-        assert_eq!(offset.x, -3.0);
-        assert_eq!(offset.y, 6.0);
     }
 }

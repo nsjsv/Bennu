@@ -42,8 +42,6 @@ impl FileBrowser {
         pane_id: BrowserPaneId,
         group_index: usize,
     ) -> Task<Message> {
-        // 平滑滚动惯性会与编程跳转互相拉扯,跳转前先停掉在途动画。
-        self.smooth_scroll.stop();
         let Some(pane) = self.pane_view(pane_id) else {
             return Task::none();
         };

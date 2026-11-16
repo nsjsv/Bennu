@@ -6,7 +6,7 @@
 
 use iced::Element;
 
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::model::{
     AudioPreviewPlayback, Message, PreviewContent, PreviewSize, PreviewState, ScrollbarRegion,
     SqlitePreviewMessage, SqlitePreviewTab, TextPreviewDocument, VideoPreviewPlayback,
@@ -62,14 +62,13 @@ pub(crate) fn view_preview_window<'a>(
         text_view,
         palette,
         // 查看器是渲染器敏感部件（Paragraph 泛型），宿主实例化注入；它自己就是滚动区，
-        // 部件 id 用平滑滚动管线的区域 id，滚轮的 scroll_by 直接作用到它。
+        // 滚轮惯性在它自己里面推进，部件 id 用来让宿主的跳转操作找到它。
         move |document: &TextPreviewDocument, view| {
             text_preview_viewer(
                 document,
                 view,
                 palette,
                 smooth_scroll_id(&ScrollbarRegion::TextPreview),
-                |delta| Message::SmoothScrollWheel(ScrollbarRegion::TextPreview, delta),
                 |event| Message::from(PreviewMessage::TextViewer(event)),
             )
         },
@@ -106,9 +105,7 @@ fn sqlite_tabs_row(state: Option<&SqlitePreviewState>) -> Element<'static, Messa
 
 fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::PreviewDirectory)
-        }),
+        smooth_scroll: smooth_scroll(&ScrollbarRegion::PreviewDirectory),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewDirectory),
         // 和压缩包一样只排看得见的行：视口回给引擎。
         on_scroll: Some(Box::new(tree_viewport_message)),
@@ -117,9 +114,7 @@ fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
 
 fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::PreviewArchive)
-        }),
+        smooth_scroll: smooth_scroll(&ScrollbarRegion::PreviewArchive),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewArchive),
         // 压缩包几万条只排看得见的行：视口回给引擎。
         on_scroll: Some(Box::new(tree_viewport_message)),
@@ -157,9 +152,7 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
         },
     };
     ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::PreviewDocument)
-        }),
+        smooth_scroll: smooth_scroll(&ScrollbarRegion::PreviewDocument),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewDocument),
         on_scroll: Some(Box::new(move |viewport| {
             Message::Preview(PreviewMessage::DocumentPreview(
@@ -178,9 +171,7 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
 // Markdown 渲染体接线：整篇已经在内存里，不需要视口回传。
 fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::MarkdownPreview)
-        }),
+        smooth_scroll: smooth_scroll(&ScrollbarRegion::MarkdownPreview),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::MarkdownPreview),
         on_scroll: None,
     }
@@ -189,9 +180,7 @@ fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
 // 表列表/数据网格各自的滚动接线：不关心滚动位置，没有视口回传。
 fn sqlite_tables_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::PreviewSqliteTables)
-        }),
+        smooth_scroll: smooth_scroll(&ScrollbarRegion::PreviewSqliteTables),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewSqliteTables),
         on_scroll: None,
     }
@@ -199,9 +188,7 @@ fn sqlite_tables_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
 
 fn sqlite_data_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
-        smooth_scroll_wrap: Box::new(|content| {
-            smooth_scroll_content(content, ScrollbarRegion::PreviewSqliteData)
-        }),
+        smooth_scroll: smooth_scroll(&ScrollbarRegion::PreviewSqliteData),
         scrollable_id: smooth_scroll_id(&ScrollbarRegion::PreviewSqliteData),
         on_scroll: None,
     }

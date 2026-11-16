@@ -3,7 +3,7 @@ use iced::{Alignment, Element, Length};
 
 use desktop_linux::FileClipboardOperation;
 
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::appearance::{
     context_menu_item_button_style, context_menu_style, enhanced_scrollbar_style,
     enhanced_vertical_scrollbar_direction, error_notification_style,
@@ -211,14 +211,15 @@ fn open_with_application_list(state: &OpenWithState) -> Element<'static, Message
     }
 
     let scroll_region = ScrollbarRegion::OpenWithApplications;
-    let scroller = scrollable(smooth_scroll_content(applications, scroll_region.clone()))
+    let smooth = smooth_scroll(&scroll_region);
+    let scroller = scrollable(smooth.capture(applications))
         .id(smooth_scroll_id(&scroll_region))
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
         .height(Length::Fixed(OPEN_WITH_APPLICATION_LIST_HEIGHT))
         .width(Length::Fill);
 
-    enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
+    smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical))
 }
 
 fn action_label(icon: IconSymbol, label: String, size: f32) -> Row<'static, Message> {

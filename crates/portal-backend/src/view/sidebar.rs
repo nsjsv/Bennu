@@ -330,20 +330,16 @@ pub(super) fn sidebar_panel(session: &PickerSession) -> Element<'static, Session
     let region = SessionScrollRegion::Sidebar;
     let request_path = session.request_path().to_string();
 
-    // 滚轮走 SmoothScrollArea → WheelScrolled{region}（main 层拦截路由），
-    // widget id 按请求路径命名空间，多窗不串。
-    let scroller = scrollable(super::smooth_scroll_region(
-        content,
-        region,
-        session.scroll_shift_pressed(),
-    ))
-    .id(scroll_id(&request_path, region))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction())
-    .style(enhanced_scrollbar_style);
+    // 滚轮惯性在滚动控件里自己推进；widget id 按请求路径命名空间，多窗不串。
+    let smooth = super::smooth_scroll_for(region);
+    let scroller = scrollable(smooth.capture(content))
+        .id(scroll_id(&request_path, region))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style);
 
-    let panel = container(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical))
+    let panel = container(smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)))
         .width(Length::Fill)
         .height(Length::Fill);
 

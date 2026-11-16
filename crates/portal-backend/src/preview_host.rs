@@ -30,7 +30,6 @@ use bennu_preview::preview_loading::{
 use bennu_preview::preview_message::PreviewMessage;
 
 use crate::picker_session::PickerSession;
-use crate::preview_scroll::PreviewScrollPipeline;
 use crate::{Message, PickerDaemon};
 
 mod content;
@@ -68,8 +67,6 @@ pub(crate) struct PreviewHost {
     pub(crate) preferences: PreviewPreferences,
     /// 偏好来源库路径：构造注入，测试指向临时目录（缺失 → 默认回落）。
     preferences_database: PathBuf,
-    /// 预览窗滚动管线（七区域的滚轮惯性）。
-    pub(crate) scroll: PreviewScrollPipeline,
     /// 预览窗指针位置宿主簿记：SQLite 列宽拖拽起点读横坐标（主软件
     /// cursor_position.x 的预览对应物；纵坐标的引擎消费走
     /// engine.preview_window_pointer_y）。
@@ -96,7 +93,6 @@ impl PreviewHost {
             request_window: None,
             preferences,
             preferences_database,
-            scroll: PreviewScrollPipeline::default(),
             preview_window_pointer: None,
             preview_on_network: false,
         }
@@ -198,13 +194,12 @@ impl PreviewHost {
     }
 
     /// 关闭预览会话：引擎复位（固定/内容/shown_path/窗口）+ 宿主簿记
-    /// 收尾（滚动管线复位 + 焦点回请求窗，design 生命周期合同；请求
+    /// 收尾（焦点回请求窗，design 生命周期合同；请求
     /// 窗已亡时 gain_focus 是 no-op）。域内主动关闭与外部关窗（X）共用
     /// 此路径。
     pub(crate) fn close_preview_session(&mut self) -> Task<PreviewMessage> {
         let (closed_window, command) = self.engine.close_preview_window();
         let request_window = self.request_window.take();
-        self.scroll.reset();
         let Some(closed) = closed_window else {
             return command;
         };
@@ -530,22 +525,21 @@ impl PreviewHost {
             .map(Message::Preview)
     }
 
-    /// 帧时钟是否需要挂载（chrome 淡入淡出 ∪ 底部控件 ∪ 预览树动画 ∪
-    /// 滚动管线；与选择窗 is_animating 联合后驱动 AnimationTick）。
+    /// 帧时钟是否需要挂载（chrome 淡入淡出 ∪ 底部控件 ∪ 预览树动画；与选择窗
+    /// is_animating 联合后驱动 AnimationTick）。
     pub(crate) fn is_animating(&self) -> bool {
         self.engine.preview_window_bottom_controls.is_animating()
             || self.engine.preview_tree_animation_is_active()
-            || self.scroll.is_animating()
     }
 
-    /// 帧推进：chrome/底部控件透明度、预览树展开动画与惯性滚动
-    /// （app-ui advance_window_animation_frame + WindowChrome-
-    /// AnimationTick/PreviewTreeAnimationTick 两条订阅的合并驱动）。
+    /// 帧推进：chrome/底部控件透明度与预览树展开动画（app-ui
+    /// advance_window_animation_frame + WindowChromeAnimationTick/
+    /// PreviewTreeAnimationTick 两条订阅的合并驱动）。
     pub(crate) fn advance_frame(&mut self) -> Task<Message> {
         self.engine.preview_window_bottom_controls.advance();
-        let tree_task = self.engine.advance_preview_tree_animation();
-        let scroll_task = self.scroll.advance_frame();
-        Task::batch([tree_task.map(Message::Preview), scroll_task])
+        self.engine
+            .advance_preview_tree_animation()
+            .map(Message::Preview)
     }
 }
 

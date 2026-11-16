@@ -55,44 +55,35 @@ fn view_density_target_covers_only_browsing_content_regions() {
 }
 
 #[test]
-fn ctrl_wheel_on_icon_grid_changes_level_without_starting_scroll() {
+fn ctrl_wheel_on_icon_grid_changes_level() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
     let region = ScrollbarRegion::PaneIcons(BrowserPaneId::PRIMARY);
-    drop(browser.handle_smooth_scroll_wheel(
-        region.clone(),
-        mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-    ));
-    assert!(browser.smooth_scroll.is_active());
-
-    browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
-    drop(browser.handle_smooth_scroll_wheel(region, mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }));
+    drop(browser.handle_view_density_wheel(region, mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }));
 
     assert_eq!(browser.user_config.icons_view_density.index(), 3);
     assert_eq!(browser.user_config.icons_icon_edge(), 112);
-    assert!(!browser.smooth_scroll.is_active());
 }
 
 #[test]
 fn ctrl_wheel_adjusts_list_and_columns_levels_independently() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
 
-    drop(browser.handle_smooth_scroll_wheel(
+    drop(browser.handle_view_density_wheel(
         ScrollbarRegion::PaneList(BrowserPaneId::PRIMARY),
         mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
     ));
-    drop(browser.handle_smooth_scroll_wheel(
+    drop(browser.handle_view_density_wheel(
         ScrollbarRegion::PaneList(BrowserPaneId::PRIMARY),
         mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
     ));
-    drop(browser.handle_smooth_scroll_wheel(
+    drop(browser.handle_view_density_wheel(
         ScrollbarRegion::Column {
             pane_id: BrowserPaneId::PRIMARY,
             directory: std::path::PathBuf::from("/tmp"),
         },
         mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
     ));
-    drop(browser.handle_smooth_scroll_wheel(
+    drop(browser.handle_view_density_wheel(
         ScrollbarRegion::ColumnBrowser(BrowserPaneId::PRIMARY),
         mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
     ));
@@ -100,17 +91,15 @@ fn ctrl_wheel_adjusts_list_and_columns_levels_independently() {
     assert_eq!(browser.user_config.list_view_density.index(), 4);
     assert_eq!(browser.user_config.columns_view_density.index(), 0);
     assert_eq!(browser.user_config.icons_view_density.index(), 2);
-    assert!(!browser.smooth_scroll.is_active());
 }
 
 #[test]
 fn ctrl_wheel_stops_silently_at_density_boundaries() {
     let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
     browser.user_config.list_view_density = crate::config::ViewDensityLevel::from_index(8);
 
     let list_region = ScrollbarRegion::PaneList(BrowserPaneId::PRIMARY);
-    drop(browser.handle_smooth_scroll_wheel(
+    drop(browser.handle_view_density_wheel(
         list_region.clone(),
         mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
     ));
@@ -119,20 +108,7 @@ fn ctrl_wheel_stops_silently_at_density_boundaries() {
     browser.user_config.list_view_density = crate::config::ViewDensityLevel::from_index(0);
     drop(
         browser
-            .handle_smooth_scroll_wheel(list_region, mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 }),
+            .handle_view_density_wheel(list_region, mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 }),
     );
     assert_eq!(browser.user_config.list_view_density.index(), 0);
-}
-
-#[test]
-fn plain_wheel_without_ctrl_keeps_normal_scroll_semantics() {
-    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-    let list_region = ScrollbarRegion::PaneList(BrowserPaneId::PRIMARY);
-    drop(
-        browser
-            .handle_smooth_scroll_wheel(list_region, mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }),
-    );
-
-    assert_eq!(browser.user_config.list_view_density.index(), 2);
-    assert!(browser.smooth_scroll.is_active());
 }

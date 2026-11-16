@@ -127,11 +127,6 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
         }
         Message::ModifiersChanged(modifiers) => {
             daemon.keyboard_modifiers = modifiers;
-            // 滚轮轴向换算（竖向区 shift 横滚）需要 shift：视图包装层与
-            // 会话处理端同源读取。
-            for session in daemon.windows.values_mut() {
-                session.set_scroll_shift_pressed(modifiers.shift());
-            }
             Task::none()
         }
         Message::PreviewSpacePressed { source } => {
@@ -180,10 +175,6 @@ fn update(daemon: &mut PickerDaemon, message: Message) -> Task<Message> {
             Some(session) => scrollbar_layout_probe_task(window, session),
             None => preview_host::handle_window_resized(daemon, window, width, height),
         },
-        Message::PreviewWheelScrolled { region, delta } => daemon
-            .preview
-            .scroll
-            .handle_wheel_scrolled(region, daemon.keyboard_modifiers.shift(), delta),
         Message::WindowFocused(window) => {
             // 预览窗 Esc 分层/失焦关闭（步骤 3）读这份焦点簿记。
             daemon.preview.focused_window = Some(window);
@@ -379,8 +370,8 @@ fn apply_session_message(
     };
     let task = match effect {
         // 导航类扫描：除扫描与布局探针外，面包屑滚到最右以揭示当前
-        // 目录段。scroll_to 可穿透 SmoothScrollArea（其 operate 转发
-        // 内层），Id 已按请求路径命名空间不会串窗。
+        // 目录段。scroll_to 可穿透惯性滚动的包装（operate 逐字转发内层），
+        // Id 已按请求路径命名空间不会串窗。
         SessionEffect::NavigateLocation(location) => Task::batch([
             scan_location_task(window_id, location),
             breadcrumb_scroll_to_end_task(session),
@@ -438,7 +429,7 @@ fn apply_session_message(
         SessionEffect::MountConnection(id) => {
             sidebar_bridge::mount_connection_task(window_id, session, id)
         }
-        // 键盘导航滚动跟随：scroll_to 可穿透 SmoothScrollArea 直达内层
+        // 键盘导航滚动跟随：scroll_to 可穿透惯性滚动的包装直达内层
         // scrollable（Id 按请求路径命名空间不会串窗）；只对 List 发布局
         // 探针，回信纠偏视口缓存。
         SessionEffect::ScrollListTo { offset_y } => Task::batch([

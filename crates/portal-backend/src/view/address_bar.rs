@@ -222,7 +222,6 @@ fn breadcrumb_layer(
     };
     let segments = breadcrumb_segments(target_directory, session.home_dir());
     let request_path = session.request_path().to_string();
-    let shift_pressed = session.scroll_shift_pressed();
 
     responsive(move |viewport_size| {
         breadcrumb_scroller(
@@ -230,7 +229,6 @@ fn breadcrumb_layer(
             opacity,
             viewport_size.width,
             request_path.clone(),
-            shift_pressed,
             emit.clone(),
         )
     })
@@ -246,24 +244,21 @@ fn breadcrumb_scroller(
     opacity: f32,
     viewport_width: f32,
     request_path: String,
-    shift_pressed: bool,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
 ) -> Element<'static, SessionMessage> {
     let region = SessionScrollRegion::Breadcrumb;
     let breadcrumbs = elastic_breadcrumbs(segments, opacity, viewport_width, emit);
     // 面包屑不画滚动条：路径下面多一根线只是噪音，滚轮照样横向滚动。
-    scrollable(super::smooth_scroll_region(
-        breadcrumbs,
-        region,
-        shift_pressed,
-    ))
-    .id(scroll_id(&request_path, region))
-    .width(Length::Fill)
-    .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
-    .direction(scrollable::Direction::Horizontal(
-        scrollable::Scrollbar::hidden(),
-    ))
-    .into()
+    let smooth = super::smooth_scroll_for(region);
+    smooth.drive(
+        scrollable(smooth.capture(breadcrumbs))
+            .id(scroll_id(&request_path, region))
+            .width(Length::Fill)
+            .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
+            .direction(scrollable::Direction::Horizontal(
+                scrollable::Scrollbar::hidden(),
+            )),
+    )
 }
 
 /// 弹性面包屑：段按钮与分隔符按「段/分隔符交错」交给共享 widget 布局；

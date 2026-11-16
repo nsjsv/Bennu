@@ -463,26 +463,3 @@ fn visible_cursor_does_not_scroll() {
     let effect = session.update(SessionMessage::ListCursorMoved { delta: 1 });
     assert!(matches!(effect, SessionEffect::None));
 }
-
-#[test]
-fn keyboard_scroll_interrupts_wheel_inertia() {
-    let (mut session, _receiver) = session(PickerKind::OpenFile {
-        multiple: false,
-        directory: false,
-    });
-    files(&mut session, 30);
-    install_list_viewport(
-        &mut session,
-        list_viewport(0.0, LIST_ROW_STRIDE * 10.0, LIST_ROW_STRIDE * 30.0),
-    );
-    session.handle_scroll_message(SessionMessage::WheelScrolled {
-        region: SessionScrollRegion::List,
-        delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-    });
-    assert!(session.smooth_scroll.is_active());
-
-    // 键盘滚动即时到位：进行中的滚轮惯性必须被打断，否则惯性会把
-    // 偏移再拉走。
-    session.update(SessionMessage::ListCursorJumped { to_end: true });
-    assert!(!session.smooth_scroll.is_active());
-}

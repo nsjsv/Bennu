@@ -9,7 +9,7 @@ use iced::widget::{
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
-use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
@@ -100,22 +100,19 @@ pub(crate) fn icon_grid_view<'a>(
         }
     };
     let scrollbar_region = ScrollbarRegion::PaneIcons(pane_id);
-    let grid_scroll = scrollable(smooth_scroll_content_with_shift(
-        content,
-        scrollbar_region.clone(),
-        browser.smooth_scroll_shift_pressed(),
-    ))
-    .id(smooth_scroll_id(&scrollbar_region))
-    .direction(enhanced_vertical_scrollbar_direction())
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(enhanced_scrollbar_style)
-    .on_scroll(move |viewport: scrollable::Viewport| {
-        let offset = viewport.absolute_offset();
-        let bounds = viewport.bounds();
-        Message::IconGridScrolled(pane_id, offset.y, bounds)
-    });
-    let grid_scroll = enhanced_scrollbar(grid_scroll, ScrollbarAxis::Vertical);
+    let smooth = smooth_scroll(&scrollbar_region);
+    let grid_scroll = scrollable(smooth.capture(content))
+        .id(smooth_scroll_id(&scrollbar_region))
+        .direction(enhanced_vertical_scrollbar_direction())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(enhanced_scrollbar_style)
+        .on_scroll(move |viewport: scrollable::Viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::IconGridScrolled(pane_id, offset.y, bounds)
+        });
+    let grid_scroll = smooth.drive(enhanced_scrollbar(grid_scroll, ScrollbarAxis::Vertical));
 
     let pane_surface: Element<'a, Message> = container(grid_scroll)
         .width(Length::Fill)

@@ -115,16 +115,18 @@ where
     if bottom_spacer > 0.0 {
         pages = pages.push(Space::new().height(Length::Fixed(bottom_spacer)));
     }
-    let scroller = scroll
-        .scrollable(pages.into())
-        .direction(enhanced_both_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
+    let scroller = scroll.scrollable(pages.into(), |scroller| {
+        enhanced_scrollbar_both(
+            scroller
+                .direction(enhanced_both_scrollbar_direction())
+                .style(enhanced_scrollbar_style)
+                .width(Length::Fill)
+                .height(Length::Fixed(document_viewport_height(preview_size.height))),
+        )
+    });
+    let mut layers = Stack::with_children([scroller, page_controls(document)])
         .width(Length::Fill)
-        .height(Length::Fixed(document_viewport_height(preview_size.height)));
-    let mut layers =
-        Stack::with_children([enhanced_scrollbar_both(scroller), page_controls(document)])
-            .width(Length::Fill)
-            .height(Length::Fill);
+        .height(Length::Fill);
     if let Some(search) = document.search() {
         layers = layers.push(
             container(document_find_bar(document, search))

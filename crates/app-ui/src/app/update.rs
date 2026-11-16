@@ -922,8 +922,8 @@ impl FileBrowser {
             }
             Message::RendererRestartRequested => self.restart_with_selected_renderer(),
             Message::RendererRestartNoticeDismissed => self.dismiss_renderer_restart_notice(),
-            Message::SmoothScrollWheel(region, delta) => {
-                self.handle_smooth_scroll_wheel(region, delta)
+            Message::ViewDensityWheel(region, delta) => {
+                self.handle_view_density_wheel(region, delta)
             }
             Message::WindowChromeAnimationTick => self.advance_window_animation_frame(),
             Message::ColumnBrowserScrolled(pane_id, offset_x, width) => {

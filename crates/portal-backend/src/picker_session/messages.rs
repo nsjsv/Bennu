@@ -105,11 +105,6 @@ pub(crate) enum SessionMessage {
         id: String,
         value: String,
     },
-    /// 滚轮输入（视图包装层捕获后发布）；增量换算在会话滚动子模块。
-    WheelScrolled {
-        region: SessionScrollRegion,
-        delta: iced::mouse::ScrollDelta,
-    },
     /// 布局探针回信：当帧滚动区布局（含溢出裁决依据）。
     ScrollbarLayoutVerified {
         region: SessionScrollRegion,

@@ -9,7 +9,7 @@ use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::formatting::format_file_size;
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
-use bennu_theme::smooth_scroll::SmoothScrollArea;
+use bennu_theme::smooth_scroll::{smooth_scroll, SmoothScroll};
 use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_row_style,
     list_row_style, muted_icon_svg_style, muted_text_color, selected_icon_svg_style,
@@ -59,19 +59,10 @@ pub(crate) fn window_min_size() -> Size {
 /// 子级行相对父级的缩进。
 const EXPANSION_INDENT: f32 = 16.0;
 
-/// 滚动内容包一层滚轮捕获（SmoothScrollArea）：内容先处理事件，未
-/// 被吞的滚轮按区域轴向发 `WheelScrolled`（增量换算在会话滚动子模块）。
-fn smooth_scroll_region(
-    content: impl Into<Element<'static, SessionMessage>>,
-    region: SessionScrollRegion,
-    shift_pressed: bool,
-) -> Element<'static, SessionMessage> {
-    Element::new(SmoothScrollArea::new(
-        content,
-        scroll_axis(region),
-        shift_pressed,
-        move |delta| SessionMessage::WheelScrolled { region, delta },
-    ))
+/// 区域的惯性滚动：滚轮在控件里按帧推进，不经过会话；先 `capture` 内容、放进
+/// `scrollable`，再 `drive` 这个滚动区。
+fn smooth_scroll_for(region: SessionScrollRegion) -> SmoothScroll<'static, SessionMessage> {
+    smooth_scroll(scroll_axis(region))
 }
 
 /// 选择窗：侧栏（顶栏写对话框标题）+ 内容（顶栏是导航与地址栏，下面是列表和
@@ -203,18 +194,15 @@ fn list_body(
             emit.clone(),
         ));
     }
-    let list_scroller = scrollable(smooth_scroll_region(
-        list,
-        region,
-        session.scroll_shift_pressed(),
-    ))
-    .id(scroll_id(session.request_path(), region))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction())
-    .style(enhanced_scrollbar_style)
-    .on_scroll(scrollbar_on_scroll(region));
-    enhanced_scrollbar(list_scroller, ScrollbarAxis::Vertical)
+    let smooth = smooth_scroll_for(region);
+    let list_scroller = scrollable(smooth.capture(list))
+        .id(scroll_id(session.request_path(), region))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .on_scroll(scrollbar_on_scroll(region));
+    smooth.drive(enhanced_scrollbar(list_scroller, ScrollbarAxis::Vertical))
 }
 
 fn centered_hint(label: &str, size: f32, color: Color) -> Element<'static, SessionMessage> {

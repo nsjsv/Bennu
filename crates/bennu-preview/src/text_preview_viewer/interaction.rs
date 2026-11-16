@@ -4,6 +4,7 @@
 use std::time::{Duration, Instant};
 
 use bennu_localization::tr;
+use bennu_theme::smooth_scroll::{wheel_delta_for_axis, SmoothScrollAxis, WheelScrollMode};
 use bennu_theme::styles::{context_menu_item_button_style, context_menu_style, muted_text_color};
 use bennu_theme::typography::BODY_SIZE;
 use bennu_theme::ui_colors;
@@ -12,11 +13,11 @@ use iced::advanced::{renderer, text, Clipboard};
 use iced::widget::{button, text_editor};
 use iced::{
     alignment, keyboard, mouse, window, Background, Border, Event, Font, Pixels, Point, Rectangle,
-    Size, Theme,
+    Size, Theme, Vector,
 };
 
 use super::find::find_shortcut;
-use super::geometry::scroll_viewer_by;
+use super::geometry::{scroll_viewer_by, scroll_viewer_horizontally};
 use super::render::text_bounds;
 use super::selection::{self, apply_key_binding};
 use super::{
@@ -57,12 +58,11 @@ pub(super) struct Notice {
     until: Instant,
 }
 
-/// 一次事件处理的结果：是否捕获、要不要重绘、有没有滚轮增量要交给宿主的平滑滚动。
+/// 一次事件处理的结果：是否捕获、要不要重绘。
 #[derive(Debug, Default)]
 pub(super) struct EventOutcome {
     pub(super) captured: bool,
     pub(super) redraw: Option<window::RedrawRequest>,
-    pub(super) wheel: Option<mouse::ScrollDelta>,
 }
 
 impl EventOutcome {
@@ -70,7 +70,6 @@ impl EventOutcome {
         Self {
             captured: true,
             redraw: Some(window::RedrawRequest::NextFrame),
-            wheel: None,
         }
     }
 
@@ -78,7 +77,6 @@ impl EventOutcome {
         Self {
             captured: false,
             redraw: Some(window::RedrawRequest::NextFrame),
-            wheel: None,
         }
     }
 }
@@ -153,7 +151,7 @@ pub(super) fn handle_event(
             }
         }
         Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
-            // Ctrl+滚轮缩放字号，其余交给宿主的平滑滚动管线。
+            // Ctrl+滚轮缩放字号，其余在查看器里惯性滚动。
             if state.modifiers.command() {
                 let upward = match delta {
                     mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => {
@@ -170,11 +168,8 @@ pub(super) fn handle_event(
                     .push(TextViewerEvent::ChangeView(change));
                 return EventOutcome::captured();
             }
-            EventOutcome {
-                captured: true,
-                redraw: None,
-                wheel: Some(*delta),
-            }
+            wheel_scroll(state, document, *delta);
+            EventOutcome::captured()
         }
         Event::Keyboard(keyboard::Event::KeyPressed {
             key,
@@ -291,21 +286,25 @@ fn drag_selection(
     }
 }
 
-/// 每帧：拖滑块跟到指针最后的位置、自动滚动推进一步、提示到点消失。
+/// 每帧：拖滑块跟到指针最后的位置、滚轮惯性和自动滚动推进一步、提示到点消失。
 fn tick(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     now: Instant,
 ) -> EventOutcome {
     scrollbar::follow_thumb_drag(state, document);
-    let mut outcome = EventOutcome::default();
+    let mut outcome = EventOutcome {
+        redraw: advance_inertia(state, document, now),
+        ..EventOutcome::default()
+    };
     if let Some(notice) = &state.notice {
-        if now >= notice.until {
+        let redraw = if now >= notice.until {
             state.notice = None;
-            outcome.redraw = Some(window::RedrawRequest::NextFrame);
+            window::RedrawRequest::NextFrame
         } else {
-            outcome.redraw = Some(window::RedrawRequest::At(notice.until));
-        }
+            window::RedrawRequest::At(notice.until)
+        };
+        outcome.redraw = Some(outcome.redraw.map_or(redraw, |earlier| earlier.min(redraw)));
     }
     if state.autoscroll_velocity == 0.0 || !state.drag_active {
         return outcome;
@@ -319,6 +318,57 @@ fn tick(
     state.autoscroll_tick = Some(now);
     autoscroll_step(state, document, step);
     EventOutcome::redraw()
+}
+
+/// 滚轮：一格一格的进惯性，在每帧的 tick 里推进；触控板给的像素直接滚。
+fn wheel_scroll(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    delta: mouse::ScrollDelta,
+) {
+    let Some(wheel) =
+        wheel_delta_for_axis(SmoothScrollAxis::Vertical, state.modifiers.shift(), delta)
+    else {
+        return;
+    };
+    match wheel.mode {
+        WheelScrollMode::MosAnimated => state.inertia.push(wheel.delta, Instant::now()),
+        WheelScrollMode::Direct => {
+            state.inertia.stop();
+            scroll_by_pixels(state, document, Vector::new(wheel.delta.x, wheel.delta.y));
+        }
+    }
+}
+
+/// 推进滚轮惯性；返回什么时候再画。滚不动了（到边）惯性就停。
+fn advance_inertia(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    now: Instant,
+) -> Option<window::RedrawRequest> {
+    if !state.inertia.is_active() {
+        return None;
+    }
+    let step = state.inertia.step(now);
+    if step.scroll != Vector::ZERO && !scroll_by_pixels(state, document, step.scroll) {
+        state.inertia.stop();
+        return None;
+    }
+    step.next
+}
+
+fn scroll_by_pixels(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    delta: Vector,
+) -> bool {
+    let horizontal = scroll_viewer_horizontally(state, delta.x);
+    let vertical = scroll_viewer_by(state, document, delta.y);
+    if vertical {
+        state.drag_fraction = None;
+        refresh_retained_content(state, document);
+    }
+    horizontal || vertical
 }
 
 /// 按当前速度滚一步，再把光标放到边缘处的那一行。

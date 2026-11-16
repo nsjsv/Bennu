@@ -136,7 +136,6 @@ use crate::app::runtime::{
 };
 use crate::app::sidebar_bookmarks::SidebarBookmarkMotionState;
 use crate::app::sidebar_resize::SidebarResizeDrag;
-use crate::app::smooth_scroll::MosScrollState;
 use crate::app::split_resize::SplitResizeDrag;
 use crate::app::tabs::{TabAnimationState, TabBarReveal};
 use crate::app::windows::{
@@ -421,7 +420,6 @@ pub(crate) struct FileBrowser {
     pending_browser_session_save: bool,
     browser_session_saves_in_flight: usize,
     last_browser_session_save: Option<std::time::Instant>,
-    smooth_scroll: MosScrollState,
     file_drag_edge_scroll: Option<file_drag_edge_scroll::FileDragEdgeScroll>,
     next_tab_id: usize,
     next_pane_id: u64,
@@ -482,7 +480,6 @@ impl FileBrowser {
         // 动画帧改变布局（终端面板高度、标签栏出现、列表折叠、图标展开），
         // 逐帧把视口收进新内容。
         Task::batch([
-            self.advance_smooth_scroll_animation(),
             self.advance_file_drag_edge_scroll(),
             self.advance_address_bar_transition(),
             self.advance_tab_bar_reveal_animation(),
@@ -796,7 +793,6 @@ impl FileBrowser {
             pending_browser_session_save: false,
             browser_session_saves_in_flight: 0,
             last_browser_session_save: None,
-            smooth_scroll: MosScrollState::default(),
             file_drag_edge_scroll: None,
             next_tab_id: 1,
             next_pane_id: 1,
@@ -966,7 +962,6 @@ impl FileBrowser {
             .preview_engine
             .preview_window_bottom_controls
             .is_animating()
-            || self.smooth_scroll_animation_is_active()
             || self.file_drag_edge_scroll_is_active()
             || self.address_bar_transition_is_active()
             || self.tab_bar_reveal_animation_is_active()

@@ -5,7 +5,7 @@ use iced::widget::{container, mouse_area, row, scrollable, Column, Row, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
-use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     column_browser_style, column_panel_style, column_resize_divider_style,
@@ -153,23 +153,23 @@ pub(crate) fn column_browser_view<'a>(
         columns = columns.push(end_scroll_spacer(scroll_spacer_width));
     }
     let scrollbar_region = ScrollbarRegion::ColumnBrowser(pane.id);
-    let column_content: Element<'_, Message> = scrollable(smooth_scroll_content_with_shift(
-        columns,
-        scrollbar_region.clone(),
-        browser.smooth_scroll_shift_pressed(),
-    ))
-    .id(column_browser_scroll_id(pane.id))
-    .direction(enhanced_horizontal_scrollbar_direction())
-    .style(enhanced_scrollbar_style)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .on_scroll(move |viewport: scrollable::Viewport| {
-        let offset = viewport.absolute_offset();
-        let bounds = viewport.bounds();
-        Message::ColumnBrowserScrolled(pane.id, offset.x, bounds.width)
-    })
-    .into();
-    let column_content = enhanced_scrollbar(column_content, ScrollbarAxis::Horizontal);
+    let smooth = smooth_scroll(&scrollbar_region);
+    let column_content: Element<'_, Message> = scrollable(smooth.capture(columns))
+        .id(column_browser_scroll_id(pane.id))
+        .direction(enhanced_horizontal_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .on_scroll(move |viewport: scrollable::Viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::ColumnBrowserScrolled(pane.id, offset.x, bounds.width)
+        })
+        .into();
+    let column_content = smooth.drive(enhanced_scrollbar(
+        column_content,
+        ScrollbarAxis::Horizontal,
+    ));
 
     pane_blank_area(
         &pane,
@@ -293,22 +293,19 @@ fn directory_column<'a>(
         directory: directory.to_path_buf(),
     };
     let scroll_directory = directory.to_path_buf();
-    let column_scroll = scrollable(smooth_scroll_content_with_shift(
-        content,
-        scrollbar_region.clone(),
-        browser.smooth_scroll_shift_pressed(),
-    ))
-    .id(smooth_scroll_id(&scrollbar_region))
-    .direction(enhanced_vertical_scrollbar_direction())
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .style(enhanced_scrollbar_style)
-    .on_scroll(move |viewport: scrollable::Viewport| {
-        let offset = viewport.absolute_offset();
-        let bounds = viewport.bounds();
-        Message::ColumnScrolled(pane.id, scroll_directory.clone(), offset.y, bounds.height)
-    });
-    let column_scroll = enhanced_scrollbar(column_scroll, ScrollbarAxis::Vertical);
+    let smooth = smooth_scroll(&scrollbar_region);
+    let column_scroll = scrollable(smooth.capture(content))
+        .id(smooth_scroll_id(&scrollbar_region))
+        .direction(enhanced_vertical_scrollbar_direction())
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(enhanced_scrollbar_style)
+        .on_scroll(move |viewport: scrollable::Viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::ColumnScrolled(pane.id, scroll_directory.clone(), offset.y, bounds.height)
+        });
+    let column_scroll = smooth.drive(enhanced_scrollbar(column_scroll, ScrollbarAxis::Vertical));
 
     let column = container(column_scroll)
         .width(Length::Fixed(browser.column_width(column_index)))

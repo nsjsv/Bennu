@@ -10,7 +10,7 @@ use bennu_theme::address_bar::{
 };
 
 use crate::app::panes::BrowserPaneView;
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     address_bar_style, faded_button_style, faded_text_input_style, path_suggestion_item_style,
@@ -207,7 +207,8 @@ fn breadcrumb_scrollable<'a>(
         active_drop_target,
         registers_drop_targets,
     );
-    let scroller = scrollable(smooth_scroll_content(breadcrumbs, region.clone()))
+    let smooth = smooth_scroll(&region);
+    let scroller = scrollable(smooth.capture(breadcrumbs))
         .id(smooth_scroll_id(&region))
         // 面包屑不画滚动条：路径下面多一根线只是噪音，滚轮照样横向滚动。
         .direction(scrollable::Direction::Horizontal(
@@ -216,11 +217,11 @@ fn breadcrumb_scrollable<'a>(
         .width(Length::Fill)
         .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
         .on_scroll(|_| Message::AddressBarScrolled);
-    if registers_drop_targets {
+    smooth.drive(if registers_drop_targets {
         track_breadcrumb_viewport(scroller, pane_id)
     } else {
         scroller.into()
-    }
+    })
 }
 
 fn elastic_breadcrumbs<'a>(

@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use bennu_theme::smooth_scroll::MosInertia;
 use iced::advanced::mouse::{click, Click};
 use iced::advanced::text::{Paragraph, Renderer as TextRenderer};
 use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset};
@@ -56,7 +57,6 @@ pub fn text_preview_viewer<'a, Message, Renderer>(
     view: TextViewSettings,
     palette: HighlightPalette,
     id: widget::Id,
-    on_wheel: impl Fn(mouse::ScrollDelta) -> Message + 'a,
     on_event: impl Fn(TextViewerEvent) -> Message + 'a,
 ) -> Element<'a, Message, Theme, Renderer>
 where
@@ -72,7 +72,6 @@ where
         document,
         view,
         palette,
-        on_wheel: Box::new(on_wheel),
         on_event: Box::new(on_event),
     })
 }
@@ -82,7 +81,6 @@ struct TextPreviewViewer<'a, Message> {
     document: &'a TextPreviewDocument,
     view: TextViewSettings,
     palette: HighlightPalette,
-    on_wheel: Box<dyn Fn(mouse::ScrollDelta) -> Message + 'a>,
     on_event: Box<dyn Fn(TextViewerEvent) -> Message + 'a>,
 }
 
@@ -135,6 +133,8 @@ struct TextPreviewViewerState {
     thumb_drag: Option<scrollbar::ThumbDrag>,
     /// 拖滑块时滑块跟手画在这个比例上，直到落点的内容到了。
     drag_fraction: Option<f32>,
+    /// 滚轮惯性：查看器自己就是滚动区，在每帧的 tick 里推进，不经过宿主。
+    inertia: MosInertia,
     reported_viewport: Option<TextViewport>,
     pending_events: Vec<TextViewerEvent>,
 }
@@ -254,9 +254,6 @@ where
         }
         if let Some(redraw) = outcome.redraw {
             shell.request_redraw_at(redraw);
-        }
-        if let Some(delta) = outcome.wheel {
-            shell.publish((self.on_wheel)(delta));
         }
         queue_viewport_report(state, self.document);
         for event in state.pending_events.drain(..) {
@@ -536,7 +533,8 @@ fn row_fully_visible(
     })
 }
 
-/// 可见范围或光标变了就排队一条报告（在 update 里发出）。
+/// 可见范围或光标变了就排队一条报告（在 update 里发出）。滚动途中（惯性、拖滑块、拖选
+/// 自动滚动）只在引擎用得上时报：每条报告都是一条应用消息，会让所有窗口重建重画。
 fn queue_viewport_report(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
     let rows = document.rows();
     let visible = visible_rows(state, document);
@@ -549,7 +547,18 @@ fn queue_viewport_report(state: &mut TextPreviewViewerState, document: &TextPrev
         at_bottom: is_at_bottom(state, document),
         cursor: state.cursor,
     };
-    if state.reported_viewport != Some(viewport) {
+    if state.reported_viewport == Some(viewport) {
+        return;
+    }
+    let scrolling = state.inertia.is_active()
+        || state.thumb_drag.is_some()
+        || (state.drag_active && state.autoscroll_velocity != 0.0);
+    let due = !scrolling
+        || state.reported_viewport.is_none_or(|reported| {
+            reported.cursor != viewport.cursor || reported.at_bottom != viewport.at_bottom
+        })
+        || document.wants_viewport(viewport);
+    if due {
         state.reported_viewport = Some(viewport);
         state
             .pending_events

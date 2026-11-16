@@ -3,7 +3,7 @@ use iced::widget::{
 };
 use iced::{Alignment, Element, Length, Padding};
 
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::transfer::TransferMessage;
 use crate::app::FileBrowser;
 use crate::app::SidebarFixedEntry;
@@ -112,12 +112,16 @@ pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
     sidebar = append_sidebar_devices(sidebar, browser);
 
     let scrollbar_region = ScrollbarRegion::Sidebar;
-    let sidebar_scroller = scrollable(smooth_scroll_content(sidebar, scrollbar_region.clone()))
+    let smooth = smooth_scroll(&scrollbar_region);
+    let sidebar_scroller = scrollable(smooth.capture(sidebar))
         .id(smooth_scroll_id(&scrollbar_region))
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
         .height(Length::Fill);
-    let sidebar_scroller = enhanced_scrollbar(sidebar_scroller, ScrollbarAxis::Vertical);
+    let sidebar_scroller = smooth.drive(enhanced_scrollbar(
+        sidebar_scroller,
+        ScrollbarAxis::Vertical,
+    ));
     let sidebar_content_panel = container(sidebar_scroller)
         .width(Length::Fill)
         .height(Length::Fill);

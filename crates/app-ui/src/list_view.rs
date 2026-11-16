@@ -5,7 +5,7 @@ use iced::widget::{container, mouse_area, row, scrollable, Column, Row, Space, S
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
-use crate::app::smooth_scroll::{smooth_scroll_content_with_shift, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, icon_svg_style,
@@ -267,22 +267,19 @@ pub(crate) fn list_browser_view<'a>(
         }
     }
     let scrollbar_region = ScrollbarRegion::PaneList(pane.id);
-    let list_scroll = scrollable(smooth_scroll_content_with_shift(
-        rows,
-        scrollbar_region.clone(),
-        browser.smooth_scroll_shift_pressed(),
-    ))
-    .id(smooth_scroll_id(&scrollbar_region))
-    .direction(enhanced_vertical_scrollbar_direction())
-    .style(enhanced_scrollbar_style)
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .on_scroll(move |viewport: scrollable::Viewport| {
-        let offset = viewport.absolute_offset();
-        let bounds = viewport.bounds();
-        Message::ListScrolled(pane.id, offset.y, bounds)
-    });
-    let list_scroll = enhanced_scrollbar(list_scroll, ScrollbarAxis::Vertical);
+    let smooth = smooth_scroll(&scrollbar_region);
+    let list_scroll = scrollable(smooth.capture(rows))
+        .id(smooth_scroll_id(&scrollbar_region))
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .on_scroll(move |viewport: scrollable::Viewport| {
+            let offset = viewport.absolute_offset();
+            let bounds = viewport.bounds();
+            Message::ListScrolled(pane.id, offset.y, bounds)
+        });
+    let list_scroll = smooth.drive(enhanced_scrollbar(list_scroll, ScrollbarAxis::Vertical));
 
     let pane_surface: Element<'a, Message> = container(list_scroll)
         .padding(LIST_CONTENT_PADDING)

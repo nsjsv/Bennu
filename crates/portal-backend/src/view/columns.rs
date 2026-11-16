@@ -24,7 +24,7 @@ use crate::picker_session::{
     PickerSession, SessionMessage, SessionScrollRegion, COLUMNS_SCALE, MIN_LANE_WIDTH,
 };
 
-use super::smooth_scroll_region;
+use super::smooth_scroll_for;
 
 /// 行内图标/缩略图边长：与列表行同尺寸（prd：行内小缩略图同列表）。
 const LANE_ICON_EDGE: f32 = 18.0;
@@ -64,18 +64,15 @@ pub(super) fn columns_body(
     }
 
     let region = SessionScrollRegion::ColumnsRail;
-    let scroller = scrollable(smooth_scroll_region(
-        rail,
-        region,
-        session.scroll_shift_pressed(),
-    ))
-    .id(scroll_id(session.request_path(), region))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .direction(enhanced_horizontal_scrollbar_direction())
-    .style(enhanced_scrollbar_style)
-    .on_scroll(scrollbar_on_scroll(region));
-    enhanced_scrollbar(scroller, ScrollbarAxis::Horizontal)
+    let smooth = smooth_scroll_for(region);
+    let scroller = scrollable(smooth.capture(rail))
+        .id(scroll_id(session.request_path(), region))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .direction(enhanced_horizontal_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .on_scroll(scrollbar_on_scroll(region));
+    smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Horizontal))
 }
 
 /// 空栏占位：无行、无交互，仅撑出等宽栏面（主软件 empty_column 同构）。
@@ -104,18 +101,15 @@ fn lane_view(
     }
 
     let region = SessionScrollRegion::ColumnsLane(lane);
-    let scroller = scrollable(smooth_scroll_region(
-        content,
-        region,
-        session.scroll_shift_pressed(),
-    ))
-    .id(scroll_id(session.request_path(), region))
-    .width(Length::Fill)
-    .height(Length::Fill)
-    .direction(enhanced_vertical_scrollbar_direction())
-    .style(enhanced_scrollbar_style)
-    .on_scroll(scrollbar_on_scroll(region));
-    let scrolled = enhanced_scrollbar(scroller, ScrollbarAxis::Vertical);
+    let smooth = smooth_scroll_for(region);
+    let scroller = scrollable(smooth.capture(content))
+        .id(scroll_id(session.request_path(), region))
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .direction(enhanced_vertical_scrollbar_direction())
+        .style(enhanced_scrollbar_style)
+        .on_scroll(scrollbar_on_scroll(region));
+    let scrolled = smooth.drive(enhanced_scrollbar(scroller, ScrollbarAxis::Vertical));
     container(scrolled)
         .width(Length::Fixed(lane_width.max(MIN_LANE_WIDTH)))
         .height(Length::Fill)

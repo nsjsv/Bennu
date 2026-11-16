@@ -2,7 +2,7 @@ use iced::widget::{button, container, mouse_area, row, scrollable, tooltip, Colu
 use iced::{Alignment, Element, Length};
 
 use super::{themed_icon, IconTone};
-use crate::app::smooth_scroll::{smooth_scroll_content, smooth_scroll_id};
+use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
     context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
@@ -93,12 +93,13 @@ fn search_history_panel(browser: &FileBrowser) -> Element<'_, Message> {
     );
 
     let region = ScrollbarRegion::SearchHistory;
-    let history = scrollable(smooth_scroll_content(history, region.clone()))
+    let smooth = smooth_scroll(&region);
+    let history = scrollable(smooth.capture(history))
         .id(smooth_scroll_id(&region))
         .direction(enhanced_vertical_scrollbar_direction())
         .style(enhanced_scrollbar_style)
         .height(Length::Shrink);
-    let history = enhanced_scrollbar(history, ScrollbarAxis::Vertical);
+    let history = smooth.drive(enhanced_scrollbar(history, ScrollbarAxis::Vertical));
 
     mouse_area(
         container(history)

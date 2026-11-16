@@ -106,13 +106,16 @@ where
                 .width(Length::Fill),
         );
     }
-    let scroller = scroll
-        .scrollable(content.into())
-        .direction(enhanced_vertical_scrollbar_direction())
-        .style(enhanced_scrollbar_style)
-        .height(Length::Fill)
-        .width(Length::Fill);
-    enhanced_scrollbar(scroller, ScrollbarAxis::Vertical)
+    scroll.scrollable(content.into(), |scroller| {
+        enhanced_scrollbar(
+            scroller
+                .direction(enhanced_vertical_scrollbar_direction())
+                .style(enhanced_scrollbar_style)
+                .height(Length::Fill)
+                .width(Length::Fill),
+            ScrollbarAxis::Vertical,
+        )
+    })
 }
 
 fn block_view<'a, Message: 'a>(block: &'a MarkdownBlock, look: Look<'a>) -> Element<'a, Message> {

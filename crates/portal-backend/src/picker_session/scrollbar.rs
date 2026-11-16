@@ -1,5 +1,5 @@
-//! 会话级滚动：Mos 惯性（复用 `bennu_theme::smooth_scroll`）与业务用的
-//! 视口缓存（键盘揭示、缩略图可见区间、多栏栏宽）。滚动条本身由
+//! 会话级滚动：业务用的视口缓存（键盘揭示、缩略图可见区间、多栏栏宽）。滚轮惯性在
+//! 滚动控件里自己推进（`bennu_theme::smooth_scroll`），不经过会话。滚动条本身由
 //! `bennu_theme::scrollbar` 按当帧布局常驻绘制，会话不再持有任何显隐状态。
 //!
 //! 多窗口约束：iced 0.14 的 widget 操作（operate/scroll_by）作用于进程
@@ -7,12 +7,10 @@
 //! 才能保证只命中本窗口的滚动容器。
 
 use bennu_theme::scrollbar::scrollbar_layout_probe;
-use bennu_theme::smooth_scroll::{
-    wheel_delta_for_axis, MosScrollState, SmoothScrollAxis, WheelScrollMode,
-};
+use bennu_theme::smooth_scroll::SmoothScrollAxis;
 use iced::advanced::widget as advanced_widget;
 use iced::widget::scrollable;
-use iced::{mouse, Task};
+use iced::Task;
 
 use super::{PickerSession, PickerViewMode, SessionMessage};
 
@@ -29,8 +27,6 @@ pub(crate) enum SessionScrollRegion {
     ColumnsLane(usize),
 }
 
-/// 会话滚轮惯性状态机：区域枚举由本模块钉死。
-pub(crate) type SmoothScrollState = MosScrollState<SessionScrollRegion>;
 /// 区域 → 滚动轴向：列表/侧栏/多栏栏竖向；面包屑与多栏栏容器是横向
 /// 滚动条，主滚轮（竖向滚动）换算为横向增量，与主软件地址栏同语义。
 pub(crate) fn scroll_axis(region: SessionScrollRegion) -> SmoothScrollAxis {
@@ -74,8 +70,7 @@ impl SessionMessage {
     pub(crate) fn is_scroll_message(&self) -> bool {
         matches!(
             self,
-            SessionMessage::WheelScrolled { .. }
-                | SessionMessage::ScrollbarLayoutVerified { .. }
+            SessionMessage::ScrollbarLayoutVerified { .. }
                 | SessionMessage::ScrollbarViewportChanged { .. }
         )
     }
@@ -105,15 +100,6 @@ pub(crate) fn scrollbar_on_scroll(
 }
 
 impl PickerSession {
-    /// 滚动轴向换算用的 shift：视图包装层与处理端必须读同一来源。
-    pub(crate) fn scroll_shift_pressed(&self) -> bool {
-        self.shift_pressed
-    }
-
-    pub(crate) fn set_scroll_shift_pressed(&mut self, pressed: bool) {
-        self.shift_pressed = pressed;
-    }
-
     pub(crate) fn scrollbar_viewport_for(
         &self,
         region: &SessionScrollRegion,
@@ -138,19 +124,15 @@ impl PickerSession {
         if let Some(viewport) = self.scroll_viewports.get_mut(&region) {
             viewport.offset_y = offset_y;
         }
-        self.smooth_scroll.stop();
     }
 
     /// 滚动类消息入口（main 层以 `is_scroll_message` 把关后路由）：
-    /// 处理滚轮、探针回信与视口回传。
+    /// 处理探针回信与视口回传。
     pub(crate) fn handle_scroll_message(
         &mut self,
         message: SessionMessage,
     ) -> Vec<Task<SessionMessage>> {
         match message {
-            SessionMessage::WheelScrolled { region, delta } => {
-                self.handle_wheel_scrolled(region, delta)
-            }
             SessionMessage::ScrollbarLayoutVerified { region, viewport } => {
                 self.handle_scrollbar_layout_verified(region, viewport)
             }
@@ -167,35 +149,6 @@ impl PickerSession {
             }
             // 非滚动消息不会进入本入口（is_scroll_message 把关）；仅为穷尽。
             _ => Vec::new(),
-        }
-    }
-
-    /// 滚轮输入：Lines 走 Mos 惯性累积；Pixels（触控板）
-    /// 停止惯性直接位移。portal 无密度档位语义，Ctrl+滚轮按普通滚动处理。
-    fn handle_wheel_scrolled(
-        &mut self,
-        region: SessionScrollRegion,
-        delta: mouse::ScrollDelta,
-    ) -> Vec<Task<SessionMessage>> {
-        let Some(wheel) = wheel_delta_for_axis(scroll_axis(region), self.shift_pressed, delta)
-        else {
-            return Vec::new();
-        };
-        match wheel.mode {
-            WheelScrollMode::MosAnimated => {
-                self.smooth_scroll.push_wheel_delta(region, wheel.delta);
-                Vec::new()
-            }
-            WheelScrollMode::Direct => {
-                self.smooth_scroll.stop();
-                vec![iced::widget::operation::scroll_by(
-                    scroll_id(&self.request_path, region),
-                    scrollable::AbsoluteOffset {
-                        x: wheel.delta.x,
-                        y: wheel.delta.y,
-                    },
-                )]
-            }
         }
     }
 
@@ -252,36 +205,12 @@ impl PickerSession {
         tasks
     }
 
-    fn advance_smooth_scroll(&mut self) -> Task<SessionMessage> {
-        // 克隆命名空间：next_frame_delta 独占借用状态机，闭包不能再借 self。
-        let request_path = self.request_path.clone();
-        let scroll_task = self
-            .smooth_scroll
-            .next_frame_delta()
-            .map(|(region, delta)| {
-                iced::widget::operation::scroll_by(
-                    scroll_id(&request_path, region),
-                    scrollable::AbsoluteOffset {
-                        x: delta.x,
-                        y: delta.y,
-                    },
-                )
-            });
-
-        if !self.smooth_scroll.is_active() {
-            self.smooth_scroll.stop();
-        }
-
-        scroll_task.unwrap_or_else(Task::none)
-    }
-
-    /// 帧时钟推进：展开动画 + 惯性滚动位移；产出的 Task 由 main 层
-    /// 按窗口路由后批量执行。
+    /// 帧时钟推进：展开动画；产出的 Task 由 main 层按窗口路由后批量执行。
     pub(crate) fn advance_frame(&mut self) -> Vec<Task<SessionMessage>> {
         // 地址栏渐变过渡不产出 Task，只需在帧尾清理已播完的退出过渡。
         self.advance_address_bar_transition();
         let expansion_frame = self.advance_animations();
-        let mut tasks = vec![self.advance_smooth_scroll()];
+        let mut tasks = Vec::new();
         // 收起播完触发结构性收缩后，行数/内容高度骤变：立刻自愈视口缓存。
         if expansion_frame.collapse_finished {
             tasks.extend(self.scrollbar_layout_probe_tasks());
@@ -354,42 +283,6 @@ mod tests {
             session.scrollbar_viewport_for(&SessionScrollRegion::List),
             Some(fitting_viewport())
         );
-    }
-
-    #[test]
-    fn line_wheel_engages_inertia_and_pixel_wheel_stops_it() {
-        let mut session = test_session();
-
-        session.handle_wheel_scrolled(
-            SessionScrollRegion::List,
-            mouse::ScrollDelta::Lines { x: 0.0, y: -1.0 },
-        );
-        assert!(session.smooth_scroll.is_active());
-        assert!(session.is_animating());
-
-        session.handle_wheel_scrolled(
-            SessionScrollRegion::List,
-            mouse::ScrollDelta::Pixels { x: 0.0, y: -30.0 },
-        );
-        assert!(!session.smooth_scroll.is_active());
-    }
-
-    #[test]
-    fn advance_frame_drains_inertia() {
-        let mut session = test_session();
-        session.handle_wheel_scrolled(
-            SessionScrollRegion::List,
-            mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },
-        );
-
-        for _ in 0..200 {
-            if !session.smooth_scroll.is_active() {
-                break;
-            }
-            drop(session.advance_frame());
-        }
-
-        assert!(!session.smooth_scroll.is_active());
     }
 
     #[test]

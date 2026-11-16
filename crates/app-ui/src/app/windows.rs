@@ -290,9 +290,8 @@ impl FileBrowser {
     }
 
     /// 六个分类页与二级页面共用 ScrollbarRegion::Settings 的 scrollable 状态，
-    /// 任何切换都必须归零，否则上一页的滚动偏移和平滑滚动动画会泄漏到新页。
+    /// 任何切换都必须归零，否则上一页的滚动偏移会泄漏到新页（在途的惯性见位置被挪走会自己停）。
     fn reset_settings_detail_scroll(&mut self) -> Task<Message> {
-        self.smooth_scroll.stop();
         iced::widget::operation::scroll_to(
             smooth_scroll_id(&ScrollbarRegion::Settings),
             scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },

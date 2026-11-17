@@ -690,7 +690,7 @@ fn list_entry_cells<'a>(
     icon_tone: FileEntryIconTone,
 ) -> Row<'a, Message> {
     // 元数据解析每行一次，避免随列数重复查找。
-    let metadata = pane.metadata_for_entry(entry);
+    let metadata = entry.metadata();
     let mut row_content = Row::new()
         .spacing(0)
         .align_y(Alignment::Center)
@@ -795,23 +795,25 @@ fn list_placeholder_entry_cell<'a>(
             search_rows::location_cell(entry, &browser.home_dir, geometry, column.width)
         }
         ListColumnKind::Modified => {
-            text_cell(modified_text(&entry.metadata), geometry, column.width)
+            text_cell(modified_text(&entry.metadata()), geometry, column.width)
         }
         ListColumnKind::Size => text_cell(
-            browser.list_directory_size_text(entry, &entry.metadata),
+            browser.list_directory_size_text(entry, &entry.metadata()),
             geometry,
             column.width,
         ),
         ListColumnKind::Kind => text_cell(kind_text(entry), geometry, column.width),
-        ListColumnKind::Owner => text_cell(owner_text(&entry.metadata), geometry, column.width),
-        ListColumnKind::Group => text_cell(group_text(&entry.metadata), geometry, column.width),
+        ListColumnKind::Owner => text_cell(owner_text(&entry.metadata()), geometry, column.width),
+        ListColumnKind::Group => text_cell(group_text(&entry.metadata()), geometry, column.width),
         ListColumnKind::Permissions => {
-            text_cell(permissions_text(&entry.metadata), geometry, column.width)
+            text_cell(permissions_text(&entry.metadata()), geometry, column.width)
         }
         ListColumnKind::Accessed => {
-            text_cell(accessed_text(&entry.metadata), geometry, column.width)
+            text_cell(accessed_text(&entry.metadata()), geometry, column.width)
         }
-        ListColumnKind::Created => text_cell(created_text(&entry.metadata), geometry, column.width),
+        ListColumnKind::Created => {
+            text_cell(created_text(&entry.metadata()), geometry, column.width)
+        }
     }
 }
 
@@ -933,10 +935,10 @@ fn list_directory_toggle<'a>(
     .into()
 }
 fn kind_text(entry: &DirectoryEntry) -> String {
-    match entry.kind {
+    match entry.kind() {
         FileKind::Directory => tr!("Folder"),
         FileKind::File => tr!("File"),
-        FileKind::Symlink if entry.is_broken_symlink => tr!("Broken Link"),
+        FileKind::Symlink if entry.is_broken_symlink() => tr!("Broken Link"),
         FileKind::Symlink => tr!("Link"),
         FileKind::Other => tr!("Other"),
     }
@@ -1057,11 +1059,11 @@ mod tests {
     fn new_metadata_columns_render_placeholder_when_metadata_is_missing() {
         let entry = test_entry(EntryMetadata::default());
 
-        assert_eq!(owner_text(&entry.metadata), "-");
-        assert_eq!(group_text(&entry.metadata), "-");
-        assert_eq!(permissions_text(&entry.metadata), "-");
-        assert_eq!(accessed_text(&entry.metadata), "-");
-        assert_eq!(created_text(&entry.metadata), "-");
+        assert_eq!(owner_text(&entry.metadata()), "-");
+        assert_eq!(group_text(&entry.metadata()), "-");
+        assert_eq!(permissions_text(&entry.metadata()), "-");
+        assert_eq!(accessed_text(&entry.metadata()), "-");
+        assert_eq!(created_text(&entry.metadata()), "-");
     }
 
     #[test]
@@ -1071,7 +1073,7 @@ mod tests {
             ..EntryMetadata::default()
         });
 
-        assert_eq!(permissions_text(&entry.metadata), "rwxr-xr-x (0755)");
+        assert_eq!(permissions_text(&entry.metadata()), "rwxr-xr-x (0755)");
     }
 
     #[test]

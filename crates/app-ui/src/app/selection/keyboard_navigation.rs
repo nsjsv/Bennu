@@ -648,7 +648,7 @@ impl FileBrowser {
     fn reject_oversized_file_preview(&mut self, path: &Path) -> Option<Task<Message>> {
         let entry = self.entry_for_path(path)?;
         let max_bytes = self.preview_file_size_limit_for(path);
-        let file_bytes = entry.metadata.len;
+        let file_bytes = entry.metadata().len;
         if max_bytes == 0 || file_bytes <= max_bytes {
             return None;
         }

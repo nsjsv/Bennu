@@ -62,7 +62,6 @@ impl<'a> IconGridLayout<'a> {
         expansion: Option<&'a IconGridExpansionState>,
     ) -> Self {
         // 大小/日期维度才依赖元数据;名字维度用缺省元数据即可,划分键确定。
-        let metadata_for_entry = |_entry: &DirectoryEntry| EntryMetadata::default();
         let grouping = root_grouping::RootGrouping {
             mode: crate::model::FileGroupingMode::NameInitial,
             direction,
@@ -85,7 +84,6 @@ impl<'a> IconGridLayout<'a> {
             expansion,
             Some(crate::icon_grid_layout::IconGridRootGrouping {
                 grouping: &grouping,
-                metadata_for_entry: &metadata_for_entry,
             }),
         )
     }

@@ -11,7 +11,7 @@ use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortFiel
 use super::*;
 use crate::config::{self, UiLanguage};
 use crate::file_entry_presentation::SelectionRunPosition;
-use crate::model::{BrowserLocation, BrowserPaneId, FileGroupingMode};
+use crate::model::{BrowserLocation, FileGroupingMode};
 use crate::transfer_placeholders::{TransferPlaceholder, TransferSortOptions};
 
 fn file_entry(path: &str, len: u64) -> DirectoryEntry {
@@ -63,14 +63,6 @@ fn grouping(mode: FileGroupingMode, direction: SortDirection) -> root_grouping::
         language: UiLanguage::English,
         now: SystemTime::UNIX_EPOCH,
     }
-}
-
-/// 划分需要一个 pane 解析显示同源元数据;测试条目无 discovery 索引,
-/// metadata_for_entry 回退条目自带元数据,len 键因此确定。
-fn browser_with_grouping(mode: FileGroupingMode) -> crate::app::FileBrowser {
-    let mut config = config::default_user_config();
-    config.file_grouping = mode;
-    crate::app::FileBrowser::new(config).0
 }
 
 fn merged_name(item: &MergedTransferItem<'_>) -> String {
@@ -212,11 +204,9 @@ fn partition_emits_header_counts_and_reverses_sections_on_descending() {
         })
         .collect();
 
-    let browser = browser_with_grouping(FileGroupingMode::NameInitial);
-    let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
     // 划分结果借用划分器与文件段,先绑定再分区避免临时值提前释放。
     let ascending_grouping = grouping(FileGroupingMode::NameInitial, SortDirection::Ascending);
-    let ascending = ascending_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
+    let ascending = ascending_grouping.partition(&files);
     let ascending_titles: Vec<&str> = ascending
         .iter()
         .map(|section| section.descriptor.title.as_str())
@@ -230,7 +220,7 @@ fn partition_emits_header_counts_and_reverses_sections_on_descending() {
 
     // 降序只反转组序列,组内保持输入序(沿用现有排序)。
     let descending_grouping = grouping(FileGroupingMode::NameInitial, SortDirection::Descending);
-    let descending = descending_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
+    let descending = descending_grouping.partition(&files);
     let descending_titles: Vec<&str> = descending
         .iter()
         .map(|section| section.descriptor.title.as_str())
@@ -264,10 +254,8 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
         MergedTransferItem::Placeholder(placeholder),
     ];
 
-    let browser = browser_with_grouping(FileGroupingMode::Size);
-    let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
     let size_grouping = grouping(FileGroupingMode::Size, SortDirection::Ascending);
-    let sections = size_grouping.partition(&files, |entry| pane.metadata_for_entry(entry));
+    let sections = size_grouping.partition(&files);
 
     // 已知尺寸 100/300/700 各成一组;未知尺寸占位归最末兜底组。
     assert_eq!(sections.len(), 3);
@@ -276,6 +264,13 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
         [1, 1, 2]
     );
     assert_eq!(merged_name(sections[2].items[1]), "incoming.bin");
+}
+
+/// 分组开关来自用户设置：按给定模式建一个浏览器。
+fn browser_with_grouping(mode: FileGroupingMode) -> crate::app::FileBrowser {
+    let mut config = config::default_user_config();
+    config.file_grouping = mode;
+    crate::app::FileBrowser::new(config).0
 }
 
 #[test]

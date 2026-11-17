@@ -346,7 +346,7 @@ impl FileBrowser {
         entry: &DirectoryEntry,
         metadata: &EntryMetadata,
     ) -> String {
-        if entry.kind != FileKind::Directory {
+        if entry.kind() != FileKind::Directory {
             if metadata.filesystem_availability != DirectoryMetadataAvailability::Complete {
                 return "-".to_owned();
             }
@@ -421,7 +421,7 @@ impl FileBrowser {
         )
         .into_iter()
         .filter_map(|visible_entry| {
-            (visible_entry.entry.kind == FileKind::Directory).then(|| RenderedListDirectory {
+            (visible_entry.entry.kind() == FileKind::Directory).then(|| RenderedListDirectory {
                 path: visible_entry.entry.path().to_path_buf(),
                 loaded_child_count: pane
                     .expanded_directories
@@ -492,7 +492,7 @@ fn resort_entry_tree_by_displayed_size(
 
     let expanded_paths = entries
         .iter()
-        .filter(|entry| entry.kind == FileKind::Directory)
+        .filter(|entry| entry.kind() == FileKind::Directory)
         .map(|entry| entry.path().to_path_buf())
         .collect::<Vec<_>>();
     for expanded_path in expanded_paths {
@@ -530,8 +530,8 @@ fn compare_entries_by_displayed_size(
     sort_direction: SortDirection,
 ) -> Ordering {
     match (
-        left.kind == FileKind::Directory,
-        right.kind == FileKind::Directory,
+        left.kind() == FileKind::Directory,
+        right.kind() == FileKind::Directory,
     ) {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,
@@ -553,9 +553,9 @@ fn compare_file_sizes(
     sort_direction: SortDirection,
 ) -> Ordering {
     apply_sort_direction(
-        left.metadata
+        left.metadata()
             .len
-            .cmp(&right.metadata.len)
+            .cmp(&right.metadata().len)
             .then_with(|| compare_entry_names(left, right)),
         sort_direction,
     )
@@ -649,7 +649,7 @@ fn collect_list_directory_paths(
     paths: &mut Vec<std::path::PathBuf>,
 ) {
     for entry in entries {
-        if entry.kind != FileKind::Directory {
+        if entry.kind() != FileKind::Directory {
             continue;
         }
 

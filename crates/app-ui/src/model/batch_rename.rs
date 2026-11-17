@@ -903,7 +903,7 @@ impl BatchRenameSource {
         Ok(Self {
             path: entry.path().to_path_buf(),
             source_name_text: source_name_text.to_owned(),
-            modified: entry.metadata.modified,
+            modified: entry.metadata().modified,
         })
     }
 }

@@ -1,8 +1,11 @@
 use crate::archive_extraction::is_supported_archive_path;
-use crate::media::{media_by_name, MediaByName};
+use crate::directory_metadata::DirectoryMetadataState;
+use crate::entry_record::EntryRecord;
+use crate::media::MediaByName;
 use std::ffi::{OsStr, OsString};
+use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,16 +107,16 @@ mod tests {
         )
     }
 
-    /// 类别问一次就记在条目上，克隆（列表快照）带着它；记没记不影响条目相等。
+    /// 类别问一次就记在共享记录里，克隆（列表快照）指向同一份；记没记不影响条目相等。
     #[test]
-    fn media_by_name_is_inferred_once_and_travels_with_clones() {
+    fn media_by_name_is_inferred_once_and_shared_by_clones() {
         let entry = file_entry("/workspace/photo.png");
-        assert_eq!(entry.media_by_name.0.get(), None);
+        let clone = entry.clone();
 
         let kind = MediaByName::Image(crate::ImageKind::Raster(crate::RasterSource::Picture));
         assert_eq!(entry.media_by_name(), kind);
-        assert_eq!(entry.media_by_name.0.get(), Some(&kind));
-        assert_eq!(entry.clone().media_by_name.0.get(), Some(&kind));
+        assert!(Arc::ptr_eq(&entry.record, &clone.record));
+        assert_eq!(clone.media_by_name(), kind);
         assert_eq!(entry, file_entry("/workspace/photo.png"));
     }
 
@@ -132,35 +135,14 @@ mod tests {
     }
 }
 
-/// 按名字推断的类别记在条目上、跟着 `path` 走，所以 `path`、`name` 只能经构造和
-/// [`DirectoryEntry::relocate`] 改。
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// 条目句柄：路径、名字和文件信息都在共享的 [`EntryRecord`] 里（为什么只存一份见那里），
+/// 克隆只加引用计数。补上的文件信息写进那一份，这里读到的总是最新的。
+#[derive(Clone)]
 pub struct DirectoryEntry {
-    path: PathBuf,
-    name: OsString,
-    pub kind: FileKind,
-    pub metadata: EntryMetadata,
-    pub is_hidden: bool,
-    pub is_symlink: bool,
-    pub is_broken_symlink: bool,
-    pub discovery_index: Option<usize>,
-    media_by_name: MediaByNameMemo,
+    record: Arc<EntryRecord>,
+    /// 在所属目录扫描列表里的位置；不是扫描来的条目（搜索命中等）没有。
+    discovery_index: Option<u32>,
 }
-
-/// 界面每帧都要问每个可见条目的类别（能不能出缩略图），按名字查一次类型库要几微秒，
-/// 所以第一次问起时算、记在条目上。不在列目录时就算：大目录里大部分条目从不显示。
-/// 条目快照在线程间共享，所以用 `OnceLock`。
-#[derive(Debug, Clone, Default)]
-struct MediaByNameMemo(OnceLock<MediaByName>);
-
-/// 类别完全由路径决定，比较条目时路径已经比过了；算没算过不算区别。
-impl PartialEq for MediaByNameMemo {
-    fn eq(&self, _: &Self) -> bool {
-        true
-    }
-}
-
-impl Eq for MediaByNameMemo {}
 
 impl DirectoryEntry {
     pub fn new(
@@ -171,7 +153,7 @@ impl DirectoryEntry {
         is_symlink: bool,
         is_broken_symlink: bool,
     ) -> Self {
-        let name = entry_name(&path);
+        let name = path.file_name().unwrap_or(path.as_os_str()).to_os_string();
         Self::with_file_name(
             path,
             name,
@@ -192,7 +174,7 @@ impl DirectoryEntry {
         is_symlink: bool,
         is_broken_symlink: bool,
     ) -> Self {
-        Self {
+        Self::from_record(Arc::new(EntryRecord::from_metadata(
             path,
             name,
             kind,
@@ -200,46 +182,139 @@ impl DirectoryEntry {
             is_hidden,
             is_symlink,
             is_broken_symlink,
+        )))
+    }
+
+    pub(crate) fn from_record(record: Arc<EntryRecord>) -> Self {
+        Self {
+            record,
             discovery_index: None,
-            media_by_name: MediaByNameMemo::default(),
         }
     }
 
     pub fn with_discovery_index(mut self, index: usize) -> Self {
-        self.discovery_index = Some(index);
+        self.discovery_index =
+            Some(u32::try_from(index).expect("a directory has fewer than 2^32 entries"));
         self
     }
 
+    pub fn discovery_index(&self) -> Option<usize> {
+        self.discovery_index.map(|index| index as usize)
+    }
+
+    /// 所属目录的扫描列表不要了（改名迁移后、换目录时）：序号不再指向任何东西。
+    pub fn detach_from_discovery(&mut self) {
+        self.discovery_index = None;
+    }
+
     pub fn path(&self) -> &Path {
-        &self.path
+        self.record.path()
     }
 
     pub fn name(&self) -> &OsStr {
-        &self.name
+        self.record.name()
     }
 
-    /// 换到新路径（改名、移动）：名字和按名字推断的类别跟着换。
+    pub fn kind(&self) -> FileKind {
+        self.record.kind
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.record.is_hidden
+    }
+
+    pub fn is_symlink(&self) -> bool {
+        self.record.is_symlink
+    }
+
+    pub fn is_broken_symlink(&self) -> bool {
+        self.record.is_broken_symlink()
+    }
+
+    /// 文件大小，不复制别的信息（排序、汇总每次比较都要读）；还没补或拿不到时是 0。
+    pub fn size(&self) -> u64 {
+        match self.record.filesystem_metadata() {
+            DirectoryMetadataState::Complete(metadata) => metadata.len,
+            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => 0,
+        }
+    }
+
+    /// 修改时间，用法同 [`Self::size`]；还没补或拿不到时是 `None`。
+    pub fn modified(&self) -> Option<SystemTime> {
+        match self.record.filesystem_metadata() {
+            DirectoryMetadataState::Complete(metadata) => metadata.modified,
+            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => None,
+        }
+    }
+
+    /// 创建时间，用法同 [`Self::size`]。
+    pub fn created(&self) -> Option<SystemTime> {
+        match self.record.filesystem_metadata() {
+            DirectoryMetadataState::Complete(metadata) => metadata.created,
+            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => None,
+        }
+    }
+
+    /// 访问时间，用法同 [`Self::size`]。
+    pub fn accessed(&self) -> Option<SystemTime> {
+        match self.record.filesystem_metadata() {
+            DirectoryMetadataState::Complete(metadata) => metadata.accessed,
+            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => None,
+        }
+    }
+
+    /// 此刻的文件信息；还在补的部分是 `Pending`。
+    pub fn metadata(&self) -> EntryMetadata {
+        self.record.metadata()
+    }
+
+    /// 换到新路径（改名、移动）：名字和按名字推断的类别跟着换，文件信息照旧。只换自己这个
+    /// 句柄，别的列表里指向原记录的不受影响。
     pub fn relocate(&mut self, path: PathBuf) {
-        self.name = entry_name(&path);
-        self.path = path;
-        self.media_by_name = MediaByNameMemo::default();
+        let name = path.file_name().unwrap_or(path.as_os_str()).to_os_string();
+        self.record = Arc::new(self.record.renamed_to(path, name));
     }
 
     pub fn media_by_name(&self) -> MediaByName {
-        *self
-            .media_by_name
-            .0
-            .get_or_init(|| media_by_name(&self.path))
+        self.record.media_by_name()
     }
 
     /// 条目能否在视图中就地展开:真实目录,或受支持的压缩包(视作
     /// 目录)。列表展开、图标网格 disclosure、视图切换迁移共用这一判定。
     pub fn expands_as_directory(&self) -> bool {
-        self.kind == FileKind::Directory || is_supported_archive_path(&self.path)
+        self.kind() == FileKind::Directory || is_supported_archive_path(self.path())
     }
 }
 
-/// 没有最后一段的路径（`/`）拿整个路径当名字。
-fn entry_name(path: &Path) -> OsString {
-    path.file_name().unwrap_or(path.as_os_str()).to_os_string()
+/// 按内容比：两个句柄指向不同记录、内容一样也算相等。
+impl PartialEq for DirectoryEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.discovery_index == other.discovery_index
+            && (Arc::ptr_eq(&self.record, &other.record)
+                || (self.path() == other.path()
+                    && self.name() == other.name()
+                    && self.kind() == other.kind()
+                    && self.is_hidden() == other.is_hidden()
+                    && self.is_symlink() == other.is_symlink()
+                    && self.is_broken_symlink() == other.is_broken_symlink()
+                    && self.metadata() == other.metadata()))
+    }
+}
+
+impl Eq for DirectoryEntry {}
+
+impl fmt::Debug for DirectoryEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DirectoryEntry")
+            .field("path", &self.path())
+            .field("name", &self.name())
+            .field("kind", &self.kind())
+            .field("metadata", &self.metadata())
+            .field("is_hidden", &self.is_hidden())
+            .field("is_symlink", &self.is_symlink())
+            .field("is_broken_symlink", &self.is_broken_symlink())
+            .field("discovery_index", &self.discovery_index)
+            .finish()
+    }
 }

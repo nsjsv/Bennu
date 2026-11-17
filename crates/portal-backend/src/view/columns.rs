@@ -148,27 +148,28 @@ fn lane_entry_row(
     };
     // 图片行有就绪缩略图时用行内 PNG 替换类型图标（与列表行同尺寸；
     // image 默认 ContentFit::Contain 保持纵横比）。
-    let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && matches!(entry.media_by_name(), MediaByName::Image(_)) {
-            match session.thumbnail_ready(entry.path()) {
-                Some(cached) => image(image::Handle::from_path(&cached.output))
-                    .width(Length::Fixed(LANE_ICON_EDGE))
-                    .height(Length::Fixed(LANE_ICON_EDGE))
-                    .into(),
-                None => file_entry_icon_symbol(entry.kind, entry.name())
-                    .view(LANE_ICON_EDGE)
-                    .style(icon_tone)
-                    .into(),
-            }
-        } else {
-            file_entry_icon_symbol(entry.kind, entry.name())
+    let icon: Element<'static, SessionMessage> = if entry.kind() == FileKind::File
+        && matches!(entry.media_by_name(), MediaByName::Image(_))
+    {
+        match session.thumbnail_ready(entry.path()) {
+            Some(cached) => image(image::Handle::from_path(&cached.output))
+                .width(Length::Fixed(LANE_ICON_EDGE))
+                .height(Length::Fixed(LANE_ICON_EDGE))
+                .into(),
+            None => file_entry_icon_symbol(entry.kind(), entry.name())
                 .view(LANE_ICON_EDGE)
                 .style(icon_tone)
-                .into()
-        };
+                .into(),
+        }
+    } else {
+        file_entry_icon_symbol(entry.kind(), entry.name())
+            .view(LANE_ICON_EDGE)
+            .style(icon_tone)
+            .into()
+    };
 
     // 目录行尾 chevron；文件行用等宽占位保证名称列对齐。
-    let trailing: Element<'static, SessionMessage> = if entry.kind == FileKind::Directory {
+    let trailing: Element<'static, SessionMessage> = if entry.kind() == FileKind::Directory {
         IconSymbol::ChevronRight
             .view(geometry.chevron_icon_size)
             .style(icon_tone)

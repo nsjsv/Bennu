@@ -87,7 +87,7 @@ pub(crate) fn compare_placeholder_with_entry(
     sort: TransferSortOptions,
 ) -> Ordering {
     if sort.directories_first
-        && placeholder.is_directory != (entry.kind == file_core::FileKind::Directory)
+        && placeholder.is_directory != (entry.kind() == file_core::FileKind::Directory)
     {
         return if placeholder.is_directory {
             Ordering::Less
@@ -101,13 +101,13 @@ pub(crate) fn compare_placeholder_with_entry(
         SortField::Size => placeholder
             .total_bytes
             .unwrap_or(0)
-            .cmp(&entry.metadata.len)
+            .cmp(&entry.metadata().len)
             .then_with(|| compare_names(&placeholder.name, entry.name())),
         SortField::Kind => placeholder_kind_rank(placeholder.is_directory)
             .cmp(&entry_kind_rank(entry))
             .then_with(|| compare_names(&placeholder.name, entry.name())),
         SortField::Modified => Some(placeholder.enqueued_at)
-            .cmp(&entry.metadata.modified)
+            .cmp(&entry.metadata().modified)
             .then_with(|| compare_names(&placeholder.name, entry.name())),
     };
     apply_sort_direction(field_ordering, sort.direction)
@@ -221,7 +221,7 @@ fn placeholder_kind_rank(is_directory: bool) -> u8 {
 }
 
 fn entry_kind_rank(entry: &DirectoryEntry) -> u8 {
-    match entry.kind {
+    match entry.kind() {
         file_core::FileKind::Directory => 0,
         file_core::FileKind::File => 1,
         file_core::FileKind::Symlink => 2,

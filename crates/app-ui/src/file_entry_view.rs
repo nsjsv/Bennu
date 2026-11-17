@@ -160,10 +160,10 @@ impl FileBrowser {
     /// 拖拽预览图标:按源条目的文件类型取图标;损坏的符号链接显示警告。
     pub(crate) fn file_drag_icon_symbol(&self, path: &Path) -> IconSymbol {
         match self.entry_for_path(path) {
-            Some(entry) if entry.kind == FileKind::Symlink && entry.is_broken_symlink => {
+            Some(entry) if entry.kind() == FileKind::Symlink && entry.is_broken_symlink() => {
                 IconSymbol::TriangleAlert
             }
-            Some(entry) => file_kind_solid_symbol(entry.kind),
+            Some(entry) => file_kind_solid_symbol(entry.kind()),
             None => IconSymbol::FileSolid,
         }
     }
@@ -176,7 +176,7 @@ impl FileBrowser {
         let mut folders = 0;
         let mut files = 0;
         for source in &drag.sources {
-            match self.entry_for_path(source).map(|entry| entry.kind) {
+            match self.entry_for_path(source).map(|entry| entry.kind()) {
                 Some(FileKind::Directory) => folders += 1,
                 _ => files += 1,
             }
@@ -381,10 +381,10 @@ fn entry_icon(
     tone: FileEntryIconTone,
     density: FileEntryIconDensity,
 ) -> Svg<'static, Theme> {
-    let symbol = if entry.kind == FileKind::Symlink && entry.is_broken_symlink {
+    let symbol = if entry.kind() == FileKind::Symlink && entry.is_broken_symlink() {
         IconSymbol::TriangleAlert
     } else {
-        file_entry_icon_symbol(entry.kind, entry.name())
+        file_entry_icon_symbol(entry.kind(), entry.name())
     };
     let tone = match (symbol, tone) {
         (IconSymbol::TriangleAlert, _) => FileEntryIconTone::Warning,

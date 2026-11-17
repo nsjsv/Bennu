@@ -18,6 +18,7 @@ pub mod directory_metadata;
 pub mod directory_usage;
 pub mod entry;
 pub mod entry_naming;
+mod entry_record;
 pub mod external_tools;
 pub mod image_decode;
 pub mod log_detail;

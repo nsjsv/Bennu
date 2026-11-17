@@ -6,18 +6,16 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use file_core::{DirectoryEntry, EntryMetadata};
+use file_core::DirectoryEntry;
 
 use crate::transfer_placeholder_view::root_grouping::{split_directories_first, RootGrouping};
 use crate::transfer_placeholders::MergedTransferItem;
 
 use super::{IconGridCell, IconGridEntryCell};
 
-/// 根面板分组入参:划分器 + 显示同源的元数据解析。网格布局不感知
-/// BrowserPaneView,解析闭包由调用方绑定 pane 提供(与列表同一来源)。
+/// 根面板分组入参:划分器。条目自己带着此刻的文件信息,和列表同一来源。
 pub(crate) struct IconGridRootGrouping<'a> {
     pub(crate) grouping: &'a RootGrouping,
-    pub(crate) metadata_for_entry: &'a dyn Fn(&DirectoryEntry) -> EntryMetadata,
 }
 
 /// 分组后的一个文件组:组头文案与索引栏短标签(构造时已本地化的
@@ -99,7 +97,7 @@ pub(crate) fn split_root_cells<'a>(
     let directory_cells = directories.iter().map(&cell_of).collect::<Arc<[_]>>();
     let groups = input
         .grouping
-        .partition(&files, |entry| (input.metadata_for_entry)(entry))
+        .partition(&files)
         .into_iter()
         .map(|section| {
             let count = section.items.len();

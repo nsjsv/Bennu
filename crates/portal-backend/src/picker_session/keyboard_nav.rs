@@ -163,7 +163,7 @@ impl PickerSession {
     pub(crate) fn cursor_directory_row(&self) -> Option<usize> {
         let index = self.keyboard_nav.cursor?;
         match self.rows.get(index) {
-            Some(row) if row.entry.kind == FileKind::Directory => Some(index),
+            Some(row) if row.entry.kind() == FileKind::Directory => Some(index),
             _ => None,
         }
     }
@@ -185,7 +185,7 @@ impl PickerSession {
             let lane = self.columns.focused();
             let index = self.columns_cursor(lane)?;
             let entry = self.column_entry(lane, index)?;
-            (entry.kind == FileKind::Directory)
+            (entry.kind() == FileKind::Directory)
                 .then_some(SessionMessage::ColumnEntryDoubleClicked { lane, index })
         } else {
             self.cursor_directory_row()

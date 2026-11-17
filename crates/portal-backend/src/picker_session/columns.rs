@@ -317,7 +317,7 @@ impl PickerSession {
         self.columns.clear_selection_except(lane);
         self.columns.place_cursor(lane, index);
         self.columns_apply_click_semantics(lane, index, ctrl, shift, &entry);
-        if entry.kind == FileKind::Directory {
+        if entry.kind() == FileKind::Directory {
             self.columns_open_child(lane, entry.path().to_path_buf())
         } else {
             self.columns.truncate_after(lane);
@@ -358,7 +358,7 @@ impl PickerSession {
         let Some(entry) = self.column_entry(lane, index).cloned() else {
             return SessionEffect::None;
         };
-        if entry.kind == FileKind::Directory {
+        if entry.kind() == FileKind::Directory {
             return self.columns_open_child(lane, entry.path().to_path_buf());
         }
         match self.kind {
@@ -399,9 +399,9 @@ impl PickerSession {
             .enumerate()
             .filter(|(_, entry)| {
                 if directory_only {
-                    entry.kind == FileKind::Directory
+                    entry.kind() == FileKind::Directory
                 } else {
-                    entry.kind == FileKind::File
+                    entry.kind() == FileKind::File
                 }
             })
             .map(|(index, _)| index)
@@ -581,7 +581,7 @@ impl PickerSession {
         let Some(entry) = self.column_entry(lane, cursor) else {
             return SessionEffect::None;
         };
-        if entry.kind != FileKind::Directory {
+        if entry.kind() != FileKind::Directory {
             return SessionEffect::None;
         }
         let directory = entry.path().to_path_buf();

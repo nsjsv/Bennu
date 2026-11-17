@@ -526,7 +526,7 @@ impl IconGridExpansionState {
         let directory_positions = entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| entry.kind == FileKind::Directory)
+            .filter(|(_, entry)| entry.kind() == FileKind::Directory)
             .map(|(index, entry)| (entry.path().to_path_buf(), index))
             .collect::<HashMap<_, _>>();
         let child_paths = self

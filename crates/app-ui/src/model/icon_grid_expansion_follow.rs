@@ -64,11 +64,9 @@ impl IconGridExpansionState {
             let Some(entries) = self.entries_in_interactive_directory(parent_directory) else {
                 return IconGridExpansionFollowAdvance::Waiting;
             };
-            let Some((index, _)) = entries
-                .iter()
-                .enumerate()
-                .find(|(_, entry)| entry.path() == *next_path && entry.kind == FileKind::Directory)
-            else {
+            let Some((index, _)) = entries.iter().enumerate().find(|(_, entry)| {
+                entry.path() == *next_path && entry.kind() == FileKind::Directory
+            }) else {
                 self.follow_plan = None;
                 return IconGridExpansionFollowAdvance::Invalid;
             };

@@ -11,9 +11,8 @@ use tokio::fs;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileError, FileKind, ScanWarning,
-};
+use crate::entry_record::EntryRecord;
+use crate::{DirectoryEntry, FileError, FileKind, ScanWarning};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectoryFilesystemMetadata {
@@ -111,21 +110,11 @@ impl DirectoryMetadataResolver {
     }
 }
 
-#[derive(Debug)]
-struct DiscoveredDirectoryEntryInner {
-    path: PathBuf,
-    name: OsString,
-    kind: FileKind,
-    is_hidden: bool,
-    is_symlink: bool,
-    filesystem_metadata:
-        OnceCell<Result<DirectoryFilesystemMetadata, DirectoryMetadataUnavailable>>,
-    identity_names: OnceCell<Result<DirectoryIdentityNames, DirectoryMetadataUnavailable>>,
-}
-
+/// 扫描得到的条目：数据在共享的 [`EntryRecord`] 里，转成界面用的 [`DirectoryEntry`] 只是多一个
+/// 指向同一份的句柄。
 #[derive(Debug, Clone)]
 pub struct DiscoveredDirectoryEntry {
-    inner: Arc<DiscoveredDirectoryEntryInner>,
+    inner: Arc<EntryRecord>,
 }
 
 impl DiscoveredDirectoryEntry {
@@ -137,15 +126,15 @@ impl DiscoveredDirectoryEntry {
         is_symlink: bool,
     ) -> Self {
         Self {
-            inner: Arc::new(DiscoveredDirectoryEntryInner {
+            inner: Arc::new(EntryRecord::new(
                 path,
                 name,
                 kind,
                 is_hidden,
                 is_symlink,
-                filesystem_metadata: OnceCell::new(),
-                identity_names: OnceCell::new(),
-            }),
+                OnceCell::new(),
+                OnceCell::new(),
+            )),
         }
     }
 
@@ -160,15 +149,15 @@ impl DiscoveredDirectoryEntry {
             .set(Err(DirectoryMetadataUnavailable::new(message)))
             .expect("new filesystem metadata cell must be empty");
         Self {
-            inner: Arc::new(DiscoveredDirectoryEntryInner {
+            inner: Arc::new(EntryRecord::new(
                 path,
                 name,
-                kind: FileKind::Other,
+                FileKind::Other,
                 is_hidden,
-                is_symlink: false,
+                false,
                 filesystem_metadata,
-                identity_names: OnceCell::new(),
-            }),
+                OnceCell::new(),
+            )),
         }
     }
 
@@ -188,15 +177,15 @@ impl DiscoveredDirectoryEntry {
             .set(Ok(directory_filesystem_metadata(metadata, false)))
             .expect("new filesystem metadata cell must be empty");
         Self {
-            inner: Arc::new(DiscoveredDirectoryEntryInner {
+            inner: Arc::new(EntryRecord::new(
                 path,
                 name,
                 kind,
                 is_hidden,
                 is_symlink,
                 filesystem_metadata,
-                identity_names: OnceCell::new(),
-            }),
+                OnceCell::new(),
+            )),
         }
     }
 
@@ -233,40 +222,32 @@ impl DiscoveredDirectoryEntry {
             }))
             .expect("new identity names cell must be empty");
         Self {
-            inner: Arc::new(DiscoveredDirectoryEntryInner {
+            inner: Arc::new(EntryRecord::new(
                 path,
                 name,
                 kind,
                 is_hidden,
-                is_symlink: false,
+                false,
                 filesystem_metadata,
                 identity_names,
-            }),
+            )),
         }
     }
 
-    /// rename 不改变文件元数据：共享已填写的 metadata/identity cells，
+    /// rename 不改变文件元数据：已填写的 metadata/identity cells 照用，
     /// 仅替换 path/name。未填写的 cell 克隆后仍是待解析状态。
     pub fn renamed_to(&self, path: PathBuf, name: OsString) -> Self {
         Self {
-            inner: Arc::new(DiscoveredDirectoryEntryInner {
-                path,
-                name,
-                kind: self.inner.kind,
-                is_hidden: self.inner.is_hidden,
-                is_symlink: self.inner.is_symlink,
-                filesystem_metadata: self.inner.filesystem_metadata.clone(),
-                identity_names: self.inner.identity_names.clone(),
-            }),
+            inner: Arc::new(self.inner.renamed_to(path, name)),
         }
     }
 
     pub fn path(&self) -> &Path {
-        &self.inner.path
+        self.inner.path()
     }
 
     pub fn name(&self) -> &OsStr {
-        &self.inner.name
+        self.inner.name()
     }
 
     pub fn kind(&self) -> FileKind {
@@ -282,76 +263,25 @@ impl DiscoveredDirectoryEntry {
     }
 
     pub fn filesystem_metadata(&self) -> DirectoryMetadataState<'_, DirectoryFilesystemMetadata> {
-        metadata_state(&self.inner.filesystem_metadata)
+        self.inner.filesystem_metadata()
     }
 
     pub fn identity_names(&self) -> DirectoryMetadataState<'_, DirectoryIdentityNames> {
-        metadata_state(&self.inner.identity_names)
+        self.inner.identity_names()
     }
 
+    /// 界面用的条目：指向同一份记录，之后补上的文件信息两边都看得到。
     pub fn display_entry(&self) -> DirectoryEntry {
-        let mut metadata = EntryMetadata::pending();
-        let mut is_broken_symlink = false;
-        match self.filesystem_metadata() {
-            DirectoryMetadataState::Pending => {}
-            DirectoryMetadataState::Complete(filesystem) => {
-                metadata.filesystem_availability = DirectoryMetadataAvailability::Complete;
-                metadata.len = filesystem.len;
-                metadata.modified = filesystem.modified;
-                metadata.accessed = filesystem.accessed;
-                metadata.created = filesystem.created;
-                metadata.readonly = filesystem.readonly;
-                metadata.permissions_mode = filesystem.permissions_mode;
-                is_broken_symlink = filesystem.is_broken_symlink;
-            }
-            DirectoryMetadataState::Unavailable(_) => {
-                metadata.filesystem_availability = DirectoryMetadataAvailability::Unavailable;
-            }
-        }
-        match self.identity_names() {
-            DirectoryMetadataState::Pending => {}
-            DirectoryMetadataState::Complete(identity_names) => {
-                metadata.identity_names_availability = DirectoryMetadataAvailability::Complete;
-                metadata.owner_name = identity_names.owner_name.clone();
-                metadata.group_name = identity_names.group_name.clone();
-            }
-            DirectoryMetadataState::Unavailable(_) => {
-                metadata.identity_names_availability = DirectoryMetadataAvailability::Unavailable;
-            }
-        }
-        DirectoryEntry::with_file_name(
-            self.path().to_path_buf(),
-            self.name().to_os_string(),
-            self.kind(),
-            metadata,
-            self.is_hidden(),
-            self.is_symlink(),
-            is_broken_symlink,
-        )
+        DirectoryEntry::from_record(Arc::clone(&self.inner))
     }
 
+    /// 文件信息和属主都齐了才算完整（旧的一次扫完接口只要完整的条目）。
     pub(crate) fn complete_entry(&self) -> Option<DirectoryEntry> {
-        let filesystem_metadata = match self.filesystem_metadata() {
-            DirectoryMetadataState::Complete(metadata) => metadata,
-            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => {
-                return None
-            }
-        };
-        let identity_names = match self.identity_names() {
-            DirectoryMetadataState::Complete(names) => names,
-            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => {
-                return None
-            }
-        };
-        Some(directory_entry_from_resolved_metadata(
-            self.path().to_path_buf(),
-            self.name().to_os_string(),
-            self.kind(),
-            self.is_hidden(),
-            self.is_symlink(),
-            filesystem_metadata,
-            identity_names,
-        ))
+        let complete = matches!(
+            self.filesystem_metadata(),
+            DirectoryMetadataState::Complete(_)
+        ) && matches!(self.identity_names(), DirectoryMetadataState::Complete(_));
+        complete.then(|| self.display_entry())
     }
 }
 
@@ -637,46 +567,15 @@ pub(crate) fn complete_entry_from_metadata(
         owner_name: filesystem_metadata.user_id.map(lookup_user_name),
         group_name: filesystem_metadata.group_id.map(lookup_group_name),
     };
-    directory_entry_from_resolved_metadata(
+    DirectoryEntry::from_record(Arc::new(EntryRecord::new(
         path,
         name,
         kind,
         is_hidden,
         is_symlink,
-        &filesystem_metadata,
-        &identity_names,
-    )
-}
-
-fn directory_entry_from_resolved_metadata(
-    path: PathBuf,
-    name: OsString,
-    kind: FileKind,
-    is_hidden: bool,
-    is_symlink: bool,
-    filesystem_metadata: &DirectoryFilesystemMetadata,
-    identity_names: &DirectoryIdentityNames,
-) -> DirectoryEntry {
-    DirectoryEntry::with_file_name(
-        path,
-        name,
-        kind,
-        EntryMetadata {
-            filesystem_availability: DirectoryMetadataAvailability::Complete,
-            identity_names_availability: DirectoryMetadataAvailability::Complete,
-            len: filesystem_metadata.len,
-            modified: filesystem_metadata.modified,
-            accessed: filesystem_metadata.accessed,
-            created: filesystem_metadata.created,
-            readonly: filesystem_metadata.readonly,
-            owner_name: identity_names.owner_name.clone(),
-            group_name: identity_names.group_name.clone(),
-            permissions_mode: filesystem_metadata.permissions_mode,
-        },
-        is_hidden,
-        is_symlink,
-        filesystem_metadata.is_broken_symlink,
-    )
+        OnceCell::new_with(Some(Ok(filesystem_metadata))),
+        OnceCell::new_with(Some(Ok(identity_names))),
+    )))
 }
 
 fn directory_filesystem_metadata(
@@ -746,7 +645,7 @@ fn lookup_group_name(group_id: u32) -> String {
     group_id.to_string()
 }
 
-fn metadata_state<T>(
+pub(crate) fn metadata_state<T>(
     cell: &OnceCell<Result<T, DirectoryMetadataUnavailable>>,
 ) -> DirectoryMetadataState<'_, T> {
     match cell.get() {

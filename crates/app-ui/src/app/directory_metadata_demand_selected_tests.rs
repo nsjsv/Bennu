@@ -59,7 +59,7 @@ async fn a_selected_entry_in_an_expanded_directory_demands_only_its_metadata() {
     let selected_index = browser.tab().expanded_directories[&expanded_path]
         .entries
         .find(&selected)
-        .and_then(|entry| entry.discovery_index)
+        .and_then(|entry| entry.discovery_index())
         .expect("the selected child has a discovery index");
     browser.tab_mut().selected_paths.insert(selected);
     browser.directory_metadata_in_flight.clear();

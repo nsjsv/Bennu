@@ -89,7 +89,7 @@ pub(super) fn push_root_transfer_rows<'a>(
             rows,
         );
     }
-    for section in grouping.partition(&files, |entry| pane.metadata_for_entry(entry)) {
+    for section in grouping.partition(&files) {
         rows.push(ListTransferRow::GroupHeader {
             title: section.descriptor.title,
             index_label: section.descriptor.index_label,

@@ -12,8 +12,8 @@ async fn scan_directory_reads_regular_entries() {
 
     assert_eq!(scan.path, dir.path());
     assert_eq!(names(&scan.entries), vec!["a-dir", "b.txt"]);
-    assert_eq!(scan.entries[0].kind, FileKind::Directory);
-    assert_eq!(scan.entries[1].kind, FileKind::File);
+    assert_eq!(scan.entries[0].kind(), FileKind::Directory);
+    assert_eq!(scan.entries[1].kind(), FileKind::File);
 }
 
 #[tokio::test]
@@ -32,9 +32,9 @@ async fn scan_directory_populates_time_metadata_from_filesystem() {
         .expect("scanned entry");
     let metadata = fs::symlink_metadata(&file_path).unwrap();
 
-    assert_eq!(entry.metadata.modified, metadata.modified().ok());
-    assert_eq!(entry.metadata.accessed, metadata.accessed().ok());
-    assert_eq!(entry.metadata.created, metadata.created().ok());
+    assert_eq!(entry.metadata().modified, metadata.modified().ok());
+    assert_eq!(entry.metadata().accessed, metadata.accessed().ok());
+    assert_eq!(entry.metadata().created, metadata.created().ok());
 }
 
 #[cfg(unix)]
@@ -57,17 +57,17 @@ async fn scan_directory_populates_unix_owner_group_and_permissions() {
     let metadata = fs::symlink_metadata(&file_path).unwrap();
 
     assert!(entry
-        .metadata
+        .metadata()
         .owner_name
         .as_deref()
         .is_some_and(|owner| !owner.is_empty()));
     assert!(entry
-        .metadata
+        .metadata()
         .group_name
         .as_deref()
         .is_some_and(|group| !group.is_empty()));
     assert_eq!(
-        entry.metadata.permissions_mode,
+        entry.metadata().permissions_mode,
         Some(metadata.mode() & 0o7777)
     );
 }
@@ -114,11 +114,11 @@ async fn discover_directory_returns_authoritative_basic_entries() {
     }));
     let display_entry = discovery.entries[0].display_entry();
     assert_eq!(
-        display_entry.metadata.filesystem_availability,
+        display_entry.metadata().filesystem_availability,
         DirectoryMetadataAvailability::Pending
     );
     assert_eq!(
-        display_entry.metadata.identity_names_availability,
+        display_entry.metadata().identity_names_availability,
         DirectoryMetadataAvailability::Pending
     );
 }
@@ -394,7 +394,7 @@ async fn metadata_failure_keeps_discovered_row_and_records_unavailable_warning()
     assert_eq!(
         discovery.entries[0]
             .display_entry()
-            .metadata
+            .metadata()
             .filesystem_availability,
         DirectoryMetadataAvailability::Unavailable
     );
@@ -471,11 +471,9 @@ async fn staged_symlink_broken_fact_resolves_on_filesystem_demand() {
         .position(|entry| entry.name() == "broken")
         .unwrap();
     assert_eq!(discovery.entries[broken_index].kind(), FileKind::Symlink);
-    assert!(
-        !discovery.entries[broken_index]
-            .display_entry()
-            .is_broken_symlink
-    );
+    assert!(!discovery.entries[broken_index]
+        .display_entry()
+        .is_broken_symlink());
 
     resolve_directory_metadata(
         discovery.metadata_resolver.clone(),
@@ -489,11 +487,54 @@ async fn staged_symlink_broken_fact_resolves_on_filesystem_demand() {
     .await
     .unwrap();
 
-    assert!(
-        discovery.entries[broken_index]
-            .display_entry()
-            .is_broken_symlink
+    assert!(discovery.entries[broken_index]
+        .display_entry()
+        .is_broken_symlink());
+}
+
+/// 界面用的条目和扫描列表共用同一份记录：条目在文件信息补上之前就转出来了，补上之后
+/// 它读到的也是最新的，不用回扫描列表找，也不用重建列表。
+#[tokio::test]
+async fn display_entries_see_metadata_resolved_after_they_were_made() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("notes.txt"), b"twelve bytes").unwrap();
+    let discovery = discover_directory_with_progress(
+        dir.path(),
+        ScanOptions::default(),
+        tokio_util::sync::CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    let display = discovery.entries[0].display_entry();
+    assert_eq!(
+        display.metadata().filesystem_availability,
+        DirectoryMetadataAvailability::Pending
     );
+
+    resolve_directory_metadata(
+        discovery.metadata_resolver.clone(),
+        DirectoryMetadataRequest {
+            request_generation: 1,
+            requirement: DirectoryMetadataRequirement::Filesystem,
+            targets: vec![0],
+        },
+        tokio_util::sync::CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        display.metadata().filesystem_availability,
+        DirectoryMetadataAvailability::Complete
+    );
+    assert_eq!(display.size(), 12);
+}
+
+/// 列表里每条只放句柄（共享记录的指针 + 扫描序号），数据不复制进列表。
+#[test]
+fn a_listed_entry_is_only_a_pointer_and_an_index() {
+    assert_eq!(std::mem::size_of::<DirectoryEntry>(), 16);
 }
 
 #[tokio::test]
@@ -616,11 +657,11 @@ async fn scan_directory_marks_symlinks_and_broken_symlinks() {
         .find(|entry| entry.name() == "broken")
         .unwrap();
 
-    assert_eq!(link.kind, FileKind::Symlink);
-    assert!(link.is_symlink);
-    assert!(!link.is_broken_symlink);
-    assert_eq!(broken.kind, FileKind::Symlink);
-    assert!(broken.is_broken_symlink);
+    assert_eq!(link.kind(), FileKind::Symlink);
+    assert!(link.is_symlink());
+    assert!(!link.is_broken_symlink());
+    assert_eq!(broken.kind(), FileKind::Symlink);
+    assert!(broken.is_broken_symlink());
 }
 
 #[tokio::test]

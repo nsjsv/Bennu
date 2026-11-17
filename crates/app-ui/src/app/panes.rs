@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use file_core::{DirectoryDiscovery, DirectoryEntry, EntryMetadata};
+use file_core::{DirectoryDiscovery, DirectoryEntry};
 use iced::Point;
 
 use super::tabs::{TabAnimationState, TabBarReveal};
@@ -59,25 +59,6 @@ impl<'a> BrowserPaneView<'a> {
     /// 正在看的真实目录；回收站没有。
     pub(crate) fn current_directory(&self) -> Option<&'a Path> {
         self.location.directory()
-    }
-
-    pub(crate) fn metadata_for_entry(&self, entry: &DirectoryEntry) -> EntryMetadata {
-        let Some(index) = entry.discovery_index else {
-            return entry.metadata.clone();
-        };
-        let discovery = entry.path().parent().and_then(|parent| {
-            if Some(parent) == self.current_directory() {
-                self.directory_discovery
-            } else {
-                self.expanded_directories
-                    .get(parent)
-                    .and_then(|expanded| expanded.directory_discovery.as_ref())
-            }
-        });
-        discovery
-            .and_then(|discovery| discovery.entries.get(index))
-            .map(|discovered| discovered.display_entry().metadata)
-            .unwrap_or_else(|| entry.metadata.clone())
     }
 
     pub(crate) fn current_directory_content(&self) -> DirectoryContentAvailability<'a> {

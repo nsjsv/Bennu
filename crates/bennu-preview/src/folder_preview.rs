@@ -489,11 +489,11 @@ impl NewFolderPlan {
 }
 
 fn node_from(entry: DirectoryEntry) -> FolderNode {
-    let kind = entry.kind;
+    let kind = entry.kind();
     FolderNode {
         name: entry.name().to_string_lossy().into_owned(),
-        len: entry.metadata.len,
-        modified: entry.metadata.modified,
+        len: entry.metadata().len,
+        modified: entry.metadata().modified,
         path: entry.path().to_path_buf(),
         kind,
         folder: (kind == FileKind::Directory).then(Box::default),

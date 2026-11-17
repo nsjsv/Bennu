@@ -751,7 +751,7 @@ impl FileBrowser {
                 .entries
                 .iter()
                 .find(|entry| entry.path() == path)
-                .map(|entry| entry.kind),
+                .map(|entry| entry.kind()),
             BrowserViewMode::Columns | BrowserViewMode::List => pane
                 .entries
                 .iter()
@@ -761,7 +761,7 @@ impl FileBrowser {
                         .flat_map(|expanded| expanded.entries.iter()),
                 )
                 .find(|entry| entry.path() == path)
-                .map(|entry| entry.kind),
+                .map(|entry| entry.kind()),
         };
 
         if entry_kind == Some(FileKind::Directory) {
@@ -882,8 +882,7 @@ impl FileBrowser {
                 path,
             )
         });
-        let summary =
-            summarize_entries(selected_entries, |entry| pane.metadata_for_entry(entry).len);
+        let summary = summarize_entries(selected_entries);
         (!summary.is_empty()).then_some(summary)
     }
 

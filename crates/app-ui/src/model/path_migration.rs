@@ -68,17 +68,10 @@ pub(super) fn detach_directory_discovery(
     discovery: &mut Option<DirectoryDiscovery>,
     order_phase: &mut DirectoryOrderPhase,
 ) {
-    if let Some(discovery) = discovery.take() {
+    // 条目和扫描列表共用同一份记录，补上的文件信息已经在条目里，只是序号不再指向任何列表。
+    if discovery.take().is_some() {
         for entry in entries {
-            let Some(index) = entry.discovery_index.take() else {
-                continue;
-            };
-            let Some(discovered) = discovery.entries.get(index) else {
-                continue;
-            };
-            let materialized = discovered.display_entry();
-            entry.metadata = materialized.metadata;
-            entry.is_broken_symlink = materialized.is_broken_symlink;
+            entry.detach_from_discovery();
         }
     }
     if let DirectoryOrderPhase::WaitingForMetadata {

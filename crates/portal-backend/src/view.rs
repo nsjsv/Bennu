@@ -236,34 +236,35 @@ fn entry_row(
     // 图片行有就绪缩略图时用行内 PNG 替换类型图标（18×18 与图标槽同
     // 尺寸；image 默认 ContentFit::Contain 保持纵横比）。Handle::from_path
     // 只持路径不驻留像素，每帧重建成本可忽略。
-    let icon: Element<'static, SessionMessage> =
-        if entry.kind == FileKind::File && matches!(entry.media_by_name(), MediaByName::Image(_)) {
-            match session.thumbnail_ready(entry.path()) {
-                Some(cached) => image(image::Handle::from_path(&cached.output))
-                    .width(Length::Fixed(18.0))
-                    .height(Length::Fixed(18.0))
-                    .into(),
-                // 未就绪/失败 backoff 期间保持类型图标占位。
-                None => file_entry_icon_symbol(entry.kind, entry.name())
-                    .view(18.0)
-                    .style(icon_tone)
-                    .into(),
-            }
-        } else {
-            file_entry_icon_symbol(entry.kind, entry.name())
+    let icon: Element<'static, SessionMessage> = if entry.kind() == FileKind::File
+        && matches!(entry.media_by_name(), MediaByName::Image(_))
+    {
+        match session.thumbnail_ready(entry.path()) {
+            Some(cached) => image(image::Handle::from_path(&cached.output))
+                .width(Length::Fixed(18.0))
+                .height(Length::Fixed(18.0))
+                .into(),
+            // 未就绪/失败 backoff 期间保持类型图标占位。
+            None => file_entry_icon_symbol(entry.kind(), entry.name())
                 .view(18.0)
                 .style(icon_tone)
-                .into()
-        };
+                .into(),
+        }
+    } else {
+        file_entry_icon_symbol(entry.kind(), entry.name())
+            .view(18.0)
+            .style(icon_tone)
+            .into()
+    };
 
-    let meta = match entry.kind {
+    let meta = match entry.kind() {
         FileKind::Directory => "文件夹".to_string(),
-        _ => format_file_size(entry.metadata.len),
+        _ => format_file_size(entry.metadata().len),
     };
 
     // 目录行首的展开开关（访达列表语义）：箭头随自身展开进度旋转，
     // 收起时同步转回；文件行用等宽占位保证名称列对齐。
-    let disclosure: Element<'static, SessionMessage> = if entry.kind == FileKind::Directory {
+    let disclosure: Element<'static, SessionMessage> = if entry.kind() == FileKind::Directory {
         button(rotated_chevron_right_view(row.expand_progress * 90.0, 12.0).style(icon_tone))
             .padding(2.0)
             .style(transparent_icon_button_style)

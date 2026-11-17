@@ -86,7 +86,7 @@ async fn added_entries_land_in_sorted_position() {
         .entries
         .iter()
         .enumerate()
-        .all(|(position, entry)| { entry.discovery_index == Some(discovery.order[position]) }));
+        .all(|(position, entry)| { entry.discovery_index() == Some(discovery.order[position]) }));
 }
 
 #[tokio::test]

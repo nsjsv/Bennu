@@ -494,8 +494,8 @@ impl PickerSession {
     fn is_allowed(&self, entry: &DirectoryEntry) -> bool {
         self.active_filter.entry_allowed(
             &entry.name().to_string_lossy(),
-            entry.kind,
-            entry.is_hidden,
+            entry.kind(),
+            entry.is_hidden(),
         )
     }
 
@@ -538,7 +538,7 @@ impl PickerSession {
         let Some(row) = self.rows.get(index) else {
             return SessionEffect::None;
         };
-        if row.entry.kind != FileKind::Directory {
+        if row.entry.kind() != FileKind::Directory {
             return SessionEffect::None;
         }
         let path = row.entry.path().to_path_buf();

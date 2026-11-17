@@ -151,7 +151,7 @@ impl SessionThumbnailState {
                 continue;
             };
             // 仅图片：视频依赖外部 ffmpegthumbnailer，生成慢不做（prd 约定）。
-            if entry.kind != FileKind::File
+            if entry.kind() != FileKind::File
                 || !matches!(entry.media_by_name(), file_core::MediaByName::Image(_))
             {
                 continue;
@@ -161,7 +161,7 @@ impl SessionThumbnailState {
             }
             let request = ThumbnailRequest::new(
                 entry.path(),
-                thumbnails::ThumbnailSourceMetadata::from(&entry.metadata),
+                thumbnails::ThumbnailSourceMetadata::from(&entry.metadata()),
                 edge,
             );
             let key = request.key();

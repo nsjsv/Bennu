@@ -280,9 +280,9 @@ mod tests {
             .map(|entry| entry.name().to_str().unwrap())
             .collect();
         assert_eq!(root_names, vec!["photos"]);
-        assert_eq!(root_scan.entries[0].kind, FileKind::Directory);
+        assert_eq!(root_scan.entries[0].kind(), FileKind::Directory);
         assert!(
-            root_scan.entries[0].metadata.filesystem_availability
+            root_scan.entries[0].metadata().filesystem_availability
                 == crate::DirectoryMetadataAvailability::Complete,
             "virtual entries must ship complete metadata without fs demand"
         );
@@ -296,8 +296,8 @@ mod tests {
             .map(|entry| entry.name().to_str().unwrap())
             .collect();
         assert_eq!(inner_names, vec!["1.txt"]);
-        assert_eq!(inner_scan.entries[0].kind, FileKind::File);
-        assert_eq!(inner_scan.entries[0].metadata.len, 5);
+        assert_eq!(inner_scan.entries[0].kind(), FileKind::File);
+        assert_eq!(inner_scan.entries[0].metadata().len, 5);
     }
 
     #[tokio::test]

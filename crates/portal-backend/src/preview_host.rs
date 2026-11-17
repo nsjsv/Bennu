@@ -408,8 +408,8 @@ pub(crate) fn preview_selection(session: &PickerSession) -> Option<PreviewSelect
     let sidebar = session.sidebar();
     Some(PreviewSelection {
         path: entry.path().to_path_buf(),
-        kind: entry.kind,
-        file_bytes: entry.metadata.len,
+        kind: entry.kind(),
+        file_bytes: entry.metadata().len,
         on_network: bennu_sidebar::path_is_on_network(
             entry.path(),
             &sidebar.connections,

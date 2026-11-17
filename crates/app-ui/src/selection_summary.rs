@@ -24,19 +24,17 @@ pub(crate) struct PaneStatusStripEntry {
     pub(crate) hidden_entry_count: Option<usize>,
 }
 
-/// 统计选中的条目。大小经由 display_len 取 UI 权威值(基础扫描阶段 len 尚未补全,
-/// 列表大小列用的 discovery 元数据才是真实大小)。
+/// 统计选中的条目；大小是条目此刻的文件信息（还没补上的算 0）。
 pub(crate) fn summarize_entries<'a>(
     selected_entries: impl Iterator<Item = &'a DirectoryEntry>,
-    display_len: impl Fn(&DirectoryEntry) -> u64,
 ) -> PaneSelectionSummary {
     let mut summary = PaneSelectionSummary::default();
     for entry in selected_entries {
-        match entry.kind {
+        match entry.kind() {
             FileKind::Directory => summary.directory_count += 1,
             FileKind::File | FileKind::Symlink | FileKind::Other => {
                 summary.file_count += 1;
-                summary.file_total_bytes += display_len(entry);
+                summary.file_total_bytes += entry.size();
             }
         }
     }
@@ -73,7 +71,7 @@ mod tests {
             entry("/dir/d", FileKind::Directory, 4096),
         ];
 
-        let summary = summarize_entries(selected.iter(), |entry| entry.metadata.len);
+        let summary = summarize_entries(selected.iter());
 
         assert_eq!(summary.directory_count, 2);
         assert_eq!(summary.file_count, 1);
@@ -81,20 +79,8 @@ mod tests {
     }
 
     #[test]
-    fn sizes_come_from_display_len_provider_not_raw_metadata() {
-        // 基础扫描阶段 metadata.len 为 0,权威大小由 discovery 元数据提供。
-        let selected = [entry("/dir/a.mp4", FileKind::File, 0)];
-
-        let summary = summarize_entries(selected.iter(), |entry| entry.metadata.len);
-        assert_eq!(summary.file_total_bytes, 0);
-
-        let summary = summarize_entries(selected.iter(), |_| 7_340_032);
-        assert_eq!(summary.file_total_bytes, 7_340_032);
-    }
-
-    #[test]
     fn empty_selection_yields_empty_summary() {
-        let summary = summarize_entries(std::iter::empty(), |entry| entry.metadata.len);
+        let summary = summarize_entries(std::iter::empty());
 
         assert!(summary.is_empty());
     }

@@ -28,7 +28,7 @@ pub fn apply_entry_options(entries: &mut Vec<DirectoryEntry>, options: &ScanOpti
 
 pub fn filter_hidden(entries: &mut Vec<DirectoryEntry>, include_hidden: bool) {
     if !include_hidden {
-        entries.retain(|entry| !entry.is_hidden);
+        entries.retain(|entry| !entry.is_hidden());
     }
 }
 
@@ -121,24 +121,22 @@ pub fn compare_entries(
     right: &DirectoryEntry,
     options: &ScanOptions,
 ) -> Ordering {
-    if let Some(ordering) = directory_position(left.kind, right.kind, options) {
+    if let Some(ordering) = directory_position(left.kind(), right.kind(), options) {
         return ordering;
     }
 
     let ordering = match options.sort_field {
         SortField::Name => compare_names(left.name(), right.name()),
         SortField::Size => left
-            .metadata
-            .len
-            .cmp(&right.metadata.len)
+            .size()
+            .cmp(&right.size())
             .then_with(|| compare_names(left.name(), right.name())),
-        SortField::Kind => kind_rank(left.kind)
-            .cmp(&kind_rank(right.kind))
+        SortField::Kind => kind_rank(left.kind())
+            .cmp(&kind_rank(right.kind()))
             .then_with(|| compare_names(left.name(), right.name())),
         SortField::Modified => left
-            .metadata
-            .modified
-            .cmp(&right.metadata.modified)
+            .modified()
+            .cmp(&right.modified())
             .then_with(|| compare_names(left.name(), right.name())),
     };
 

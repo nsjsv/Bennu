@@ -197,7 +197,7 @@ impl PickerSession {
         self.columns.set_selection(0, selection, anchor);
         if let (true, Some(anchor)) = (carried_paths.len() == 1, anchor) {
             if let Some(entry) = self.column_entry(0, anchor) {
-                if entry.kind == FileKind::Directory {
+                if entry.kind() == FileKind::Directory {
                     let directory = entry.path().to_path_buf();
                     return self.columns_open_child(0, directory);
                 }

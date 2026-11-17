@@ -252,7 +252,7 @@ mod tests {
         assert!(scan.entries.iter().any(|entry| {
             entry.original_path == visible_original
                 && entry.entry.name().to_string_lossy() == "visible-original.txt"
-                && !entry.entry.is_hidden
+                && !entry.entry.is_hidden()
         }));
         assert_eq!(scan.skipped.len(), 1);
     }

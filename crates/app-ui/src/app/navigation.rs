@@ -576,7 +576,7 @@ impl FileBrowser {
     }
 
     pub(super) fn entry_kind_recursive(&self, path: &Path) -> Option<FileKind> {
-        self.entry_for_path(path).map(|entry| entry.kind)
+        self.entry_for_path(path).map(|entry| entry.kind())
     }
 
     fn capture_directory_loading_placeholder(&self) -> Option<DirectoryLoadingPlaceholder> {
@@ -733,7 +733,7 @@ pub(super) fn directory_order_phase_after_collection(
 ) -> DirectoryOrderPhase {
     if matches!(options.sort_field, SortField::Size | SortField::Modified)
         && entries.iter().any(|entry| {
-            entry.metadata.filesystem_availability
+            entry.metadata().filesystem_availability
                 == file_core::DirectoryMetadataAvailability::Pending
         })
     {
@@ -802,8 +802,8 @@ mod tests {
 
         assert_eq!(browser.tab().entries.len(), 300);
         assert!(browser.tab().entries.iter().all(|entry| {
-            entry.metadata.filesystem_availability == DirectoryMetadataAvailability::Pending
-                && entry.metadata.identity_names_availability
+            entry.metadata().filesystem_availability == DirectoryMetadataAvailability::Pending
+                && entry.metadata().identity_names_availability
                     == DirectoryMetadataAvailability::Pending
         }));
         let committed_discovery = browser

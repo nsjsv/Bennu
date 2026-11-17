@@ -77,7 +77,7 @@ impl FileBrowser {
         let mut expanded_targets: Vec<(&Path, &ExpandedDirectory, Vec<usize>)> = Vec::new();
         for path in pane.selected_paths {
             if let Some(entry) = pane.entries.find(path) {
-                root_targets.extend(entry.discovery_index);
+                root_targets.extend(entry.discovery_index());
                 continue;
             }
             let Some(directory) = path.parent() else {
@@ -91,7 +91,7 @@ impl FileBrowser {
                 let Some(index) = expanded
                     .entries
                     .find(path)
-                    .and_then(|entry| entry.discovery_index)
+                    .and_then(|entry| entry.discovery_index())
                 else {
                     continue;
                 };
@@ -242,7 +242,7 @@ impl FileBrowser {
                 range.start,
                 range.end,
             ) {
-                let Some(index) = visible.entry.discovery_index else {
+                let Some(index) = visible.entry.discovery_index() else {
                     continue;
                 };
                 let context = if visible.entry.path().parent() == Some(current_directory) {
@@ -1083,8 +1083,8 @@ mod tests {
         let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
         let child_entry = &pane.expanded_directories[&expanded_path].entries[0];
 
-        assert_eq!(child_entry.discovery_index, Some(0));
-        assert_eq!(pane.metadata_for_entry(child_entry).len, 100);
+        assert_eq!(child_entry.discovery_index(), Some(0));
+        assert_eq!(child_entry.size(), 100);
     }
 
     #[tokio::test]
@@ -1196,7 +1196,7 @@ mod tests {
         ));
         // 权威扫描提交后条目元数据是 Pending，自动调度的缩略图请求基于空值 key。
         assert_eq!(
-            browser.tab().entries[0].metadata.filesystem_availability,
+            browser.tab().entries[0].metadata().filesystem_availability,
             file_core::DirectoryMetadataAvailability::Pending
         );
         let stale_key = crate::thumbnail_cache::request_for_entry(
@@ -1239,7 +1239,7 @@ mod tests {
 
         // 排序提交重建条目后元数据落地，且必须已经用真实 key 重新入队缩略图。
         assert_eq!(
-            browser.tab().entries[0].metadata.filesystem_availability,
+            browser.tab().entries[0].metadata().filesystem_availability,
             file_core::DirectoryMetadataAvailability::Complete
         );
         let current_request = crate::thumbnail_cache::request_for_entry(
@@ -1281,7 +1281,7 @@ mod tests {
             .entries
             .iter()
             .find(|entry| entry.path() == target)
-            .and_then(|entry| entry.discovery_index)
+            .and_then(|entry| entry.discovery_index())
             .expect("the fixture entry has a discovery index");
         (directory, browser, target, index)
     }

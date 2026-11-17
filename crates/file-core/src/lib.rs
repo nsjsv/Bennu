@@ -13,6 +13,7 @@ pub mod archive_vfs;
 pub mod byte_progress;
 pub mod checksum;
 pub mod data_dir_migration;
+pub mod decode_budget;
 pub mod directory_metadata;
 pub mod directory_usage;
 pub mod entry;

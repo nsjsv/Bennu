@@ -1,21 +1,27 @@
 //! 预览、缩略图、格式转换共用的图片解码。像素图先给内置解码器（认得的格式又快又不起进程），
 //! 不认得的交给 ffmpeg；相机 RAW 取里面自带的 JPEG 预览图。出来的都是按方向转正的 RGBA，
-//! 可以要求不超过某个大小（预览按屏幕大小、缩略图按档位），大图不用先解成原尺寸再缩。
+//! 可以要求不超过某个大小（预览按屏幕大小、缩略图按档位），大图不用先解成原尺寸再缩：
+//! JPEG 在解码时缩小，大 PNG 边读边缩，其余整图解码共用一份内存预算。
 
+mod area_shrink;
 mod camera_raw;
 mod facts;
 mod ffmpeg_still;
 mod iso_media;
+mod png_rows;
+mod scaled_jpeg;
 mod tiff;
+mod tiff_rows;
 
 pub use facts::{image_facts, ImageFacts};
 
 use std::path::Path;
 
 use image::metadata::Orientation;
-use image::{DynamicImage, ImageDecoder, ImageReader};
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
 use thiserror::Error;
 
+use crate::decode_budget;
 use crate::media::RasterSource;
 
 #[derive(Debug, Error)]
@@ -103,32 +109,81 @@ pub fn decode_image(
     bound: DecodeBound,
 ) -> Result<DecodedImage, ImageDecodeError> {
     match source {
-        RasterSource::Picture => with_ffmpeg_fallback(
-            builtin_decoder(path).and_then(|decoder| {
-                decoder
-                    .map(|mut decoder| {
-                        let orientation =
-                            decoder.orientation().unwrap_or(Orientation::NoTransforms);
-                        decode_with(decoder, orientation, bound)
-                    })
-                    .transpose()
-            }),
-            || {
-                let plan = ffmpeg_still::probe(path)?;
-                let pixels = ffmpeg_still::decode(path, &plan, bound)?;
-                Ok(DecodedImage {
-                    has_alpha: has_transparent_pixel(&pixels),
-                    pixels,
-                    width: plan.width,
-                    height: plan.height,
-                })
-            },
-        ),
+        RasterSource::Picture => with_ffmpeg_fallback(decode_builtin(path, bound), || {
+            let plan = ffmpeg_still::probe(path)?;
+            let pixels = ffmpeg_still::decode(path, &plan, bound)?;
+            Ok(DecodedImage {
+                has_alpha: has_transparent_pixel(&pixels),
+                pixels,
+                width: plan.width,
+                height: plan.height,
+            })
+        }),
         RasterSource::CameraRaw => {
             let preview = camera_raw::read_embedded_preview(path)?;
             let (decoder, orientation) = preview.decoder()?;
-            decode_with(decoder, orientation, bound)
+            decode_whole(decoder, orientation, bound)
         }
+    }
+}
+
+/// 内置解码器认得的格式，按 `decode_route` 解。
+fn decode_builtin(
+    path: &Path,
+    bound: DecodeBound,
+) -> Result<Option<DecodedImage>, ImageDecodeError> {
+    let Some(reader) = guessed_reader(path)? else {
+        return Ok(None);
+    };
+    let format = reader.format();
+    // JPEG 先由缩小解码的解码器读文件头：image 的 JPEG 解码器一建就把整个文件读进内存。
+    if format == Some(ImageFormat::Jpeg) {
+        if let Some(header) = scaled_jpeg::read_header(path) {
+            let plan = ShrinkPlan::new(header.dimensions(), header.orientation(), bound);
+            if decode_route(format, &plan, 0) == DecodeRoute::ShrinkJpeg {
+                if let Some(image) = header.decode_scaled(plan.stored_target) {
+                    return Ok(Some(plan.finish(image)));
+                }
+            }
+        }
+    }
+    let mut decoder = reader.into_decoder()?;
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let plan = ShrinkPlan::new(decoder.dimensions(), orientation, bound);
+    let rows = match decode_route(format, &plan, decoder.total_bytes()) {
+        DecodeRoute::PngRows => png_rows::decode(path, plan.stored_target)?,
+        DecodeRoute::TiffRows => tiff_rows::decode(path, plan.stored_target)?,
+        DecodeRoute::ShrinkJpeg | DecodeRoute::Whole => None,
+    };
+    match rows {
+        Some(pixels) => Ok(Some(plan.finish(DynamicImage::ImageRgba8(pixels)))),
+        None => decode_whole(decoder, orientation, bound).map(Some),
+    }
+}
+
+/// 内置解码器认得的图怎么解。都不交给 ffmpeg：它同样要解整图，还多一份格式转换（4000×3000 的
+/// 16 位 TIFF 在 ffmpeg 里要 148 MB）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DecodeRoute {
+    /// 每边至少缩一半的 JPEG 在解码时就缩小。
+    ShrinkJpeg,
+    /// 要缩小、整图又超出解码预算的 PNG 逐行读、边读边缩。
+    PngRows,
+    /// 要缩小的 TIFF 不管多大都按条带/图块边读边缩：image 的 TIFF 解码器整解要两份。
+    TiffRows,
+    /// 整图解出来再缩；超出预算的占满整个预算独自解。缩小解码不支持的写法（CMYK JPEG、
+    /// 隔行 PNG）也退到这里。
+    Whole,
+}
+
+fn decode_route(format: Option<ImageFormat>, plan: &ShrinkPlan, whole_bytes: u64) -> DecodeRoute {
+    match format {
+        Some(ImageFormat::Jpeg) if plan.halves() => DecodeRoute::ShrinkJpeg,
+        Some(ImageFormat::Png) if plan.shrinks() && whole_bytes > decode_budget::BUDGET_BYTES => {
+            DecodeRoute::PngRows
+        }
+        Some(ImageFormat::Tiff) if plan.shrinks() => DecodeRoute::TiffRows,
+        _ => DecodeRoute::Whole,
     }
 }
 
@@ -182,34 +237,84 @@ fn builtin_decoder(path: &Path) -> Result<Option<impl ImageDecoder>, ImageDecode
         .transpose()
 }
 
-fn decode_with(
+/// 整图解出来再缩；解之前在共享的解码预算里占好位置。
+fn decode_whole(
     mut decoder: impl ImageDecoder,
     orientation: Orientation,
     bound: DecodeBound,
 ) -> Result<DecodedImage, ImageDecodeError> {
+    let _reservation = decode_budget::reserve(decoder.total_bytes());
     let mut limits = image::Limits::default();
     limits.reserve(decoder.total_bytes())?;
     decoder.set_limits(limits)?;
-    let image = DynamicImage::from_decoder(decoder)?;
-    let has_alpha_channel = image.color().has_alpha();
-    let (width, height) = oriented_dimensions((image.width(), image.height()), orientation);
-    let (fit_width, fit_height) = bound.fit(width, height);
-    let mut image = if (fit_width, fit_height) == (width, height) {
-        image
-    } else if swaps_axes(orientation) {
-        image.thumbnail(fit_height, fit_width)
-    } else {
-        image.thumbnail(fit_width, fit_height)
-    };
-    image.apply_orientation(orientation);
-    let pixels = image.into_rgba8();
-    Ok(DecodedImage {
-        // 没有透明通道的格式不用一个个像素看。
-        has_alpha: has_alpha_channel && has_transparent_pixel(&pixels),
-        pixels,
-        width,
-        height,
-    })
+    let plan = ShrinkPlan::new(decoder.dimensions(), orientation, bound);
+    Ok(plan.finish(DynamicImage::from_decoder(decoder)?))
+}
+
+/// 一张图要缩成多大。`width`×`height` 是转正后的原图大小；`stored_target` 是按文件里存的方向
+/// 要缩到的大小（转正放在缩完以后，少转些像素）。
+struct ShrinkPlan {
+    orientation: Orientation,
+    width: u32,
+    height: u32,
+    stored: (u32, u32),
+    stored_target: (u32, u32),
+}
+
+impl ShrinkPlan {
+    fn new(stored: (u32, u32), orientation: Orientation, bound: DecodeBound) -> Self {
+        let (width, height) = oriented_dimensions(stored, orientation);
+        let (fit_width, fit_height) = bound.fit(width, height);
+        let stored_target = if swaps_axes(orientation) {
+            (fit_height, fit_width)
+        } else {
+            (fit_width, fit_height)
+        };
+        Self {
+            orientation,
+            width,
+            height,
+            stored,
+            stored_target,
+        }
+    }
+
+    fn shrinks(&self) -> bool {
+        self.stored_target != self.stored
+    }
+
+    /// 每边至少缩一半：JPEG 的 DCT 缩放从 1/2 起。
+    fn halves(&self) -> bool {
+        self.stored_target.0 * 2 <= self.stored.0 && self.stored_target.1 * 2 <= self.stored.1
+    }
+
+    /// 缩到目标大小、转正、换成 RGBA。`image` 不小于目标。
+    fn finish(&self, image: DynamicImage) -> DecodedImage {
+        let has_alpha_channel = image.color().has_alpha();
+        let mut image = if (image.width(), image.height()) == self.stored_target {
+            image
+        } else {
+            image.thumbnail(self.stored_target.0, self.stored_target.1)
+        };
+        image.apply_orientation(self.orientation);
+        let pixels = image.into_rgba8();
+        DecodedImage {
+            // 没有透明通道的格式不用一个个像素看。
+            has_alpha: has_alpha_channel && has_transparent_pixel(&pixels),
+            pixels,
+            width: self.width,
+            height: self.height,
+        }
+    }
+}
+
+fn decoding_error(
+    format: ImageFormat,
+    error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+) -> ImageDecodeError {
+    ImageDecodeError::Image(image::ImageError::Decoding(
+        image::error::DecodingError::new(image::error::ImageFormatHint::Exact(format), error),
+    ))
 }
 
 fn has_transparent_pixel(pixels: &image::RgbaImage) -> bool {
@@ -236,3 +341,6 @@ fn swaps_axes(orientation: Orientation) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod shrink_tests;

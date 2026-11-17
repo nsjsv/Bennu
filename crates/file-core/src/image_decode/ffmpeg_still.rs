@@ -23,6 +23,8 @@ pub(super) struct StillPlan {
 }
 
 pub(super) fn probe(path: &Path) -> Result<StillPlan, ImageDecodeError> {
+    // ffprobe 读流信息时也解一帧（HEIC、TIFF 实测 54～74 MB），同样算进解码预算。
+    let _reservation = crate::decode_budget::reserve(crate::decode_budget::DECODER_PROCESS_BYTES);
     let mut child = spawn(
         Command::new("ffprobe")
             .args([
@@ -193,6 +195,10 @@ pub(super) fn decode(
             plan.input, bound.max_width, bound.max_height
         )
     };
+    // ffmpeg 进程和读回来的整张像素都算进共享的解码预算。
+    let _reservation = crate::decode_budget::reserve(
+        crate::decode_budget::DECODER_PROCESS_BYTES + u64::from(width) * u64::from(height) * 4,
+    );
     let output = spawn(
         Command::new("ffmpeg")
             .args(["-hide_banner", "-nostdin", "-loglevel", "error", "-i"])

@@ -328,7 +328,10 @@ fn video_thumbnail(
     scratch: &Path,
     edge: u32,
 ) -> Result<image::RgbaImage, ThumbnailError> {
+    let reservation =
+        file_core::decode_budget::reserve(file_core::decode_budget::DECODER_PROCESS_BYTES);
     run_video_thumbnailer(source, scratch, edge)?;
+    drop(reservation);
     let frame = image::open(scratch);
     remove_temporary_file(scratch);
     frame
@@ -427,6 +430,9 @@ fn run_ffmpeg(source: &Path, output: &Path, max_edge: u32) -> Result<(), Thumbna
         .arg("-loglevel")
         .arg("error")
         .arg("-y")
+        // 缩略图只要一帧，单线程解：多线程解码每个线程各留一套帧缓冲，实测常驻 103 MB → 79 MB。
+        // 不改成只解关键帧：关键帧隔得远的视频会取到片头（常是黑屏）。
+        .args(["-threads", "1"])
         .arg("-ss")
         .arg(VIDEO_THUMBNAIL_SEEK_TIME)
         .arg("-i")

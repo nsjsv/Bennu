@@ -83,6 +83,11 @@ fn main() -> std::process::ExitCode {
     // 限制 glibc 的线程 arena 数量，避免预览关闭后的分配页长期滞留。
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     let _ = unsafe { libc::mallopt(libc::M_ARENA_MAX, 1) };
+    // 1 MB 以上的分配（解码中的图、缩略图像素）单独映射，用完立刻还给系统。glibc 默认的阈值
+    // 会跟着释放过的大块往上调（最高 32 MB），之后几 MB 的解码缓冲都落进堆里，释放后成了碎片
+    // 还不回去：3000 个文件的图标视图滚过一遍，静置时私有内存 71 MB，固定阈值后 36 MB。
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    let _ = unsafe { libc::mallopt(libc::M_MMAP_THRESHOLD, 1 << 20) };
     // 改名迁移必须在任何状态数据库/配置读取之前执行（含窗口图标
     // 的 stored_theme_mode 读取）。
     file_core::data_dir_migration::migrate_legacy_data_dir(&file_core::app_dirs::user_data_dir());

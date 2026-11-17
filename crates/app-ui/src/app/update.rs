@@ -183,12 +183,16 @@ impl FileBrowser {
                     .supervise_drivers(std::time::Instant::now());
                 self.launch_ready_driver()
             }
-            Message::OperationStoreChanged => {
+            Message::StateDatabaseChanged => {
                 if let Some(error) = self.operation_queue.adopt_foreign_tasks() {
                     self.show_global_error(error);
                 }
-                self.launch_ready_driver()
+                Task::batch([
+                    self.launch_ready_driver(),
+                    self.reread_user_preferences_command(),
+                ])
             }
+            Message::StoredUserPreferencesRead(read) => self.accept_stored_user_preferences(read),
             Message::ForeignTaskReleased(stored_task_id, generation, outcome) => {
                 if let Err(error) = outcome {
                     self.show_global_error(error);

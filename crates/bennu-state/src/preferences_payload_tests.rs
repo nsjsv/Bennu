@@ -36,6 +36,14 @@ impl Default for Document {
     }
 }
 
+/// 这个进程什么都没改：保存只该补上库里没有的键。
+fn unchanged(document: Document) -> PreferencesChange<Document> {
+    PreferencesChange {
+        seen: document.clone(),
+        current: document,
+    }
+}
+
 fn store_with_payload(payload: &str) -> (UserSettingsStore, TempDir) {
     let directory = tempfile::tempdir().unwrap();
     let store = UserSettingsStore::new(directory.path().join("state.sqlite")).unwrap();
@@ -186,11 +194,18 @@ fn keys_this_version_does_not_know_survive_a_save() {
     let (store, _directory) = store_with_payload(&payload);
 
     store
-        .replace_user_preferences(&Document::default())
+        .save_user_preferences(&PreferencesChange {
+            seen: Document::default(),
+            current: Document {
+                show_hidden_files: true,
+                ..Document::default()
+            },
+        })
         .unwrap();
 
     let saved: Value = serde_json::from_str(&stored_payload(&store)).unwrap();
     assert_eq!(saved["setting_from_a_newer_version"], json!({"level": 3}));
+    assert_eq!(saved["show_hidden_files"], json!(true));
 }
 
 #[test]
@@ -202,7 +217,7 @@ fn keys_this_version_does_not_know_survive_the_shutdown_commit() {
         .database
         .commit_application_shutdown(StoredApplicationShutdown {
             browser_session: StoredBrowserSessionShutdown::Skip,
-            user_preferences: Some(Document::default()),
+            user_preferences: Some(unchanged(Document::default())),
             interrupted_recoverable_tasks: Vec::new(),
             transient_task_ids: Vec::new(),
         })
@@ -217,7 +232,7 @@ fn an_unreadable_payload_is_backed_up_before_it_is_overwritten() {
     let (store, directory) = store_with_payload("{ not json");
 
     store
-        .replace_user_preferences(&Document::default())
+        .save_user_preferences(&unchanged(Document::default()))
         .unwrap();
 
     let backups = backups(&directory);
@@ -324,4 +339,49 @@ fn an_unreadable_session_stays_in_place_after_reading() {
         .query_row("SELECT COUNT(*) FROM browser_session", [], |row| row.get(0))
         .unwrap();
     assert_eq!(remaining, 1);
+}
+
+#[test]
+fn a_save_writes_only_what_this_process_changed() {
+    // 另一个进程刚把侧栏拖宽、存了；这个进程是在那之前读的设置。
+    let payload = default_payload_with(json!({"sidebar_width": 300.0}));
+    let (store, _directory) = store_with_payload(&payload);
+
+    store
+        .save_user_preferences(&PreferencesChange {
+            seen: Document::default(),
+            current: Document {
+                show_hidden_files: true,
+                ..Document::default()
+            },
+        })
+        .unwrap();
+
+    let read = read_back(&store);
+    assert!(read.preferences.show_hidden_files);
+    assert_eq!(read.preferences.sidebar_width, 300.0);
+}
+
+#[test]
+fn a_change_from_elsewhere_keeps_what_this_process_has_not_saved_yet() {
+    let change = PreferencesChange {
+        seen: Document::default(),
+        current: Document {
+            terminal_emulator: "kitty".to_owned(),
+            ..Document::default()
+        },
+    };
+    let stored = Document {
+        sidebar_width: 300.0,
+        ..Document::default()
+    };
+
+    assert_eq!(
+        merge_stored_preferences(&change, &stored).unwrap(),
+        Document {
+            terminal_emulator: "kitty".to_owned(),
+            sidebar_width: 300.0,
+            ..Document::default()
+        }
+    );
 }

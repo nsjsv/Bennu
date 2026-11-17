@@ -22,7 +22,8 @@ pub use browser_session::{
 pub use database::StateDatabase;
 pub use error::{StoreError, StoreResult};
 pub use preferences_payload::{
-    UnreadablePreferences, UnreadablePreferencesBackup, UserPreferencesRead, USER_PREFERENCES_KEY,
+    merge_stored_preferences, PreferencesChange, UnreadablePreferences,
+    UnreadablePreferencesBackup, UserPreferencesRead, USER_PREFERENCES_KEY,
 };
 pub use recoverable_transfer::{
     ClaimedRecoverableTask, RecoverableRestoreCoordinatorLease, RecoverableTaskRunnerLease,

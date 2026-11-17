@@ -181,6 +181,30 @@ impl NetworkConnectionState {
             .collect()
     }
 
+    /// 别的 Bennu 进程改了保存的连接：同一个连接留着这里的挂载状态，远端身份变了时
+    /// 忘掉会话内记住的凭据；新加的从未连接开始，删掉的去掉。
+    pub(crate) fn adopt_saved_connections(&mut self, connections: Vec<SavedNetworkConnection>) {
+        let mut previous = std::mem::take(&mut self.entries);
+        self.entries = connections
+            .into_iter()
+            .map(|saved| {
+                let Some(index) = previous
+                    .iter()
+                    .position(|entry| entry.connection.id == saved.connection.id)
+                else {
+                    return SidebarNetworkConnectionEntry::new(saved);
+                };
+                let mut entry = previous.swap_remove(index);
+                if entry.connection != saved.connection {
+                    entry.remembered_credentials = None;
+                }
+                entry.connection = saved.connection;
+                entry.auto_connect = saved.auto_connect;
+                entry
+            })
+            .collect();
+    }
+
     pub(crate) fn saved_connections(&self) -> Vec<SavedNetworkConnection> {
         self.entries
             .iter()

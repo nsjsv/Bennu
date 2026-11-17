@@ -58,17 +58,21 @@ mod tests {
     fn the_sidebar_shows_the_favorites_and_connections_saved_by_the_main_program() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("state.sqlite");
+        let saved = SidebarSettings {
+            sidebar_favorites: Some(vec![StoredSidebarFavorite {
+                label: "Projects".to_owned(),
+                path: StoredPath::from_path(Path::new("/srv/projects")),
+            }]),
+            network_connections: vec![
+                stored_connection("nas", "smb", "smb://server/share"),
+                stored_connection("bad", "ftp", "ftp://server"),
+            ],
+        };
         UserSettingsStore::new(&database)
             .unwrap()
-            .replace_user_preferences(&SidebarSettings {
-                sidebar_favorites: Some(vec![StoredSidebarFavorite {
-                    label: "Projects".to_owned(),
-                    path: StoredPath::from_path(Path::new("/srv/projects")),
-                }]),
-                network_connections: vec![
-                    stored_connection("nas", "smb", "smb://server/share"),
-                    stored_connection("bad", "ftp", "ftp://server"),
-                ],
+            .save_user_preferences(&bennu_state::PreferencesChange {
+                seen: saved.clone(),
+                current: saved,
             })
             .unwrap();
 

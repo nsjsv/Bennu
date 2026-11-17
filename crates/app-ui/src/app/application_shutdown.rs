@@ -1,6 +1,8 @@
 use std::collections::{BTreeSet, HashSet};
 
-use bennu_state::{StateDatabase, StoredApplicationShutdown, StoredBrowserSessionShutdown};
+use bennu_state::{
+    PreferencesChange, StateDatabase, StoredApplicationShutdown, StoredBrowserSessionShutdown,
+};
 use iced::{window, Task};
 
 use super::file_operations::queue_finish_from_completion;
@@ -69,7 +71,12 @@ impl FileBrowser {
         let user_preferences_writable =
             self.user_preferences_persistence == config::SettingsPersistence::Writable;
         let user_preferences = (user_preferences_need_final_commit && user_preferences_writable)
-            .then(|| self.user_config.user_preferences().to_stored());
+            .then(|| {
+                config::stored_change(&PreferencesChange {
+                    seen: self.user_preferences_seen.clone(),
+                    current: self.user_config.user_preferences(),
+                })
+            });
         let disposition = self.operation_queue.begin_application_shutdown();
         startup_trace::record_application_shutdown_plan(
             disposition.waiting_for_operation_ids.len(),
@@ -159,7 +166,7 @@ impl FileBrowser {
 
     pub(super) fn accept_application_shutdown_user_preferences_saved(
         &mut self,
-        outcome: Result<(), String>,
+        outcome: Result<config::UserPreferences, String>,
     ) -> Task<Message> {
         self.user_preferences_save_in_flight = false;
         if let Err(error) = outcome {

@@ -138,6 +138,9 @@ impl FileBrowser {
 
     fn apply_loaded_user_config(&mut self, mut user_config: UserConfig) {
         user_config.save_view_state = user_config.startup_location_policy.saves_view_state();
+        // 刚从库里、配置文件里读到（或启动修复刚写下）的就是它们现在的内容。
+        self.user_preferences_seen = user_config.user_preferences();
+        self.app_config_seen = crate::config::AppConfig::from_user_config(&user_config);
         self.sidebar_width = self.sidebar_width_for_window(user_config.sidebar_width);
         self.right_preview_panel_open = user_config.right_preview_panel_open;
         self.right_preview_panel_width = crate::config::normalize_right_preview_panel_width(

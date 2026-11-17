@@ -4,7 +4,7 @@ use std::path::Path;
 
 use bennu_preview::preview_config::StoredPreviewPreferences;
 use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
-use bennu_state::{UserSettingsStore, USER_PREFERENCES_KEY};
+use bennu_state::{PreferencesChange, UserSettingsStore, USER_PREFERENCES_KEY};
 use rusqlite::{params, Connection};
 
 use super::*;
@@ -120,7 +120,12 @@ fn user_preferences_roundtrip_replace() {
         ..defaults
     };
 
-    store.replace_user_preferences(&first).unwrap();
+    store
+        .save_user_preferences(&PreferencesChange {
+            seen: StoredUserPreferences::default(),
+            current: first.clone(),
+        })
+        .unwrap();
     assert_eq!(stored_preferences(&store), Some(first.clone()));
 
     let second = StoredUserPreferences {
@@ -128,9 +133,14 @@ fn user_preferences_roundtrip_replace() {
         sidebar_favorites: Some(Vec::new()),
         network_connections: Vec::new(),
         shortcuts: Vec::new(),
-        ..first
+        ..first.clone()
     };
-    store.replace_user_preferences(&second).unwrap();
+    store
+        .save_user_preferences(&PreferencesChange {
+            seen: first.clone(),
+            current: second.clone(),
+        })
+        .unwrap();
 
     assert_eq!(stored_preferences(&store), Some(second));
 }

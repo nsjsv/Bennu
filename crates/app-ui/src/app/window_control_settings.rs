@@ -119,7 +119,7 @@ mod tests {
             into_stream(browser.toggle_window_control_visibility(WindowControlKind::Minimize))
                 .is_some()
         );
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
         assert_eq!(
             browser
                 .user_config()
@@ -132,7 +132,7 @@ mod tests {
             browser.select_window_control_side(WindowControlKind::Close, WindowControlSide::Left)
         )
         .is_some());
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
         assert!(into_stream(
             browser.select_window_control_side(WindowControlKind::Close, WindowControlSide::Left)
         )
@@ -172,7 +172,7 @@ mod tests {
             WindowControlMoveDirection::Down
         ))
         .is_some());
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
         assert_eq!(
             kinds_on(&browser, WindowControlSide::Right),
             vec![
@@ -189,7 +189,7 @@ mod tests {
             WindowControlMoveDirection::Down
         ))
         .is_some());
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
         assert!(into_stream(browser.move_window_control_within_side(
             WindowControlKind::Minimize,
             WindowControlMoveDirection::Down
@@ -224,7 +224,7 @@ mod tests {
     fn reset_restores_confirmed_default() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         drop(browser.select_window_control_side(WindowControlKind::Close, WindowControlSide::Left));
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
 
         assert!(into_stream(browser.reset_window_controls()).is_some());
         assert_eq!(

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use bennu_preview::preview_config::{StoredPreviewExtensionRules, StoredPreviewPreferences};
 use bennu_sidebar::{StoredNetworkConnection, StoredSidebarFavorite};
-use bennu_state::{StoreResult, StoredPath, UserSettingsStore};
+use bennu_state::{PreferencesChange, StoreResult, StoredPath, UserSettingsStore};
 use desktop_linux::TerminalEmulator;
 use file_core::FileOperationVerification;
 
@@ -556,9 +556,18 @@ impl UserConfig {
 
 pub(crate) fn save_user_preferences(
     store: &UserSettingsStore,
-    preferences: &UserPreferences,
+    change: &PreferencesChange<UserPreferences>,
 ) -> StoreResult<()> {
-    store.replace_user_preferences(&preferences.to_stored())
+    store.save_user_preferences(&stored_change(change))
+}
+
+pub(crate) fn stored_change(
+    change: &PreferencesChange<UserPreferences>,
+) -> PreferencesChange<StoredUserPreferences> {
+    PreferencesChange {
+        seen: change.seen.to_stored(),
+        current: change.current.to_stored(),
+    }
 }
 
 fn stored_sidebar_favorites(favorites: &[SidebarFavoriteConfig]) -> Vec<StoredSidebarFavorite> {

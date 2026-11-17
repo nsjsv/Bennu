@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use bennu_state::{StoreResult, UnreadablePreferences, UserSettingsStore};
+use bennu_state::{PreferencesChange, StoreResult, UnreadablePreferences, UserSettingsStore};
 
 use super::app_config::AppConfig;
 use super::legacy_toml;
@@ -61,7 +61,10 @@ pub(super) fn load_user_config_from_sources(
                 Err(error) => return unavailable(default, error.to_string()),
             };
             let recovery = store
-                .replace_user_preferences(&migrated.user_preferences().to_stored())
+                .save_user_preferences(&PreferencesChange {
+                    seen: default.user_preferences().to_stored(),
+                    current: migrated.user_preferences().to_stored(),
+                })
                 .err()
                 .map(|error| SettingsRecovery::MigrationNotSaved {
                     error: error.to_string(),

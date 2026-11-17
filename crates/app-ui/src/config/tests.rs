@@ -101,7 +101,14 @@ fn app_config_toml_contains_only_startup_level_keys() {
         search_max_extract_bytes: 4096,
     };
 
-    app_config::save_app_config_at(&path, &app_config).expect("save app config");
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: app_config::default_app_config(),
+            current: app_config.clone(),
+        },
+    )
+    .expect("save app config");
     let document = fs::read_to_string(&path)
         .unwrap()
         .parse::<toml::Table>()
@@ -155,7 +162,14 @@ fn writes_app_config_without_user_preferences() {
         search_max_extract_bytes: 8192,
     };
 
-    app_config::save_app_config_at(&path, &app_config).expect("write app config");
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: app_config::default_app_config(),
+            current: app_config,
+        },
+    )
+    .expect("write app config");
 
     let content = fs::read_to_string(path).expect("read app config");
     assert!(content.starts_with("# Bennu application configuration\n"));
@@ -243,7 +257,14 @@ fn user_preferences_round_trip_through_sqlite() {
     );
     config.shortcuts.apply_toml_table(&shortcut_table);
 
-    save_user_preferences(&store, &config.user_preferences()).expect("save preferences");
+    save_user_preferences(
+        &store,
+        &bennu_state::PreferencesChange {
+            seen: default_user_config().user_preferences(),
+            current: config.user_preferences(),
+        },
+    )
+    .expect("save preferences");
 
     let loaded = user_config_loading::load_user_config_from_sources(
         app_config.clone(),
@@ -1012,7 +1033,14 @@ fn saving_app_config_keeps_the_probe_cache_section() {
     renderer_probe_cache::save_renderer_probe_cache_at(&path, &stored).expect("write cache");
 
     let user_persisted = AppConfig::from_user_config(&default_user_config());
-    app_config::save_app_config_at(&path, &user_persisted).expect("save app config");
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: user_persisted.clone(),
+            current: user_persisted.clone(),
+        },
+    )
+    .expect("save app config");
 
     assert_eq!(
         renderer_probe_cache::load_renderer_probe_cache_at(&path),

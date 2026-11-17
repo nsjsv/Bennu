@@ -386,8 +386,10 @@ pub(crate) enum Message {
     FileOperationPersistenceFinished(file_operations::FileOperationPersistenceOutcome),
     OperationProgressAnimationTick,
     OperationSupervisionTick,
-    /// 任务库有写入（或刚开始监视）：看看别的进程是否留下或拿着可恢复任务。
-    OperationStoreChanged,
+    /// 状态库有写入（或刚开始监视）：看看别的进程是否留下或拿着可恢复任务、是否改了设置。
+    StateDatabaseChanged,
+    /// 重读的设置（别的 Bennu 进程可能改过）。
+    StoredUserPreferencesRead(Result<crate::config::UserPreferences, String>),
     /// 别的进程放掉了一条任务的锁：(stored id, 等待代数, 等待本身的结果)。
     ForeignTaskReleased(u64, u64, Result<(), String>),
     FileDragSpringOpenTick,
@@ -612,8 +614,9 @@ pub(crate) enum Message {
     SearchServiceIncidentDetailsCopyRequested(SearchServiceDiagnosticKind),
     SystemModeChanged(AppearanceMode),
     MatugenColorsUpdated(Result<Option<MatugenColors>, String>),
-    UserPreferencesSaved(Result<(), String>),
-    AppConfigSaved(Result<(), String>),
+    /// 存成功时带着写下的那份设置。
+    UserPreferencesSaved(Result<crate::config::UserPreferences, String>),
+    AppConfigSaved(Result<crate::config::AppConfig, String>),
     ColumnWidthOverrideSaved(Result<(), String>),
     ExpandedDirectoryDiscoveryBatch(ExpandedDirectoryLoadRequest, DirectoryDiscoveryBatch),
     ExpandedDirectoryEntriesReady(

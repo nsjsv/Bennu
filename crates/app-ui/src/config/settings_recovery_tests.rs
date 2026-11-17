@@ -471,7 +471,14 @@ fn saving_the_config_keeps_keys_this_version_does_not_know() {
         "from_a_newer_version = \"kept\"\n[some_tool]\nanswer = 42\n",
     );
 
-    app_config::save_app_config_at(&path, &default_app_config()).unwrap();
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: default_app_config(),
+            current: default_app_config(),
+        },
+    )
+    .unwrap();
 
     let document = config_document(&path);
     assert_eq!(document["from_a_newer_version"].as_str(), Some("kept"));
@@ -484,7 +491,14 @@ fn saving_over_an_unparseable_config_file_backs_it_up_first() {
     let directory = tempfile::tempdir().unwrap();
     let path = config_file_with(directory.path(), "[[broken");
 
-    app_config::save_app_config_at(&path, &default_app_config()).unwrap();
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: default_app_config(),
+            current: default_app_config(),
+        },
+    )
+    .unwrap();
 
     let backups = config_backups(directory.path());
     assert_eq!(backups.len(), 1);
@@ -530,4 +544,46 @@ fn the_probe_cache_writes_only_its_own_section() {
     let document = config_document(&path);
     assert!(!document.contains_key("renderer_probe_cache"));
     assert_eq!(document["rendering_backend"].as_str(), Some("quantum"));
+}
+
+#[test]
+fn saving_the_config_file_keeps_a_key_another_window_changed() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.toml");
+    let defaults = default_app_config();
+    let other_gpu = match defaults.rendering_gpu_preference {
+        RenderingGpuPreference::DisplayGpu => RenderingGpuPreference::HighPerformanceGpu,
+        RenderingGpuPreference::HighPerformanceGpu => RenderingGpuPreference::DisplayGpu,
+    };
+    // 窗口 A 换了显卡偏好。
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: defaults.clone(),
+            current: AppConfig {
+                rendering_gpu_preference: other_gpu,
+                ..defaults.clone()
+            },
+        },
+    )
+    .unwrap();
+    // 窗口 B 手上还是启动时读到的那份，它只改了内容索引。
+    app_config::save_app_config_at(
+        &path,
+        &bennu_state::PreferencesChange {
+            seen: defaults.clone(),
+            current: AppConfig {
+                search_content_indexing_enabled: !defaults.search_content_indexing_enabled,
+                ..defaults.clone()
+            },
+        },
+    )
+    .unwrap();
+
+    let saved = app_config::load_app_config_at(&path);
+    assert_eq!(saved.rendering_gpu_preference, other_gpu);
+    assert_eq!(
+        saved.search_content_indexing_enabled,
+        !defaults.search_content_indexing_enabled
+    );
 }

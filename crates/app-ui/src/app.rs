@@ -49,6 +49,7 @@ mod path_suggestions;
 mod paths;
 mod persistence_feedback;
 mod pointer_interactions;
+mod preferences_sync;
 mod preview_settings;
 pub(crate) mod preview_state;
 mod preview_window_view;
@@ -132,7 +133,7 @@ use crate::app::convert::ConvertState;
 use crate::app::events::global_event_message;
 use crate::app::runtime::{
     desktop_activation_subscription, directory_watch_subscription, foreign_task_wait_subscription,
-    matugen_colors_subscription, operation_store_subscription, storage_change_subscription,
+    matugen_colors_subscription, state_database_subscription, storage_change_subscription,
     system_mode_subscription, wayland_file_dnd_subscription, x11_file_dnd_subscription,
 };
 use crate::app::sidebar_bookmarks::SidebarBookmarkMotionState;
@@ -415,6 +416,11 @@ pub(crate) struct FileBrowser {
     list_directory_summary_cache: crate::model::ListDirectorySummaryCache,
     user_preferences_save_in_flight: bool,
     pending_user_preferences_save: Option<config::UserPreferences>,
+    /// 这个进程上次从库里读到或写下的设置：和它不一样的才是这个进程改的（见
+    /// `preferences_sync`）。
+    user_preferences_seen: config::UserPreferences,
+    /// 同上，对 config.toml。
+    app_config_seen: config::AppConfig,
     /// 启动时设置读不了或原数据没能备份时为 Blocked：写回会覆盖用户原来的设置。
     user_preferences_persistence: config::SettingsPersistence,
     /// 同上，对 config.toml。
@@ -792,6 +798,8 @@ impl FileBrowser {
             list_directory_summary_cache: crate::model::ListDirectorySummaryCache::default(),
             user_preferences_save_in_flight: false,
             pending_user_preferences_save: None,
+            user_preferences_seen: user_config.user_preferences(),
+            app_config_seen: config::AppConfig::from_user_config(&user_config),
             user_preferences_persistence: config::SettingsPersistence::Writable,
             app_config_persistence: config::SettingsPersistence::Writable,
             pending_browser_session_save: false,
@@ -929,10 +937,10 @@ impl FileBrowser {
                     .map(|_| Message::OperationSupervisionTick),
             );
         }
-        // 认领其他进程留下的任务:任务库有写入时重新看,拿不到锁的阻塞等它被放手
-        // (见 file_operations 的 supervision)。
+        // 认领其他进程留下的任务、拿其他进程改的设置:状态库有写入时重新看,拿不到锁的
+        // 任务阻塞等它被放手(见 file_operations 的 supervision)。
         if let Some(database) = self.operation_queue.state_database() {
-            subscriptions.push(operation_store_subscription(database.path().to_path_buf()));
+            subscriptions.push(state_database_subscription(database.path().to_path_buf()));
         }
         subscriptions.extend(
             self.operation_queue

@@ -1,6 +1,7 @@
 //! 设置这一行 JSON 的读写规则（参照 GNOME dconf 与 KDE KConfig）：
-//! 读没有任何副作用，读不懂的项逐项回落默认值；写时保留本版本不认识的键，
-//! 整份读不懂的旧数据先备份再覆盖。
+//! 读没有任何副作用，读不懂的项逐项回落默认值；写时只写这个进程改过的键，其余键
+//! （别的 Bennu 进程刚改的、本版本不认识的）保留库里现在的值，整份读不懂的旧数据
+//! 先备份再覆盖。
 //!
 //! 设置文档有哪些字段是应用的事，存储层只认"一个 JSON 对象"：文档类型由调用方给
 //! （主程序与文件选择器各自只关心自己用到的键），所以这里的读写对文档类型泛型。
@@ -19,6 +20,15 @@ use crate::{StoreResult, UserSettingsStore};
 
 /// 设置文档所在行的键。
 pub const USER_PREFERENCES_KEY: &str = "main";
+
+/// 一个进程手上的设置改动：`seen` 是它上次从库里读到或写下的那份，`current` 是它现在
+/// 的。两份不一样的顶层键才是它改的；一样的键可能刚被别的进程改过，以库里的为准。
+/// 二次启动默认是另起一个进程开新窗口，整份覆盖会让后写的进程冲掉先写的进程的改动。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreferencesChange<T> {
+    pub seen: T,
+    pub current: T,
+}
 
 /// 读出的设置，读不懂的部分已换成默认值。
 #[derive(Debug, Clone, PartialEq)]
@@ -52,9 +62,12 @@ impl UserSettingsStore {
             .map(|raw_payload| decode_user_preferences(raw_payload, defaults)))
     }
 
-    pub fn replace_user_preferences<T: Serialize>(&self, preferences: &T) -> StoreResult<()> {
+    pub fn save_user_preferences<T: Serialize>(
+        &self,
+        change: &PreferencesChange<T>,
+    ) -> StoreResult<()> {
         let connection = self.database.write();
-        write_user_preferences(&connection, self.db_path(), preferences)
+        write_user_preferences(&connection, self.db_path(), change)
     }
 
     /// 主程序启动修复：先把读不懂的原始载荷另存成数据库所在目录下的文件，再写入
@@ -163,24 +176,56 @@ fn accepts<T: DeserializeOwned>(base: &Map<String, Value>, key: &str, value: &Va
     serde_json::from_value::<T>(Value::Object(candidate)).is_ok()
 }
 
-/// 写设置的唯一入口（单独保存与关闭程序时的事务共用）。现有一行里本版本不认识的
-/// 键原样并入新载荷，降级使用不会丢掉新版本写下的设置；现有一行整份读不懂时，
-/// 没有先备份就不覆盖它。
+/// 写设置的唯一入口（单独保存与关闭程序时的事务共用）：在现有一行上只换这个进程
+/// 改过的键（见 [`PreferencesChange`]）。其余键原样留着，所以别的进程刚写下的改动、
+/// 新版本写下的本版本不认识的键都不会丢；现有一行整份读不懂时，没有先备份就不覆盖它。
 pub(crate) fn write_user_preferences<T: Serialize>(
     connection: &Connection,
     db_path: &Path,
-    preferences: &T,
+    change: &PreferencesChange<T>,
 ) -> StoreResult<()> {
-    let mut payload = payload_object(preferences)?;
-    if let Some(existing) = read_payload(connection)? {
-        match serde_json::from_str::<Value>(&existing) {
-            Ok(Value::Object(existing)) => keep_unknown_keys(&mut payload, existing),
+    let current = payload_object(&change.current)?;
+    let seen = payload_object(&change.seen)?;
+    let payload = match read_payload(connection)? {
+        None => current,
+        Some(existing) => match serde_json::from_str::<Value>(&existing) {
+            Ok(Value::Object(existing)) => with_changed_keys(existing, current, &seen),
             _ => {
                 back_up_payload(db_path, &existing)?;
+                current
             }
+        },
+    };
+    upsert_payload(connection, payload)
+}
+
+/// 别的进程改了库里的设置之后，这个进程手上的设置该是什么：它自己改过、还没存完的键
+/// 留它自己的，其余用库里读到的 `stored`。
+pub fn merge_stored_preferences<T: Serialize + DeserializeOwned>(
+    change: &PreferencesChange<T>,
+    stored: &T,
+) -> StoreResult<T> {
+    let merged = with_changed_keys(
+        payload_object(stored)?,
+        payload_object(&change.current)?,
+        &payload_object(&change.seen)?,
+    );
+    Ok(serde_json::from_value(Value::Object(merged))?)
+}
+
+/// 以 `base` 为底，换上 `current` 相对 `seen` 改过的键；`base` 里还没有的键（库里是旧
+/// 版本写的）也用 `current` 的。
+fn with_changed_keys(
+    mut base: Map<String, Value>,
+    current: Map<String, Value>,
+    seen: &Map<String, Value>,
+) -> Map<String, Value> {
+    for (key, value) in current {
+        if seen.get(&key) != Some(&value) || !base.contains_key(&key) {
+            base.insert(key, value);
         }
     }
-    upsert_payload(connection, payload)
+    base
 }
 
 fn payload_object<T: Serialize>(preferences: &T) -> StoreResult<Map<String, Value>> {

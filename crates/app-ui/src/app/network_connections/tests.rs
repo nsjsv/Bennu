@@ -785,3 +785,26 @@ fn refresh_only_mount_success_does_not_navigate() {
             if path == &PathBuf::from("/run/user/1000/gvfs/smb-share:server=server,share=share")
     ));
 }
+
+#[test]
+fn connections_saved_elsewhere_keep_the_mount_state_of_the_same_connection() {
+    let mut state =
+        crate::network_connections::NetworkConnectionState::from_connections(vec![connection()]);
+    let mount = PathBuf::from("/run/user/1000/gvfs/smb-share:server=server,share=share");
+    state.entries[0].state = NetworkMountState::Mounted(mount.clone());
+    let mut renamed = connection();
+    renamed.label = "NAS at home".to_owned();
+
+    state.adopt_saved_connections(vec![
+        crate::network_connections::SavedNetworkConnection::new(renamed, true),
+        crate::network_connections::SavedNetworkConnection::new(webdav_connection(), false),
+    ]);
+
+    assert_eq!(state.entries[0].mount_path(), Some(mount.as_path()));
+    assert_eq!(state.entries[0].connection.label, "NAS at home");
+    assert!(state.entries[0].auto_connect);
+    assert!(matches!(
+        state.entries[1].state,
+        NetworkMountState::Disconnected
+    ));
+}

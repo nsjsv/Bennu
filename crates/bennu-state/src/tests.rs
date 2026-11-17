@@ -435,8 +435,11 @@ fn application_shutdown_commits_session_recovery_and_transient_cleanup_atomicall
         .database()
         .commit_application_shutdown(StoredApplicationShutdown {
             browser_session: StoredBrowserSessionShutdown::Persist(session.clone()),
-            user_preferences: Some(SettingsDocument {
-                search_history: vec!["report".to_owned()],
+            user_preferences: Some(PreferencesChange {
+                seen: SettingsDocument::default(),
+                current: SettingsDocument {
+                    search_history: vec!["report".to_owned()],
+                },
             }),
             interrupted_recoverable_tasks: vec![StoredInterruptedRecoverableTask {
                 task_id: recoverable_task_id,
@@ -492,7 +495,7 @@ fn application_shutdown_rejects_transient_id_with_recovery_and_rolls_back() {
             browser_session: StoredBrowserSessionShutdown::Persist(stored_browser_session(
                 Path::new("/tmp/new-session"),
             )),
-            user_preferences: None::<SettingsDocument>,
+            user_preferences: None::<PreferencesChange<SettingsDocument>>,
             interrupted_recoverable_tasks: Vec::new(),
             transient_task_ids: vec![recoverable_task_id],
         })
@@ -542,8 +545,11 @@ fn application_shutdown_rolls_back_prior_task_writes_when_session_write_fails() 
             browser_session: StoredBrowserSessionShutdown::Persist(stored_browser_session(
                 Path::new("/tmp/new-session"),
             )),
-            user_preferences: Some(SettingsDocument {
-                search_history: vec!["report".to_owned()],
+            user_preferences: Some(PreferencesChange {
+                seen: SettingsDocument::default(),
+                current: SettingsDocument {
+                    search_history: vec!["report".to_owned()],
+                },
             }),
             interrupted_recoverable_tasks: vec![StoredInterruptedRecoverableTask {
                 task_id: recoverable_task_id,

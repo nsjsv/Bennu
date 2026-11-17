@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::browser_session::upsert_browser_session;
 use crate::database::{current_time_ms, StateDatabase};
-use crate::preferences_payload::write_user_preferences;
+use crate::preferences_payload::{write_user_preferences, PreferencesChange};
 use crate::{
     StoreError, StoreResult, StoredBrowserSession, StoredInterruptedRecoverableTask,
     StoredTaskStatus,
@@ -22,7 +22,7 @@ pub enum StoredBrowserSessionShutdown {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredApplicationShutdown<T> {
     pub browser_session: StoredBrowserSessionShutdown,
-    pub user_preferences: Option<T>,
+    pub user_preferences: Option<PreferencesChange<T>>,
     pub interrupted_recoverable_tasks: Vec<StoredInterruptedRecoverableTask>,
     pub transient_task_ids: Vec<u64>,
 }
@@ -83,8 +83,8 @@ impl StateDatabase {
             transaction.execute("DELETE FROM task_queue WHERE id = ?1", params![task_id])?;
         }
 
-        if let Some(preferences) = &user_preferences {
-            write_user_preferences(&transaction, self.path(), preferences)?;
+        if let Some(change) = &user_preferences {
+            write_user_preferences(&transaction, self.path(), change)?;
         }
         if let Some(payload_json) = browser_session_json {
             upsert_browser_session(&transaction, &payload_json)?;

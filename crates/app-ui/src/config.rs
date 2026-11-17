@@ -52,7 +52,7 @@ pub(crate) use user_config_loading::{
     load_user_config_for_app_config, read_user_preferences_without_repair,
 };
 mod user_preferences;
-pub(crate) use user_preferences::{save_user_preferences, UserPreferences};
+pub(crate) use user_preferences::{save_user_preferences, stored_change, UserPreferences};
 
 pub(super) const CONFIG_FILE_NAME: &str = "config.toml";
 const MATUGEN_THEME_FILE_NAME: &str = "matugen.toml";

@@ -4,6 +4,8 @@
 use std::io;
 use std::path::Path;
 
+use bennu_state::PreferencesChange;
+
 use super::config_file::{
     back_up_config_file, config_file_path, read_config_file, write_config_file, ConfigFileContent,
 };
@@ -145,11 +147,16 @@ fn repair_app_config(
 
 /// 只写这三个键，文件里其余的键（探针缓存段、本版本不认识的键）原样保留；现有
 /// 文件读不懂时先备份再写。
-pub(crate) fn save_app_config(config: &AppConfig) -> io::Result<()> {
-    save_app_config_at(&config_file_path(), config)
+/// 只写这个进程改过的键（`change.seen` 是它上次读到或写下的）：别的 Bennu 进程刚改的
+/// 键保留文件里现在的值。
+pub(crate) fn save_app_config(change: &PreferencesChange<AppConfig>) -> io::Result<()> {
+    save_app_config_at(&config_file_path(), change)
 }
 
-pub(super) fn save_app_config_at(path: &Path, config: &AppConfig) -> io::Result<()> {
+pub(super) fn save_app_config_at(
+    path: &Path,
+    change: &PreferencesChange<AppConfig>,
+) -> io::Result<()> {
     let mut document = match read_config_file(path)? {
         ConfigFileContent::Missing => toml::Table::new(),
         ConfigFileContent::Parsed { document, .. } => document,
@@ -158,7 +165,7 @@ pub(super) fn save_app_config_at(path: &Path, config: &AppConfig) -> io::Result<
             toml::Table::new()
         }
     };
-    insert_app_config_keys(&mut document, config);
+    insert_changed_app_config_keys(&mut document, change);
     write_config_file(path, &document)
 }
 
@@ -214,6 +221,22 @@ fn read_key<'a, T>(
         unreadable.push(key);
     }
     value
+}
+
+/// 改过的键写进去；文件里还没有的键也补上。
+fn insert_changed_app_config_keys(
+    document: &mut toml::Table,
+    change: &PreferencesChange<AppConfig>,
+) {
+    let mut seen = toml::Table::new();
+    insert_app_config_keys(&mut seen, &change.seen);
+    let mut current = toml::Table::new();
+    insert_app_config_keys(&mut current, &change.current);
+    for (key, value) in current {
+        if seen.get(&key) != Some(&value) || !document.contains_key(&key) {
+            document.insert(key, value);
+        }
+    }
 }
 
 fn insert_app_config_keys(document: &mut toml::Table, config: &AppConfig) {

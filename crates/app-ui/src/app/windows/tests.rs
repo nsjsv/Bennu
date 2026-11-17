@@ -844,7 +844,10 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
     let mut old_preferences = config::default_user_config().user_preferences().to_stored();
     old_preferences.search_history = vec!["old".to_owned()];
     UserSettingsStore::from(store.database().clone())
-        .replace_user_preferences(&old_preferences)
+        .save_user_preferences(&bennu_state::PreferencesChange {
+            seen: config::default_user_config().user_preferences().to_stored(),
+            current: old_preferences,
+        })
         .expect("store old preferences");
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     drop(browser.accept_operation_store(Ok(LoadedOperationStore {
@@ -866,8 +869,9 @@ async fn shutdown_waits_for_old_preferences_save_then_commits_latest_search_hist
     .is_empty());
 
     assert_eq!(
-        shutdown_actions(&mut browser, |browser| browser
-            .update(Message::UserPreferencesSaved(Ok(()))))
+        shutdown_actions(&mut browser, |browser| browser.update(
+            Message::UserPreferencesSaved(Ok(browser.user_config.user_preferences()))
+        ))
         .await,
         vec![ShutdownAction::PersistenceFinished]
     );

@@ -134,18 +134,18 @@ pub(super) fn directory_watch_subscription(
     Subscription::run_with((path, include_hidden), directory_watch_stream)
 }
 
-/// 任务库（含 WAL、回滚日志）有写入时报一次；开始监视时先报一次，
-/// 补上监视建立之前别的进程已经写下的任务。
-pub(super) fn operation_store_subscription(database_path: PathBuf) -> Subscription<Message> {
-    Subscription::run_with(database_path, operation_store_stream)
+/// 状态库（含 WAL、回滚日志）有写入时报一次；开始监视时先报一次，补上监视建立之前
+/// 别的进程已经写下的任务与设置。
+pub(super) fn state_database_subscription(database_path: PathBuf) -> Subscription<Message> {
+    Subscription::run_with(database_path, state_database_stream)
 }
 
-fn operation_store_stream(
+fn state_database_stream(
     database_path: &PathBuf,
 ) -> impl iced::futures::Stream<Item = Message> + 'static {
     let database_path = database_path.clone();
     iced::stream::channel(1, async move |mut output| {
-        if output.send(Message::OperationStoreChanged).await.is_err() {
+        if output.send(Message::StateDatabaseChanged).await.is_err() {
             return;
         }
         let (Some(directory), Some(database_name)) =
@@ -160,8 +160,7 @@ fn operation_store_stream(
                         .changes
                         .iter()
                         .any(|change| change_touches_database(change, database_name));
-                    if touches_database
-                        && output.send(Message::OperationStoreChanged).await.is_err()
+                    if touches_database && output.send(Message::StateDatabaseChanged).await.is_err()
                     {
                         break;
                     }

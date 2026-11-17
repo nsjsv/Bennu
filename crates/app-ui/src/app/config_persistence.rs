@@ -1,4 +1,4 @@
-use bennu_state::UserSettingsStore;
+use bennu_state::{PreferencesChange, UserSettingsStore};
 use iced::Task;
 
 use super::FileBrowser;
@@ -30,14 +30,18 @@ impl FileBrowser {
         self.persist_user_preferences_command()
     }
 
-    pub(super) fn persist_user_preferences_command(&mut self) -> Task<Message> {
-        // 预览域设置（展开层数/后缀规则/大小上限）的变都以持久化收尾，
-        // 这里是引擎配置快照的唯一刷新点，保证引擎读到落盘值。
+    /// 预览域设置（展开层数/后缀规则/大小上限）的变都以持久化或采纳别的进程的改动收尾，
+    /// 这里是引擎配置快照的唯一刷新点，保证引擎读到落盘值。
+    pub(super) fn refresh_preview_engine_config(&mut self) {
         self.preview_engine.config = bennu_preview::engine::PreviewEngineConfig {
             directory_expand_levels: self.user_config.preview_directory_expand_levels,
             extension_rules: self.user_config.preview_extension_rules.clone(),
             size_limits: self.user_config.preview_size_limits,
         };
+    }
+
+    pub(super) fn persist_user_preferences_command(&mut self) -> Task<Message> {
+        self.refresh_preview_engine_config();
         if let config::SettingsPersistence::Blocked(recovery) = &self.user_preferences_persistence {
             // 原设置读不了或没能备份：写回会覆盖它，修改本次只在界面上生效。
             let message = recovery.message(self.active_language());
@@ -67,7 +71,10 @@ impl FileBrowser {
         preferences: config::UserPreferences,
     ) -> Task<Message> {
         save_user_preferences_command(
-            preferences,
+            PreferencesChange {
+                seen: self.user_preferences_seen.clone(),
+                current: preferences,
+            },
             self.operation_queue
                 .state_database()
                 .map(UserSettingsStore::from),
@@ -101,7 +108,19 @@ impl FileBrowser {
             self.show_global_error(message);
             return Task::none();
         }
-        save_app_config_command(config::AppConfig::from_user_config(&self.user_config))
+        save_app_config_command(PreferencesChange {
+            seen: self.app_config_seen.clone(),
+            current: config::AppConfig::from_user_config(&self.user_config),
+        })
+    }
+
+    /// 存成功：写下的那份就是这个进程此后"上次写下的设置"。
+    pub(super) fn record_saved_user_preferences(&mut self, saved: config::UserPreferences) {
+        self.user_preferences_seen = saved;
+    }
+
+    pub(super) fn record_saved_app_config(&mut self, saved: config::AppConfig) {
+        self.app_config_seen = saved;
     }
 }
 
@@ -145,11 +164,11 @@ mod tests {
         assert!(pending.show_hidden_files);
         assert_eq!(pending.sidebar_width, 240.0);
 
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
         assert!(browser.user_preferences_save_in_flight);
         assert!(browser.pending_user_preferences_save.is_none());
 
-        drop(browser.accept_user_preferences_saved(Ok(())));
+        drop(browser.accept_user_preferences_saved(Ok(browser.user_config.user_preferences())));
         assert!(!browser.user_preferences_save_in_flight);
     }
 

@@ -1139,7 +1139,7 @@ fn finished_tasks_stay_until_queue_is_cleared() {
         .database()
         .commit_application_shutdown(bennu_state::StoredApplicationShutdown {
             browser_session: bennu_state::StoredBrowserSessionShutdown::Skip,
-            user_preferences: None::<serde_json::Value>,
+            user_preferences: None::<bennu_state::PreferencesChange<serde_json::Value>>,
             interrupted_recoverable_tasks: disposition.interrupted_recoverable_tasks,
             transient_task_ids: disposition.transient_task_ids,
         })

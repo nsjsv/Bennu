@@ -10,6 +10,7 @@ use local_send::ReceiverFailure;
 
 use super::super::FileBrowser;
 use super::TransferMessage;
+use crate::config::UserPreferences;
 use crate::config::{
     default_transfer_device_alias, transfer_port_from, transfer_receive_pin_from,
     TransferAcceptMode,
@@ -24,6 +25,39 @@ impl FileBrowser {
             .clone()
             .filter(|alias| !alias.trim().is_empty())
             .unwrap_or_else(default_transfer_device_alias)
+    }
+
+    /// 别的 Bennu 进程改了 LocalSend 设置（`before` 是改之前这个进程的）：输入框跟上，
+    /// 服务按新设置重启，只改了收藏时换服务的收藏快照。
+    pub(in crate::app) fn adopt_transfer_preferences(&mut self, before: &UserPreferences) {
+        let now = self.user_config.user_preferences();
+        if before.transfer_device_alias != now.transfer_device_alias {
+            self.transfer_device_alias_input = self.effective_transfer_device_alias();
+        }
+        if before.transfer_port != now.transfer_port {
+            self.transfer_port_input = now.transfer_port.to_string();
+        }
+        if before.transfer_download_dir != now.transfer_download_dir {
+            self.transfer_download_dir_input = self.configured_transfer_download_dir();
+        }
+        if before.transfer_receive_pin != now.transfer_receive_pin {
+            self.transfer_pin_input = now.transfer_receive_pin.clone();
+        }
+        let service_changed = before.transfer_device_alias != now.transfer_device_alias
+            || before.transfer_port != now.transfer_port
+            || before.transfer_download_dir != now.transfer_download_dir
+            || before.transfer_receive_enabled != now.transfer_receive_enabled
+            || before.transfer_accept_mode != now.transfer_accept_mode
+            || before.transfer_receive_pin != now.transfer_receive_pin;
+        if service_changed {
+            self.start_or_restart_local_send_service();
+        } else if before.transfer_favorite_devices != now.transfer_favorite_devices {
+            if let Some(runtime) = &self.transfer_runtime {
+                runtime
+                    .handle
+                    .set_favorites(super::service_favorites(&now.transfer_favorite_devices));
+            }
+        }
     }
 
     /// 接收端没开起来或已停止的原因；服务重启换代后重新计算。

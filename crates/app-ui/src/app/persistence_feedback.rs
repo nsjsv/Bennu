@@ -6,13 +6,19 @@ use crate::model::Message;
 impl FileBrowser {
     pub(super) fn accept_user_preferences_saved(
         &mut self,
-        result: Result<(), String>,
+        result: Result<crate::config::UserPreferences, String>,
     ) -> Task<Message> {
+        // 先记下写成的那份，排着的下一次保存才按它算改了哪些键。
+        let result = result.map(|saved| self.record_saved_user_preferences(saved));
         let feedback = self.accept_persistence_result(result, "Failed to save user preferences");
         Task::batch([feedback, self.continue_user_preferences_save()])
     }
 
-    pub(super) fn accept_app_config_saved(&mut self, result: Result<(), String>) -> Task<Message> {
+    pub(super) fn accept_app_config_saved(
+        &mut self,
+        result: Result<crate::config::AppConfig, String>,
+    ) -> Task<Message> {
+        let result = result.map(|saved| self.record_saved_app_config(saved));
         self.accept_persistence_result(result, "Failed to save application configuration")
     }
 

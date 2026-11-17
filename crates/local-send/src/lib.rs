@@ -32,7 +32,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::sync::{broadcast, mpsc, watch, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, watch, Mutex};
 pub use tokio_util::sync::CancellationToken;
 
 pub use device::{Announce, DeviceInfo, FileMetadata, PrepareUploadRequest, PrepareUploadResponse};
@@ -98,6 +98,46 @@ pub struct Favorite {
     pub address: Option<SocketAddr>,
 }
 
+impl Favorite {
+    /// 不在线时按记住的地址连它用的目标（发送、检测）。收藏只会是开了加密的设备，连的
+    /// 时候按证书认它，这个地址上换了别人就连不上。还没见过它（没有地址）时 None。
+    pub fn remembered_device(&self, alias: String) -> Option<DeviceInfo> {
+        let address = self.address?;
+        Some(DeviceInfo {
+            alias,
+            version: "2.0".to_owned(),
+            fingerprint: self.fingerprint.clone(),
+            device_model: None,
+            device_type: None,
+            download: None,
+            port: address.port(),
+            protocol: "https".to_owned(),
+            address: Some(address.ip()),
+        })
+    }
+}
+
+/// 有人在看设备列表：至少一份 [`DeviceListLease`] 活着时服务才主动找设备（连收藏和已知
+/// 设备、扫子网），全放掉后只靠组播露面和回应。可 clone，带进需要 `'static` 的地方再取凭据。
+#[derive(Clone)]
+pub struct DeviceListWatch(watch::Sender<usize>);
+
+impl DeviceListWatch {
+    pub fn lease(&self) -> DeviceListLease {
+        self.0.send_modify(|watchers| *watchers += 1);
+        DeviceListLease(self.0.clone())
+    }
+}
+
+/// 看设备列表的凭据，drop 即不再看。
+pub struct DeviceListLease(watch::Sender<usize>);
+
+impl Drop for DeviceListLease {
+    fn drop(&mut self) {
+        self.0.send_modify(|watchers| *watchers -= 1);
+    }
+}
+
 /// 按地址找设备（"按 IP 添加"）没找到的原因；文案归 UI。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FindDeviceError {
@@ -138,7 +178,7 @@ pub enum QrEvent {
 pub enum ServiceEvent {
     /// 发现新设备或设备信息变化（address 已回填来源 IP）。
     DeviceSeen(DeviceInfo),
-    /// 设备超过 30s 未刷新被剔除（UI 移除列表条目）。
+    /// 设备超过 30s 未刷新被剔除，或检测时连不上（UI 移除列表条目）。
     DeviceLost(DeviceInfo),
     /// 未信任设备请求发送文件，等待 UI 确认。
     IncomingRequest {
@@ -181,14 +221,15 @@ pub struct ServiceHandle {
     receiver_released: receive::PortReleased,
     favorites: watch::Sender<Vec<Favorite>>,
     discovery: Arc<discovery::Discovery>,
+    device_list_watch: DeviceListWatch,
 }
 
 /// UI → 常驻服务的命令（经无界通道路由到各服务任务）。
 enum ServiceCommand {
     /// 接收确认 Modal 的回写。
     ResolveSession { session_id: String, accept: bool },
-    /// 手动刷新：清空设备表（逐个广播 DeviceLost）并立即触发一轮扫描。
-    RefreshDevices,
+    /// 手动刷新：清空设备表（逐个广播 DeviceLost）并立即找一轮整的，找完回这个 oneshot。
+    RefreshDevices(oneshot::Sender<()>),
     /// 本机取消一次接收。
     CancelReceive { session_id: String },
 }
@@ -275,9 +316,26 @@ impl ServiceHandle {
         });
     }
 
-    /// 手动刷新设备列表：清空现有条目并立即触发一轮子网扫描。
-    pub fn refresh_devices(&self) {
-        let _ = self.commands.send(ServiceCommand::RefreshDevices);
+    /// 手动刷新设备列表：清空现有条目，立即扫整个子网。future 结束即这一轮找完（服务停了
+    /// 也结束）；只在有人看设备列表（`device_list_watch`）时找。
+    pub fn refresh_devices(&self) -> impl Future<Output = ()> + Send + 'static {
+        let (done, finished) = oneshot::channel();
+        let _ = self.commands.send(ServiceCommand::RefreshDevices(done));
+        async move {
+            let _ = finished.await;
+        }
+    }
+
+    /// 只连这一台一次：连上就刷新它，连不上（或这个地址上换了别人）就从设备表拿掉并发
+    /// `DeviceLost`。结果都走事件流；future 结束即检测完。
+    pub fn check_device(&self, target: &DeviceInfo) -> impl Future<Output = ()> + Send + 'static {
+        let discovery = Arc::clone(&self.discovery);
+        let target = target.clone();
+        async move { discovery::check_device(&discovery, &target).await }
+    }
+
+    pub fn device_list_watch(&self) -> DeviceListWatch {
+        self.device_list_watch.clone()
     }
 
     /// 按新配置重启：关停本服务，新服务的接收端等本服务放掉接收端口后再绑定。
@@ -360,8 +418,9 @@ impl LocalSendService {
             ),
         };
 
-        // sweeper 的手动刷新通知：命令路由收到 RefreshDevices 时 notify 一次。
-        let sweeper_notify = Arc::new(tokio::sync::Notify::new());
+        // 手动刷新：命令路由清空设备表后把等结果的 oneshot 转给找设备的任务。
+        let (refresh_requests, refresh_rx) = mpsc::unbounded_channel();
+        let (device_list_watch, watchers) = watch::channel(0);
         let discovery = Arc::new(discovery::Discovery {
             own_fingerprint: own_device.fingerprint.clone(),
             port: config.port,
@@ -373,7 +432,8 @@ impl LocalSendService {
         });
         discovery::spawn(
             Arc::clone(&discovery),
-            Arc::clone(&sweeper_notify),
+            refresh_rx,
+            watchers,
             shutdown_rx.clone(),
         );
 
@@ -381,7 +441,6 @@ impl LocalSendService {
         let (command_tx, mut command_rx) = mpsc::unbounded_channel::<ServiceCommand>();
         let devices_for_refresh = Arc::clone(&devices);
         let events_for_refresh = events.clone();
-        let sweeper_notify_for_refresh = Arc::clone(&sweeper_notify);
         let mut command_shutdown = shutdown_rx;
         tokio::spawn(async move {
             loop {
@@ -398,13 +457,12 @@ impl LocalSendService {
                                 state.sessions.end_session(&session_id).await;
                             }
                         }
-                        Some(ServiceCommand::RefreshDevices) => {
-                            // 清空设备表并逐个广播 DeviceLost，再立即触发一轮扫描。
+                        Some(ServiceCommand::RefreshDevices(done)) => {
                             let cleared = devices_for_refresh.lock().await.clear();
                             for device in cleared {
                                 let _ = events_for_refresh.send(ServiceEvent::DeviceLost(device));
                             }
-                            sweeper_notify_for_refresh.notify_one();
+                            let _ = refresh_requests.send(done);
                         }
                         None => return,
                     },
@@ -421,6 +479,7 @@ impl LocalSendService {
                 receiver_released,
                 favorites,
                 discovery,
+                device_list_watch: DeviceListWatch(device_list_watch),
             },
             events_rx,
         ))

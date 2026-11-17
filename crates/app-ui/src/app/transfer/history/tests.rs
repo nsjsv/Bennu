@@ -72,10 +72,7 @@ fn an_accepted_send_records_each_file_and_canceled_ones_as_canceled() {
         HistoryItem::File { path: Some(path), size: Some(10), .. } if path.ends_with("sent-0.txt")
     ));
     assert_eq!(
-        browser
-            .direct_send_to(&sample_device("phone"))
-            .unwrap()
-            .phase,
+        browser.direct_send_to("phone").unwrap().phase,
         crate::app::transfer::DirectSendPhase::Canceled
     );
 }

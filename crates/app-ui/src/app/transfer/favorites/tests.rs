@@ -30,6 +30,8 @@ fn favorite(fingerprint: &str, alias: &str, address: Option<&str>) -> FavoriteTr
         alias: alias.to_owned(),
         custom_alias: false,
         address: address.map(|address| address.parse().unwrap()),
+        // 和 `device` 造的一样是手机。
+        device_type: Some("mobile".to_owned()),
         added_at: String::new(),
     }
 }
@@ -367,4 +369,113 @@ fn closing_the_local_send_window_clears_the_address_form() {
     drop(browser.close_local_send_window());
 
     assert!(browser.favorite_address_form.is_none());
+}
+
+#[test]
+fn a_favorite_is_reached_where_it_is_online_else_at_its_remembered_address() {
+    let favorites = [
+        favorite("F1", "Phone", Some("192.168.1.5:53317")),
+        FavoriteTransferDevice {
+            device_type: Some("server".to_owned()),
+            ..favorite("F2", "NAS", Some("100.64.0.7:53318"))
+        },
+        favorite("F3", "Old", None),
+    ];
+    let devices = [device("F1", "https", "192.168.1.9:53317")];
+
+    let targets: Vec<_> = favorite_rows_among(&favorites, &devices)
+        .iter()
+        .map(|row| {
+            row.target().map(|target| {
+                (
+                    target.address,
+                    target.port,
+                    target.protocol,
+                    target.alias,
+                    target.device_type,
+                )
+            })
+        })
+        .collect();
+
+    assert_eq!(
+        targets,
+        [
+            // 在线：连它现在的地址，名字是它自报的。
+            Some((
+                devices[0].address,
+                53317,
+                "https".to_owned(),
+                "Phone".to_owned(),
+                Some("mobile".to_owned()),
+            )),
+            // 不在线：按记住的地址、只走加密连，名字和图标用收藏里记的。
+            Some((
+                Some("100.64.0.7".parse().unwrap()),
+                53318,
+                "https".to_owned(),
+                "NAS".to_owned(),
+                Some("server".to_owned()),
+            )),
+            // 还没见过地址：没地方可连。
+            None,
+        ]
+    );
+}
+
+#[test]
+fn offline_favorites_with_an_address_count_as_checked_targets() {
+    let mut browser = browser();
+    browser.user_config.transfer_favorite_devices = vec![
+        favorite("F1", "NAS", Some("100.64.0.7:53317")),
+        favorite("F2", "Old", None),
+    ];
+    let owner = super::super::DeviceListOwner::LocalSendWindow;
+    browser.keyboard_modifiers = iced::keyboard::Modifiers::CTRL;
+    // 按住 Ctrl 点两台不在线的收藏：都勾上，但只有记着地址的那台连得到。
+    for fingerprint in ["F1", "F2"] {
+        drop(browser.press_device(owner, device(fingerprint, "https", "100.64.0.7:53317")));
+    }
+
+    let targets: Vec<_> = browser
+        .checked_targets(owner)
+        .into_iter()
+        .map(|target| target.fingerprint)
+        .collect();
+    assert_eq!(targets, ["F1"]);
+}
+
+#[test]
+fn dropping_on_a_favorite_never_seen_says_it_has_not_been_found() {
+    let mut browser = browser();
+    browser.user_config.transfer_favorite_devices = vec![favorite("F3", "Old", None)];
+
+    drop(browser.send_paths_to_favorite("F3", vec![PathBuf::from("/a")]));
+
+    assert!(browser.global_error_notification.is_some());
+    assert!(browser.direct_send_to("F3").is_none());
+}
+
+#[test]
+fn a_favorite_remembers_its_device_type_for_the_icon_while_offline() {
+    let mut browser = browser();
+    browser.user_config.transfer_favorite_devices = vec![FavoriteTransferDevice {
+        device_type: None,
+        ..favorite("F1", "Phone", Some("192.168.1.5:53317"))
+    }];
+
+    seen(&mut browser, device("F1", "https", "192.168.1.5:53317"));
+    assert_eq!(
+        favorites(&browser)[0].device_type.as_deref(),
+        Some("mobile")
+    );
+
+    // 这次对方没报类型：留着上次记的。
+    let mut silent = device("F1", "https", "192.168.1.6:53317");
+    silent.device_type = None;
+    seen(&mut browser, silent);
+    assert_eq!(
+        favorites(&browser)[0].device_type.as_deref(),
+        Some("mobile")
+    );
 }

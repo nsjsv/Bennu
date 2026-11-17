@@ -278,6 +278,8 @@ pub(crate) struct FileBrowser {
     pub(crate) favorite_alias_inputs: HashMap<String, String>,
     /// 常驻 LocalSend 服务运行时；None = 未启动或启动失败。
     pub(crate) transfer_runtime: Option<transfer::LocalSendRuntime>,
+    /// 这个进程负不负责 LocalSend 接收（同一用户只有一个 Bennu 进程收）。
+    pub(crate) transfer_receiver_role: transfer::ReceiverRole,
     /// 二维码下载会话；与 transfer_window 同生命周期。
     pub(crate) transfer_session: Option<transfer::TransferSessionState>,
     /// 收到的文字，排队一次弹一条（队首在显示）。
@@ -477,6 +479,7 @@ impl FileBrowser {
         self.preview_engine.preview_window_bottom_controls.advance();
         self.advance_terminal_panel_height_animation();
         self.advance_terminal_tab_shift_animations();
+        self.advance_device_refresh_spin();
         // 动画帧改变布局（终端面板高度、标签栏出现、列表折叠、图标展开），
         // 逐帧把视口收进新内容。
         Task::batch([
@@ -677,6 +680,7 @@ impl FileBrowser {
             local_send_text: iced::widget::text_editor::Content::new(),
             favorite_alias_inputs: HashMap::new(),
             transfer_runtime: None,
+            transfer_receiver_role: transfer::ReceiverRole::Unclaimed,
             transfer_session: None,
             incoming_transfer: None,
             incoming_messages: std::collections::VecDeque::new(),
@@ -846,6 +850,15 @@ impl FileBrowser {
                 runtime.generation,
                 runtime.events.resubscribe(),
             ));
+            if self.waits_for_receiver_lock() {
+                subscriptions.push(transfer::receiver_lock_subscription());
+            }
+            if self.shows_device_list() {
+                subscriptions.push(transfer_service::device_list_watch_subscription(
+                    runtime.generation,
+                    runtime.handle.device_list_watch(),
+                ));
+            }
         }
         if let Some((generation, remaining)) = self.global_error_notification_countdown() {
             subscriptions.push(
@@ -973,6 +986,7 @@ impl FileBrowser {
             || self.icon_grid_expansion_animation_is_active()
             || self.sidebar_bookmark_motion_is_active()
             || self.terminal_panel.is_animating()
+            || self.device_refresh_is_spinning()
         {
             subscriptions.push(
                 time::every(bennu_theme::animation::FRAME_INTERVAL_60HZ)

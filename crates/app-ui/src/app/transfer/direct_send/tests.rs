@@ -34,7 +34,7 @@ fn checking(browser: &mut FileBrowser, batch: u64, fingerprint: &str) -> u64 {
 }
 
 fn send<'a>(browser: &'a FileBrowser, fingerprint: &str) -> &'a DirectSendState {
-    browser.direct_send_to(&sample_device(fingerprint)).unwrap()
+    browser.direct_send_to(fingerprint).unwrap()
 }
 
 #[test]

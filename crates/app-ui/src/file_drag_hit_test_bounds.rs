@@ -7,8 +7,8 @@ use iced::{Rectangle, Task, Vector};
 
 use crate::model::{
     BreadcrumbDropTargetBounds, BrowserPaneId, ColumnEntryBounds, DirectoryFileDragTargetBounds,
-    FileDragBlockedDirectoryBounds, FileDragHitTestBounds, FileDropLayoutRequest, Message,
-    SidebarFileDragTargetBounds, TabFileDropTarget, TabFileDropTargetBounds,
+    FileDragBlockedDirectoryBounds, FileDragHitTestBounds, FileDropLayoutRequest, FileDropTarget,
+    Message, SidebarFileDragTargetBounds, TabFileDropTarget, TabFileDropTargetBounds,
 };
 
 #[derive(Debug, Clone)]
@@ -39,7 +39,10 @@ pub(crate) enum FileDragHitTestMarker {
         favorite_index: Option<usize>,
     },
     EmptySidebarBookmarks,
-    SidebarLocalSend,
+    /// 侧栏 LocalSend 入口或它下面的收藏设备。
+    SidebarLocalSend {
+        target: FileDropTarget,
+    },
 }
 
 pub(crate) enum FileDragHitTestBoundsRequest {
@@ -109,7 +112,7 @@ struct FileDragHitTestBoundsOperation {
     blocked_directories: Vec<FileDragBlockedDirectoryBounds>,
     sidebar_directories: Vec<SidebarFileDragTargetBounds>,
     empty_sidebar_bookmark_bounds: Option<Rectangle>,
-    local_send_bounds: Option<Rectangle>,
+    local_send: Vec<(FileDropTarget, Rectangle)>,
     /// 遍历中遇到的滚动可视区(surface 坐标),拖拽聚合判断用来区分
     /// "超出列表视口"与"超出窗口"。
     scrollable_viewports: Vec<Rectangle>,
@@ -129,7 +132,7 @@ impl FileDragHitTestBoundsOperation {
             blocked_directories: Vec::new(),
             sidebar_directories: Vec::new(),
             empty_sidebar_bookmark_bounds: None,
-            local_send_bounds: None,
+            local_send: Vec::new(),
             scrollable_viewports: Vec::new(),
         }
     }
@@ -164,7 +167,7 @@ impl FileDragHitTestBoundsOperation {
             blocked_directories: self.blocked_directories.clone(),
             sidebar_directories: self.sidebar_directories.clone(),
             empty_sidebar_bookmarks: self.empty_sidebar_bookmark_bounds,
-            local_send: self.local_send_bounds,
+            local_send: self.local_send.clone(),
         }
     }
 }
@@ -261,8 +264,8 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
             FileDragHitTestMarker::EmptySidebarBookmarks => {
                 self.empty_sidebar_bookmark_bounds = Some(bounds);
             }
-            FileDragHitTestMarker::SidebarLocalSend => {
-                self.local_send_bounds = Some(bounds);
+            FileDragHitTestMarker::SidebarLocalSend { target } => {
+                self.local_send.push((target.clone(), bounds));
             }
         }
     }

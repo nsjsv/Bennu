@@ -1,14 +1,14 @@
-//! 常驻 LocalSend 服务的装配层：事件订阅与服务配置。
+//! 常驻 LocalSend 服务的装配层：事件订阅、看设备列表的凭据与服务配置。
 //!
 //! 从 transfer.rs 拆出的服务接线职责：状态机只消费这里的产物，
 //! 不直接接触协议装配细节。
 
 use iced::futures::SinkExt;
-use local_send::{AcceptPolicy, ReceiverConfig, ServiceConfig, ServiceEvent};
+use local_send::{AcceptPolicy, DeviceListWatch, ReceiverConfig, ServiceConfig, ServiceEvent};
 use tokio::sync::broadcast;
 use tracing::warn;
 
-use super::transfer::{service_favorites, TransferMessage};
+use super::transfer::{service_favorites, ReceiverRole, TransferMessage};
 use crate::config::{default_transfer_device_alias, TransferAcceptMode};
 use crate::model::Message;
 
@@ -66,6 +66,48 @@ fn local_send_event_stream(
     })
 }
 
+/// 设备列表显示着时挂上：订阅拿着看列表的凭据，服务只在有凭据时主动找设备。窗口关了
+/// 订阅被丢掉，凭据随之放掉；服务换代时按 generation 重挂到新服务上。
+struct DeviceListWatchKey {
+    generation: u64,
+    watch: DeviceListWatch,
+}
+
+impl PartialEq for DeviceListWatchKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation
+    }
+}
+
+impl Eq for DeviceListWatchKey {}
+
+impl std::hash::Hash for DeviceListWatchKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.generation.hash(state);
+    }
+}
+
+pub(crate) fn device_list_watch_subscription(
+    generation: u64,
+    watch: DeviceListWatch,
+) -> iced::Subscription<Message> {
+    iced::Subscription::run_with(
+        DeviceListWatchKey { generation, watch },
+        device_list_watch_stream,
+    )
+}
+
+/// 什么都不发，只在活着期间拿着凭据。
+fn device_list_watch_stream(
+    key: &DeviceListWatchKey,
+) -> impl iced::futures::Stream<Item = Message> + 'static {
+    let lease = key.watch.lease();
+    iced::stream::channel(1, async move |_output| {
+        let _lease = lease;
+        std::future::pending::<()>().await;
+    })
+}
+
 /// 接收保存目录：用户配置优先，缺省 ~/Downloads；尽力创建。
 pub(crate) fn transfer_download_dir(user_config: &crate::config::UserConfig) -> std::path::PathBuf {
     let dir = user_config
@@ -79,11 +121,14 @@ pub(crate) fn transfer_download_dir(user_config: &crate::config::UserConfig) -> 
     dir
 }
 
-/// 组装常驻服务配置：本机设备信息、收藏设备；接收开着时再带上接收目录、确认档位与 PIN。
-pub(crate) fn service_config(user_config: &crate::config::UserConfig) -> ServiceConfig {
-    let receiver = user_config
-        .transfer_receive_enabled
-        .then(|| ReceiverConfig {
+/// 组装常驻服务配置：本机设备信息、收藏设备；这个进程负责接收且接收开着时，再带上接收
+/// 目录、确认档位与 PIN。
+pub(crate) fn service_config(
+    user_config: &crate::config::UserConfig,
+    role: &ReceiverRole,
+) -> ServiceConfig {
+    let receiver =
+        (role.is_receiving() && user_config.transfer_receive_enabled).then(|| ReceiverConfig {
             download_dir: transfer_download_dir(user_config),
             accept: match user_config.transfer_accept_mode {
                 TransferAcceptMode::AskEveryone => AcceptPolicy::AskEveryone,

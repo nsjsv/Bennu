@@ -2,7 +2,7 @@
 //! 时的“一起发”。下面的设备格子见 `local_send_tiles`。勾选按窗口各记一份（`DeviceListOwner`）。
 
 use iced::widget::{column, row, Column};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Radians, Rotation};
 
 use crate::app::transfer::{DeviceListOwner, TransferMessage};
 use crate::app::FileBrowser;
@@ -19,13 +19,15 @@ pub(super) fn devices_section_head(
     browser: &FileBrowser,
     owner: DeviceListOwner,
 ) -> Column<'_, Message> {
-    // 手动刷新：立即清空快照并触发一轮扫描（不等 10s 周期）。
-    let refresh = icon_button(themed_icon(
-        IconSymbol::Refresh,
-        IconTone::Normal,
-        MENU_ICON_SIZE,
-    ))
-    .on_press(Message::Transfer(TransferMessage::RefreshDevicesRequested));
+    // 手动刷新：箭头一直转到这一轮找完，转着时点不了。
+    let turn = browser.device_refresh_turn();
+    let arrow = themed_icon(IconSymbol::Refresh, IconTone::Normal, MENU_ICON_SIZE).rotation(
+        Rotation::Floating(Radians(turn.unwrap_or(0.0) * std::f32::consts::TAU)),
+    );
+    let refresh = icon_button(arrow).on_press_maybe(
+        turn.is_none()
+            .then_some(Message::Transfer(TransferMessage::RefreshDevicesRequested)),
+    );
     let can_send = browser.has_outgoing(owner);
     let any_device =
         !browser.favorite_rows().is_empty() || !browser.unclaimed_nearby_devices().is_empty();
@@ -60,7 +62,7 @@ fn checked_bar(
     if browser.checked_devices.of(owner).is_empty() {
         return None;
     }
-    let count = browser.checked_online_devices(owner).len();
+    let count = browser.checked_targets(owner).len();
     let action = |label: String, message: Option<TransferMessage>| {
         normal_button(readable_text(label)).on_press_maybe(message.map(Message::Transfer))
     };

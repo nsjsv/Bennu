@@ -343,12 +343,16 @@ fn this_computer_footer(browser: &FileBrowser) -> Element<'_, Message> {
         error_text(receiver_failure_message(failure))
     } else if browser.transfer_runtime.is_none() {
         error_text(tr!("LocalSend is not running."))
-    } else if receiving {
-        muted_setting_text(tr!("Other devices can find this computer."))
-    } else {
+    } else if !receiving {
         muted_setting_text(tr!(
             "Receiving is off. Other devices cannot find this computer."
         ))
+    } else if browser.waits_for_receiver_lock() {
+        muted_setting_text(tr!(
+            "Another Bennu window receives files. This window takes over when that one closes."
+        ))
+    } else {
+        muted_setting_text(tr!("Other devices can find this computer."))
     };
     let toggle = button(switch(receiving))
         .padding(0)

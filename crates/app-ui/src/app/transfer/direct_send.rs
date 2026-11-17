@@ -185,16 +185,16 @@ impl DirectSendState {
 }
 
 impl FileBrowser {
-    pub(crate) fn direct_send_to(&self, device: &DeviceInfo) -> Option<&DirectSendState> {
+    pub(crate) fn direct_send_to(&self, fingerprint: &str) -> Option<&DirectSendState> {
         self.transfer_tasks
-            .latest_send_to(&device.fingerprint)
+            .latest_send_to(fingerprint)
             .map(|(_, send)| send)
     }
 
     /// 同一台设备同时只有一次直推：设备行的按钮与发送入口都按它判断。
     pub(crate) fn can_send_to(&self, device: &DeviceInfo) -> bool {
         !self
-            .direct_send_to(device)
+            .direct_send_to(&device.fingerprint)
             .is_some_and(DirectSendState::is_busy)
     }
 

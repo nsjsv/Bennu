@@ -1,4 +1,5 @@
-//! LocalSend 收藏设备：唯一的改动入口、设备列表划分、"按 IP 添加"表单。
+//! LocalSend 收藏设备：唯一的改动入口、设备列表划分、侧栏上拖给它直接发、"按 IP 添加"
+//! 表单。
 //!
 //! 收藏列表只存在 UserConfig 里。每次改动都经 `change_favorites`：改配置 → 推给常驻
 //! 服务（接收时判信任、扫描时按记住的地址连）→ 持久化，所以服务手里的快照永远等于
@@ -6,12 +7,13 @@
 //! 自动往这台电脑发文件、改掉收藏记住的地址。
 
 use std::net::{Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
 
 use iced::Task;
 use local_send::{DeviceInfo, FindDeviceError};
 
 use super::super::FileBrowser;
-use super::TransferMessage;
+use super::{Outgoing, TransferMessage};
 use crate::config::FavoriteTransferDevice;
 use crate::model::Message;
 
@@ -19,6 +21,22 @@ use crate::model::Message;
 pub(crate) struct FavoriteRow<'a> {
     pub(crate) favorite: &'a FavoriteTransferDevice,
     pub(crate) online: Option<&'a DeviceInfo>,
+}
+
+impl FavoriteRow<'_> {
+    /// 点它、往它身上拖文件时连的那台：在线就是它，不在线按记住的地址连（连的时候按
+    /// 证书认，地址上换了别人连不上），带上记住的设备类型好选图标。还没见过它的地址时
+    /// None。
+    pub(crate) fn target(&self) -> Option<DeviceInfo> {
+        self.online.cloned().or_else(|| {
+            let remembered =
+                service_favorite(self.favorite).remembered_device(self.favorite.alias.clone())?;
+            Some(DeviceInfo {
+                device_type: self.favorite.device_type.clone(),
+                ..remembered
+            })
+        })
+    }
 }
 
 /// LocalSend 窗口里展开的"按 IP 添加"表单。
@@ -116,6 +134,28 @@ impl FileBrowser {
             favorites.retain(|favorite| favorite.fingerprint != fingerprint);
             favorites.len() != before
         })
+    }
+
+    /// 侧栏收藏设备上松手：不先检测，直接发（在线连它，不在线按记住的地址连）。发送本身
+    /// 就是检测，连不上在任务面板里显示失败。还没见过它的地址时没地方可连，提示一下。
+    pub(in crate::app) fn send_paths_to_favorite(
+        &mut self,
+        fingerprint: &str,
+        paths: Vec<PathBuf>,
+    ) -> Task<Message> {
+        let Some(row) = self
+            .favorite_rows()
+            .into_iter()
+            .find(|row| row.favorite.fingerprint == fingerprint)
+        else {
+            return Task::none();
+        };
+        let Some(target) = row.target() else {
+            self.show_global_error(tr!("This device has not been found yet."));
+            return Task::none();
+        };
+        let paths = self.sendable_paths(paths);
+        self.begin_direct_sends(vec![target], Outgoing::Files(paths))
     }
 
     /// 发现了一台设备：是收藏就跟上它的地址（以及没改过的名字）。
@@ -334,12 +374,13 @@ fn merge_favorite(
         custom_alias: custom_name.is_some(),
         alias: custom_name.unwrap_or_else(|| device.alias.clone()),
         address: device_address(device),
+        device_type: device.device_type.clone(),
         added_at: chrono::Utc::now().to_rfc3339(),
     });
     true
 }
 
-/// 跟上这一次见到的地址；给了名字就用它，没给时名字没改过就跟着对方的名字。
+/// 跟上这一次见到的地址和设备类型；给了名字就用它，没给时名字没改过就跟着对方的名字。
 fn update_favorite(
     favorite: &mut FavoriteTransferDevice,
     device: &DeviceInfo,
@@ -351,6 +392,9 @@ fn update_favorite(
     let before = favorite.clone();
     if let Some(address) = device_address(device) {
         favorite.address = Some(address);
+    }
+    if device.device_type.is_some() {
+        favorite.device_type = device.device_type.clone();
     }
     match custom_name {
         Some(name) => {
@@ -369,13 +413,14 @@ fn device_address(device: &DeviceInfo) -> Option<SocketAddr> {
 }
 
 pub(crate) fn service_favorites(favorites: &[FavoriteTransferDevice]) -> Vec<local_send::Favorite> {
-    favorites
-        .iter()
-        .map(|favorite| local_send::Favorite {
-            fingerprint: favorite.fingerprint.clone(),
-            address: favorite.address,
-        })
-        .collect()
+    favorites.iter().map(service_favorite).collect()
+}
+
+fn service_favorite(favorite: &FavoriteTransferDevice) -> local_send::Favorite {
+    local_send::Favorite {
+        fingerprint: favorite.fingerprint.clone(),
+        address: favorite.address,
+    }
 }
 
 fn find_device_error_message(error: &FindDeviceError) -> String {

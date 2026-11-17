@@ -6,6 +6,7 @@ use iced::{Point, Task};
 
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::animation::elapsed_fraction as sidebar_bookmark_animation_progress;
+use crate::config::FavoriteTransferDevice;
 use crate::model::{
     ContextMenuState, FileDragPhase, FileDropTarget, Message, NavigationMode,
     SidebarBookmarkContextMenuState, SidebarBookmarkDragState, SidebarBookmarkDropSlot,
@@ -29,6 +30,8 @@ pub(crate) enum SidebarFixedEntry<'a> {
     Location(&'a SidebarLocation),
     Trash,
     LocalSend,
+    /// LocalSend 下面一台收藏的设备。
+    LocalSendDevice(&'a FavoriteTransferDevice),
 }
 
 impl FileBrowser {
@@ -38,6 +41,12 @@ impl FileBrowser {
             .filter(|location| !location.kind.is_user_favorite())
             .map(SidebarFixedEntry::Location)
             .chain([SidebarFixedEntry::Trash, SidebarFixedEntry::LocalSend])
+            .chain(
+                self.user_config
+                    .transfer_favorite_devices
+                    .iter()
+                    .map(SidebarFixedEntry::LocalSendDevice),
+            )
             .collect()
     }
 }

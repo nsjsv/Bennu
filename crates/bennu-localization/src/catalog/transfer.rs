@@ -201,6 +201,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "先选好文件或写好文字，再点设备。",
     ),
     ("Offline", "不在线"),
+    ("This device has not been found yet.", "还没找到这台设备。"),
+    (
+        "Another Bennu window receives files. This window takes over when that one closes.",
+        "另一个 Bennu 窗口在负责接收文件，它关掉后由这个窗口接手。",
+    ),
     ("Sending %1%", "发送中 %1%"),
     ("Waiting...", "等对方接受…"),
     ("Needs a PIN", "需要 PIN"),

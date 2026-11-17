@@ -51,6 +51,8 @@ pub(crate) enum FileDropTarget {
     Trash,
     /// 侧栏 LocalSend 入口：放进 LocalSend 待发列表。
     LocalSend,
+    /// 侧栏 LocalSend 下面的收藏设备（证书指纹）：直接发给它。
+    LocalSendDevice(String),
     SidebarBookmarkSlot(SidebarBookmarkDropSlot),
     Tab(TabFileDropTarget),
 }

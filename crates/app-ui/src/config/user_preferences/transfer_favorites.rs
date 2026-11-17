@@ -13,6 +13,7 @@ pub(super) fn stored_favorite_transfer_devices(
             alias: device.alias.clone(),
             custom_alias: device.custom_alias,
             address: device.address.map(|address| address.to_string()),
+            device_type: device.device_type.clone(),
             added_at: device.added_at.clone(),
         })
         .collect()
@@ -42,6 +43,7 @@ pub(super) fn favorite_transfer_devices_from_stored(
                 unreadable_address |= parsed.is_none();
                 parsed
             }),
+            device_type: device.device_type.clone(),
             added_at: device.added_at.clone(),
         })
         .collect::<Vec<_>>();

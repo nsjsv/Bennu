@@ -11,6 +11,7 @@ use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_sidebar_item_style,
     selected_sidebar_item_style, sidebar_bookmark_drop_slot_style,
 };
+use crate::config::FavoriteTransferDevice;
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
 use crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker;
 use crate::formatting::format_file_size;
@@ -27,6 +28,7 @@ use bennu_theme::measured_text::measured_middle_ellipsized_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use iced::alignment::Vertical;
 
+use super::local_send_tiles::device_icon;
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
 use bennu_theme::controls::{icon_button, icon_button_style};
 use bennu_theme::typography::{BODY_SIZE, BOLD, CAPTION_SIZE};
@@ -49,6 +51,7 @@ fn location_icon_symbol(location: &SidebarLocation) -> IconSymbol {
 const SIDEBAR_RESIZE_HANDLE_WIDTH: f32 = 6.0;
 const SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT: f32 = 3.0;
 const SIDEBAR_ROW_PADDING_X: f32 = 8.0;
+const SIDEBAR_LABEL_SPACING: f32 = 8.0;
 
 // 侧栏列表的几何：界面按这些常量排，收藏夹拖放落点（app/sidebar_bookmarks）按同样的
 // 常量算。行高必须固定——跟着字号变的行高曾让落点整体偏移（2026-11-10）。
@@ -83,6 +86,9 @@ pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
             SidebarFixedEntry::Location(location) => sidebar_location_item(browser, location),
             SidebarFixedEntry::Trash => sidebar_trash_item(browser),
             SidebarFixedEntry::LocalSend => sidebar_local_send_item(browser),
+            SidebarFixedEntry::LocalSendDevice(favorite) => {
+                sidebar_local_send_device_item(browser, favorite)
+            }
         });
     }
 
@@ -479,24 +485,59 @@ fn sidebar_trash_item(browser: &FileBrowser) -> Element<'_, Message> {
         .into()
 }
 
-/// LocalSend 入口：点开窗口；拖上来的文件进待发列表。它不是路径，悬停用按钮自身
-/// 的状态出样式，不往按路径记的 `hovered_sidebar` 里塞假路径。
+/// LocalSend 入口：点开窗口；拖上来的文件进待发列表。
 fn sidebar_local_send_item(browser: &FileBrowser) -> Element<'_, Message> {
+    sidebar_local_send_row(
+        browser,
+        sidebar_label(IconSymbol::Send, &tr!("LocalSend"), IconTone::Normal),
+        SIDEBAR_ROW_PADDING_X,
+        FileDropTarget::LocalSend,
+    )
+}
+
+/// LocalSend 下面一台收藏的设备：点开窗口；文件拖上来松手直接发给它。不显示在不在线：
+/// 松手时的发送本身就是检测。
+fn sidebar_local_send_device_item<'a>(
+    browser: &'a FileBrowser,
+    favorite: &'a FavoriteTransferDevice,
+) -> Element<'a, Message> {
+    sidebar_local_send_row(
+        browser,
+        sidebar_label(
+            device_icon(favorite.device_type.as_deref()),
+            &favorite.alias,
+            IconTone::Normal,
+        ),
+        // 图标和“LocalSend”几个字对齐，看得出是它下面的。
+        SIDEBAR_ROW_PADDING_X + MENU_ICON_SIZE + SIDEBAR_LABEL_SPACING,
+        FileDropTarget::LocalSendDevice(favorite.fingerprint.clone()),
+    )
+}
+
+/// LocalSend 的侧栏行：点开窗口，文件拖到上面时和指针悬停一样高亮。它们不是路径，悬停用
+/// 按钮自身的状态出样式，不往按路径记的 `hovered_sidebar` 里塞假路径。
+fn sidebar_local_send_row<'a>(
+    browser: &FileBrowser,
+    label: Row<'static, Message>,
+    indent: f32,
+    drop_target: FileDropTarget,
+) -> Element<'a, Message> {
     let drop_hovered = browser
         .file_drop_session
         .as_ref()
-        .is_some_and(|session| session.hovered_target == Some(FileDropTarget::LocalSend));
+        .is_some_and(|session| session.hovered_target.as_ref() == Some(&drop_target));
     let item = button(
-        container(sidebar_label(
-            IconSymbol::Send,
-            &tr!("LocalSend"),
-            IconTone::Normal,
-        ))
-        .height(Length::Fill)
-        .align_y(Vertical::Center),
+        container(label)
+            .height(Length::Fill)
+            .align_y(Vertical::Center),
     )
     .on_press(Message::Transfer(TransferMessage::LocalSendWindowRequested))
-    .padding([0.0, SIDEBAR_ROW_PADDING_X])
+    .padding(Padding {
+        top: 0.0,
+        right: SIDEBAR_ROW_PADDING_X,
+        bottom: 0.0,
+        left: indent,
+    })
     .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
     .width(Length::Fill)
     .style(move |theme, status| {
@@ -521,7 +562,9 @@ fn sidebar_local_send_item(browser: &FileBrowser) -> Element<'_, Message> {
     // 才吃掉松开事件，拖拽经过时不会。
     track_file_drag_hit_test_marker(
         mouse_area(item).on_release(Message::DragSelectionFinished),
-        FileDragHitTestMarker::SidebarLocalSend,
+        FileDragHitTestMarker::SidebarLocalSend {
+            target: drop_target,
+        },
     )
 }
 
@@ -606,7 +649,7 @@ fn sidebar_label(icon: IconSymbol, label: &str, tone: IconTone) -> Row<'static, 
         themed_icon(icon, tone, MENU_ICON_SIZE),
         measured_middle_ellipsized_text(label.to_owned(), BODY_SIZE)
     ]
-    .spacing(8)
+    .spacing(SIDEBAR_LABEL_SPACING)
     .align_y(Alignment::Center)
 }
 

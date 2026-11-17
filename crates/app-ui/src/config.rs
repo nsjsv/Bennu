@@ -448,6 +448,8 @@ pub(crate) struct FavoriteTransferDevice {
     pub(crate) custom_alias: bool,
     /// 最后一次见到它的地址(IP + 它的端口);升级来的旧信任设备还没有。
     pub(crate) address: Option<std::net::SocketAddr>,
+    /// 对方自报的设备类型(mobile/desktop/…):不在线时也要按它选图标;还没见过时 None。
+    pub(crate) device_type: Option<String>,
     pub(crate) added_at: String,
 }
 

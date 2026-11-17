@@ -98,19 +98,11 @@ impl FileBrowser {
         window::close(window)
     }
 
-    /// 进待发列表的唯一入口（侧栏落点、选择器）：压缩包里的虚拟路径发不了，跳过并
-    /// 提示一次；已在列表里的不重复加；其余追加并后台测大小，然后打开窗口。
+    /// 进待发列表的唯一入口（侧栏落点、选择器）：已在列表里的不重复加；其余追加并后台测
+    /// 大小，然后打开窗口。
     pub(in crate::app) fn stage_local_send_paths(&mut self, paths: Vec<PathBuf>) -> Task<Message> {
-        let (sendable, inside_archive): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| {
-            file_core::archive_path_identity(path) != file_core::ArchivePathIdentity::InsideArchive
-        });
-        if !inside_archive.is_empty() {
-            self.show_global_error(tr!(
-                "Files inside an archive cannot be sent directly. Extract them first."
-            ));
-        }
         let mut measurements = Vec::new();
-        for path in sendable {
+        for path in self.sendable_paths(paths) {
             if self.local_send_staged.iter().any(|item| item.path == path) {
                 continue;
             }
@@ -124,6 +116,19 @@ impl FileBrowser {
         }
         measurements.push(self.open_local_send_window());
         Task::batch(measurements)
+    }
+
+    /// 拖进来的路径里能发的：压缩包里的虚拟路径发不了，跳过并提示一次。
+    pub(super) fn sendable_paths(&mut self, paths: Vec<PathBuf>) -> Vec<PathBuf> {
+        let (sendable, inside_archive): (Vec<_>, Vec<_>) = paths.into_iter().partition(|path| {
+            file_core::archive_path_identity(path) != file_core::ArchivePathIdentity::InsideArchive
+        });
+        if !inside_archive.is_empty() {
+            self.show_global_error(tr!(
+                "Files inside an archive cannot be sent directly. Extract them first."
+            ));
+        }
+        sendable
     }
 
     /// 按路径回填；已被移除的项找不到就丢弃。同一路径移除后又加入时，旧测量的

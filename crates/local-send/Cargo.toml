@@ -34,3 +34,5 @@ x509-parser = { version = "0.18", features = ["verify"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# 找设备的时机测试要拨快时钟（`start_paused`）。
+tokio = { workspace = true, features = ["test-util"] }

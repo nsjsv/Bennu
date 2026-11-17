@@ -718,6 +718,12 @@ impl FileBrowser {
             (FileDropOrigin::External, FileDropTarget::LocalSend) => {
                 self.stage_local_send_paths(paths)
             }
+            (FileDropOrigin::Internal(snapshot), FileDropTarget::LocalSendDevice(fingerprint)) => {
+                self.send_paths_to_favorite(&fingerprint, snapshot.sources)
+            }
+            (FileDropOrigin::External, FileDropTarget::LocalSendDevice(fingerprint)) => {
+                self.send_paths_to_favorite(&fingerprint, paths)
+            }
             (FileDropOrigin::Internal(snapshot), FileDropTarget::SidebarBookmarkSlot(slot)) => {
                 snapshot.bookmark_source.map_or_else(Task::none, |source| {
                     self.insert_sidebar_bookmark_from_drag(slot, source)

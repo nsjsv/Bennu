@@ -291,6 +291,7 @@ fn trusted_devices_saved_before_favorites_existed_become_favorites() {
             alias: "Phone".to_owned(),
             custom_alias: false,
             address: None,
+            device_type: None,
             added_at: "2026-10-01T00:00:00Z".to_owned(),
         }]
     );
@@ -298,13 +299,14 @@ fn trusted_devices_saved_before_favorites_existed_become_favorites() {
 }
 
 #[test]
-fn favorites_keep_their_address_and_custom_name_across_saves() {
+fn favorites_keep_their_address_custom_name_and_type_across_saves() {
     let mut config = default_user_config();
     config.transfer_favorite_devices = vec![FavoriteTransferDevice {
         fingerprint: "AB12CD".to_owned(),
         alias: "Living room".to_owned(),
         custom_alias: true,
         address: Some("192.168.1.9:53318".parse().unwrap()),
+        device_type: Some("mobile".to_owned()),
         added_at: String::new(),
     }];
 
@@ -327,6 +329,7 @@ fn an_unreadable_favorite_address_is_dropped_but_the_favorite_stays() {
             alias: "Phone".to_owned(),
             custom_alias: false,
             address: Some("not an address".to_owned()),
+            device_type: None,
             added_at: String::new(),
         },
         // 空 fingerprint 不能匹配上任何设备：丢掉。
@@ -335,6 +338,7 @@ fn an_unreadable_favorite_address_is_dropped_but_the_favorite_stays() {
             alias: "broken".to_owned(),
             custom_alias: false,
             address: None,
+            device_type: None,
             added_at: String::new(),
         },
     ];

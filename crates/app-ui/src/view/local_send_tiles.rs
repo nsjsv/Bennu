@@ -1,14 +1,15 @@
 //! 设备格子（LocalSend、发送到手机两个窗口共用）：大圆头像（设备类型图标）+ 名字 + 一行
-//! 状态，点一下就把这个窗口要发的东西发过去。发送中头像外面一圈进度；收藏的排前面，右上角
-//! 是实心星；按住 Ctrl 点是多选，勾上的头像带强调色描边。要输 PIN、能取消、失败要看详情的，
-//! 在格子下面的“进行中”里处理。
+//! 状态，点一下就把这个窗口要发的东西发过去（没东西可发时只检测这一台）。不在线的收藏按
+//! 记住的地址照样能点。发送中头像外面一圈进度；收藏的排前面，右上角是实心星；按住 Ctrl 点
+//! 是多选，勾上的头像带强调色描边。要输 PIN、能取消、失败要看详情的，在格子下面的“进行中”
+//! 里处理。
 
 use iced::widget::{button, column, container, tooltip, Row, Stack};
 use iced::{alignment, Alignment, Background, Border, Color, Element, Length, Theme};
 
 use crate::app::transfer::{
     AddressFormMessage, DeviceListOwner, DirectSendFailure, DirectSendPhase, DirectSendState,
-    FavoriteRow, TransferMessage,
+    TransferMessage,
 };
 use crate::app::FileBrowser;
 use crate::appearance::muted_text_color;
@@ -42,25 +43,32 @@ pub(super) fn device_tiles(
     owner: DeviceListOwner,
 ) -> Vec<Element<'_, Message>> {
     let mut tiles: Vec<Element<'_, Message>> = Vec::new();
-    for FavoriteRow { favorite, online } in browser.favorite_rows() {
+    for row in browser.favorite_rows() {
         let unfavor = star_button(
             IconSymbol::StarSolid,
             Some(TransferMessage::UnfavoritePressed(
-                favorite.fingerprint.clone(),
+                row.favorite.fingerprint.clone(),
             )),
         );
-        tiles.push(match online {
-            // 名字用收藏时起的（或对方自报的）别名。
-            Some(device) => online_tile(browser, owner, device, favorite.alias.clone(), unfavor),
-            None => offline_tile(favorite.alias.clone(), unfavor),
+        // 名字用收藏时起的（或对方自报的）别名。
+        let name = row.favorite.alias.clone();
+        let presence = if row.online.is_some() {
+            Presence::Online
+        } else {
+            Presence::Offline
+        };
+        tiles.push(match row.target() {
+            Some(target) => device_tile(browser, owner, target, name, presence, unfavor),
+            None => unknown_address_tile(name, unfavor),
         });
     }
     for device in browser.unclaimed_nearby_devices() {
-        tiles.push(online_tile(
+        tiles.push(device_tile(
             browser,
             owner,
-            device,
+            device.clone(),
             device.alias.clone(),
+            Presence::Online,
             favor_star(device),
         ));
     }
@@ -80,22 +88,24 @@ pub(super) fn tile_grid(tiles: Vec<Element<'_, Message>>) -> Element<'_, Message
 /// 看详情）。都没有时返回 `None`。
 pub(super) fn active_sends(browser: &FileBrowser) -> Option<Element<'_, Message>> {
     let favorites = browser.favorite_rows();
-    let online = favorites
+    let listed = favorites
         .iter()
-        .filter_map(|row| {
-            row.online
-                .map(|device| (row.favorite.alias.clone(), device))
+        .map(|row| {
+            (
+                row.favorite.alias.clone(),
+                row.favorite.fingerprint.as_str(),
+            )
         })
         .chain(
             browser
                 .unclaimed_nearby_devices()
                 .into_iter()
-                .map(|device| (device.alias.clone(), device)),
+                .map(|device| (device.alias.clone(), device.fingerprint.as_str())),
         );
     let mut rows = column![].spacing(10).width(Length::Fill);
     let mut any = false;
-    for (name, device) in online {
-        let Some(state) = browser.direct_send_to(device) else {
+    for (name, fingerprint) in listed {
+        let Some(state) = browser.direct_send_to(fingerprint) else {
             continue;
         };
         if !needs_attention(&state.phase) {
@@ -105,7 +115,7 @@ pub(super) fn active_sends(browser: &FileBrowser) -> Option<Element<'_, Message>
         rows = rows.push(
             column![
                 readable_text(name).size(CAPTION_SIZE),
-                direct_send_lines(browser, &device.fingerprint, state),
+                direct_send_lines(browser, fingerprint, state),
             ]
             .spacing(2),
         );
@@ -126,26 +136,44 @@ fn needs_attention(phase: &DirectSendPhase) -> bool {
     }
 }
 
-fn online_tile<'a>(
+#[derive(Clone, Copy)]
+enum Presence {
+    Online,
+    /// 不在线的收藏：灰着，点它按记住的地址连。
+    Offline,
+}
+
+fn device_tile<'a>(
     browser: &'a FileBrowser,
     owner: DeviceListOwner,
-    device: &'a DeviceInfo,
+    device: DeviceInfo,
     name: String,
+    presence: Presence,
     star: Element<'a, Message>,
 ) -> Element<'a, Message> {
-    let state = browser.direct_send_to(device);
+    let state = browser.direct_send_to(&device.fingerprint);
     let checked = browser
         .checked_devices
         .of(owner)
         .contains(&device.fingerprint);
+    let look = match presence {
+        Presence::Online => AvatarLook::Online { checked },
+        Presence::Offline => AvatarLook::Offline { checked },
+    };
     let avatar = avatar(
-        device_icon(device),
-        AvatarLook::Online { checked },
+        device_icon(device.device_type.as_deref()),
+        look,
         state.and_then(|state| ring_progress(browser, state)),
     );
-    let status = match state {
-        Some(state) => tile_status(browser, state),
-        None => TileStatus::Plain(device.device_model.clone().unwrap_or_default()),
+    let status = match (state, presence) {
+        _ if browser.is_checking_device(&device.fingerprint) => {
+            TileStatus::Plain(tr!("Connecting..."))
+        }
+        (Some(state), _) => tile_status(browser, state),
+        (None, Presence::Online) => {
+            TileStatus::Plain(device.device_model.clone().unwrap_or_default())
+        }
+        (None, Presence::Offline) => TileStatus::Plain(tr!("Offline")),
     };
     tile(
         avatar,
@@ -153,16 +181,23 @@ fn online_tile<'a>(
         status,
         Some(Message::Transfer(TransferMessage::DevicePressed {
             owner,
-            device: device.clone(),
+            device,
         })),
         Some(star),
     )
 }
 
-/// 不在线的收藏：灰着、点不了；后台按记住的地址一直在找，找到了就变成在线。
-fn offline_tile(name: String, star: Element<'static, Message>) -> Element<'static, Message> {
+/// 还没见过地址的收藏（如接收时加的、对方没留下地址）：没地方可连，点不了。
+fn unknown_address_tile(
+    name: String,
+    star: Element<'static, Message>,
+) -> Element<'static, Message> {
     tile(
-        avatar(IconSymbol::Monitor, AvatarLook::Offline, None),
+        avatar(
+            IconSymbol::Monitor,
+            AvatarLook::Offline { checked: false },
+            None,
+        ),
         name,
         TileStatus::Plain(tr!("Offline")),
         None,
@@ -173,7 +208,11 @@ fn offline_tile(name: String, star: Element<'static, Message>) -> Element<'stati
 /// 按 IP 添加只在 LocalSend 窗口里：表单跟着那个窗口开关。
 pub(super) fn add_by_ip_tile() -> Element<'static, Message> {
     tile(
-        avatar(IconSymbol::Plus, AvatarLook::Offline, None),
+        avatar(
+            IconSymbol::Plus,
+            AvatarLook::Offline { checked: false },
+            None,
+        ),
         tr!("Add by IP"),
         TileStatus::Plain(String::new()),
         Some(Message::Transfer(TransferMessage::AddressForm(
@@ -239,7 +278,7 @@ fn tile<'a>(
 #[derive(Clone, Copy)]
 enum AvatarLook {
     Online { checked: bool },
-    Offline,
+    Offline { checked: bool },
 }
 
 fn avatar(
@@ -249,7 +288,7 @@ fn avatar(
 ) -> Element<'static, Message> {
     let tone = match look {
         AvatarLook::Online { .. } => IconTone::Selected,
-        AvatarLook::Offline => IconTone::Normal,
+        AvatarLook::Offline { .. } => IconTone::Normal,
     };
     let circle = container(themed_icon(symbol, tone, DEVICE_GLYPH_SIZE))
         .center(Length::Fixed(AVATAR_SIZE))
@@ -267,20 +306,18 @@ fn avatar(
 
 fn avatar_style(theme: &Theme, look: AvatarLook) -> container::Style {
     let colors = ui_colors(theme);
-    let (background, border) = match look {
-        AvatarLook::Online { checked } => (
-            colors.primary_container,
-            if checked {
-                Border {
-                    color: colors.primary,
-                    width: 2.0,
-                    radius: (AVATAR_SIZE / 2.0).into(),
-                }
-            } else {
-                round()
-            },
-        ),
-        AvatarLook::Offline => (colors.surface_container_high, round()),
+    let (background, checked) = match look {
+        AvatarLook::Online { checked } => (colors.primary_container, checked),
+        AvatarLook::Offline { checked } => (colors.surface_container_high, checked),
+    };
+    let border = if checked {
+        Border {
+            color: colors.primary,
+            width: 2.0,
+            radius: (AVATAR_SIZE / 2.0).into(),
+        }
+    } else {
+        round()
     };
     container::Style {
         background: Some(Background::Color(background)),
@@ -384,8 +421,8 @@ fn star_button(symbol: IconSymbol, message: Option<TransferMessage>) -> Element<
 }
 
 /// 按设备类型取图标；不认识的类型按桌面电脑处理。
-fn device_icon(device: &DeviceInfo) -> IconSymbol {
-    match device.device_type.as_deref() {
+pub(super) fn device_icon(device_type: Option<&str>) -> IconSymbol {
+    match device_type {
         Some("mobile") => IconSymbol::Smartphone,
         Some("headless" | "server") => IconSymbol::HardDrive,
         _ => IconSymbol::Monitor,

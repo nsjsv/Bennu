@@ -222,7 +222,7 @@ async fn multicast_listener_shares_its_port_with_another_reusing_socket() {
     assert_eq!(second.local_addr().unwrap().port(), port);
 }
 
-fn device(fingerprint: &str) -> DeviceInfo {
+pub(crate) fn device(fingerprint: &str) -> DeviceInfo {
     DeviceInfo {
         alias: "A".into(),
         version: "2.0".into(),

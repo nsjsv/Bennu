@@ -235,3 +235,32 @@ fn bookmark_enter_does_not_replace_insert_target_during_file_drag() {
         ))
     ));
 }
+
+#[test]
+fn local_send_favorites_sit_under_the_entry_and_push_the_bookmarks_down() {
+    let mut browser = browser_with_bookmarks(vec![bookmark("/home/user/alpha")]);
+    let first_row_top = browser.sidebar_favorite_first_row_top();
+    let favorite = |fingerprint: &str| config::FavoriteTransferDevice {
+        fingerprint: fingerprint.to_owned(),
+        alias: fingerprint.to_owned(),
+        custom_alias: false,
+        address: None,
+        device_type: None,
+        added_at: String::new(),
+    };
+    browser.user_config.transfer_favorite_devices = vec![favorite("PHONE"), favorite("NAS")];
+
+    assert!(matches!(
+        browser.sidebar_fixed_entries().as_slice(),
+        [
+            ..,
+            SidebarFixedEntry::LocalSend,
+            SidebarFixedEntry::LocalSendDevice(phone),
+            SidebarFixedEntry::LocalSendDevice(nas),
+        ] if phone.fingerprint == "PHONE" && nas.fingerprint == "NAS"
+    ));
+    assert_eq!(
+        browser.sidebar_favorite_first_row_top(),
+        first_row_top + 2.0 * sidebar_bookmark_motion_stride()
+    );
+}

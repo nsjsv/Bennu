@@ -69,11 +69,12 @@ pub(super) fn resolve_file_drop_target(
     {
         return Some(FileDropTarget::Tab(tab.target.clone()));
     }
-    if bounds
+    if let Some((target, _)) = bounds
         .local_send
-        .is_some_and(|area| area.contains(position))
+        .iter()
+        .find(|(_, area)| area.contains(position))
     {
-        return Some(FileDropTarget::LocalSend);
+        return Some(target.clone());
     }
 
     if let Some(bookmark_source) = bookmark_source {
@@ -196,10 +197,10 @@ mod tests {
     #[test]
     fn sidebar_local_send_entry_resolves_to_local_send() {
         let bounds = FileDropHitTestBounds {
-            local_send: Some(Rectangle::new(
-                Point::new(0.0, 40.0),
-                Size::new(180.0, 36.0),
-            )),
+            local_send: vec![(
+                FileDropTarget::LocalSend,
+                Rectangle::new(Point::new(0.0, 40.0), Size::new(180.0, 36.0)),
+            )],
             directory_targets: vec![crate::model::DirectoryFileDragTargetBounds {
                 pane_id: crate::model::BrowserPaneId(0),
                 directory: PathBuf::from("/content"),
@@ -215,6 +216,38 @@ mod tests {
         assert_eq!(
             resolve_file_drop_target(&bounds, Point::new(20.0, 100.0), None),
             Some(FileDropTarget::Directory(PathBuf::from("/content")))
+        );
+    }
+
+    #[test]
+    fn sidebar_local_send_devices_resolve_to_the_device_under_the_pointer() {
+        let row = |y: f32| Rectangle::new(Point::new(0.0, y), Size::new(180.0, 32.0));
+        let bounds = FileDropHitTestBounds {
+            local_send: vec![
+                (FileDropTarget::LocalSend, row(40.0)),
+                (
+                    FileDropTarget::LocalSendDevice("PHONE".to_owned()),
+                    row(74.0),
+                ),
+                (
+                    FileDropTarget::LocalSendDevice("NAS".to_owned()),
+                    row(108.0),
+                ),
+            ],
+            ..FileDropHitTestBounds::default()
+        };
+
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 50.0), None),
+            Some(FileDropTarget::LocalSend)
+        );
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 80.0), None),
+            Some(FileDropTarget::LocalSendDevice("PHONE".to_owned()))
+        );
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 120.0), None),
+            Some(FileDropTarget::LocalSendDevice("NAS".to_owned()))
         );
     }
 

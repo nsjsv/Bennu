@@ -169,6 +169,7 @@ fn breadcrumb_layer<'a>(
             Some(
                 FileDropTarget::Trash
                 | FileDropTarget::LocalSend
+                | FileDropTarget::LocalSendDevice(_)
                 | FileDropTarget::SidebarBookmarkSlot(_)
                 | FileDropTarget::Tab(_),
             )

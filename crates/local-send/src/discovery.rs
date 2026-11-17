@@ -1,4 +1,4 @@
-//! 发现：UDP 组播 announce 与回应、legacy HTTP 扫描、设备表老化。
+//! 发现：UDP 组播 announce 与回应、主动找设备（有人看设备列表时）、设备表老化。
 //!
 //! 组播组 `224.0.0.167`，端口与接收端口相同（默认 53317）；对端收到
 //! `announce:true` 后优先用 HTTP `POST /api/localsend/v2/register` 回应，失败退化为
@@ -33,6 +33,8 @@ pub(crate) const ANNOUNCE_INTERVAL: Duration = Duration::from_secs(5);
 const ANNOUNCE_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// 用户按地址找设备时的超时：人在等，但对方可能在别的网段或隧道另一头。
 const FIND_TIMEOUT: Duration = Duration::from_secs(5);
+/// 用户点了一台设备时连它的超时：地址是刚才还连得上的，局域网里几毫秒就回，人在等。
+const CHECK_TIMEOUT: Duration = Duration::from_secs(2);
 /// register 路由路径（listener 回应与主动扫描共用）。
 const REGISTER_PATH: &str = "/api/localsend/v2/register";
 /// info 路由路径：不露面时扫描只查询、不登记。
@@ -103,12 +105,32 @@ impl DeviceTable {
         })
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// 表里每台设备连上它时的地址与协议：找设备时直接再连一次，保住它不被老化剔除。
+    pub(crate) fn addresses(&self) -> impl Iterator<Item = (SocketAddr, &'static str)> + '_ {
+        self.entries.values().map(|entry| {
+            let scheme = if entry.device.protocol == "https" {
+                "https"
+            } else {
+                "http"
+            };
+            (SocketAddr::new(entry.address, entry.device.port), scheme)
+        })
+    }
+
     /// 手动刷新：清空设备表并返回被清设备（逐个广播 `DeviceLost`）。
     pub(crate) fn clear(&mut self) -> Vec<DeviceInfo> {
         self.entries
             .drain()
             .map(|(_, entry)| entry.device)
             .collect()
+    }
+
+    pub(crate) fn remove(&mut self, fingerprint: &str) -> Option<DeviceInfo> {
+        self.entries.remove(fingerprint).map(|entry| entry.device)
     }
 
     /// 剔除超时设备，返回被剔除设备（需发 `DeviceLost`）。
@@ -201,18 +223,26 @@ pub(crate) enum Presence {
 }
 
 impl Presence {
+    /// 露面时向每个接口发一份组播 announce：开着 LocalSend 的设备收到会马上来登记。
+    async fn announce(&self, port: u16) {
+        let Presence::Visible(own_device) = self else {
+            return;
+        };
+        if announce_to_all(own_device, port).await.is_err() {
+            // 单次发送失败（如临时的接口变化）只影响这一次，下一次照发。
+            tracing::debug!(event = "localsend_announce_failed", "announce round failed");
+        }
+    }
+
     /// announce 循环：只在露面时运行。
     fn spawn_announcer(&self, port: u16, mut shutdown: watch::Receiver<bool>) {
         let Presence::Visible(own_device) = self else {
             return;
         };
-        let own_device = own_device.clone();
+        let presence = Presence::Visible(own_device.clone());
         tokio::spawn(async move {
             loop {
-                if announce_to_all(&own_device, port).await.is_err() {
-                    // 单次发送失败（如临时的接口变化）只影响本轮，等待下一轮即可。
-                    tracing::debug!(event = "localsend_announce_failed", "announce round failed");
-                }
+                presence.announce(port).await;
                 tokio::select! {
                     _ = tokio::time::sleep(ANNOUNCE_INTERVAL) => {}
                     _ = shutdown.changed() => return,
@@ -277,11 +307,12 @@ pub(crate) struct Discovery {
     pub(crate) favorites: watch::Receiver<Vec<Favorite>>,
 }
 
-/// 驱动全部发现任务：announce 循环（露面时）、组播监听、扫描与设备老化；收到
-/// shutdown 后全部退出。
+/// 驱动全部发现任务：announce 循环（露面时）、组播监听、主动找设备（有人看设备列表
+/// 时）与设备老化；收到 shutdown 后全部退出。
 pub(crate) fn spawn(
     discovery: Arc<Discovery>,
-    sweeper_notify: Arc<tokio::sync::Notify>,
+    refresh_requests: tokio::sync::mpsc::UnboundedReceiver<tokio::sync::oneshot::Sender<()>>,
+    watchers: watch::Receiver<usize>,
     shutdown: watch::Receiver<bool>,
 ) {
     discovery
@@ -308,10 +339,10 @@ pub(crate) fn spawn(
         }
     });
 
-    // legacy HTTP 扫描兜底：组播被网络吞掉时仍能发现常驻 LocalSend 设备。
-    tokio::spawn(sweep::run_http_sweeper(
+    tokio::spawn(sweep::run_device_search(
         Arc::clone(&discovery),
-        sweeper_notify,
+        refresh_requests,
+        watchers,
         shutdown.clone(),
     ));
 
@@ -340,7 +371,7 @@ fn bind_multicast_listener(port: u16) -> std::io::Result<UdpSocket> {
 }
 
 /// 听不到组播只影响"发现别人"：本机 announce 走每个接口单独的发送套接字，不受影响；
-/// 扫描每轮兜底，用户也无可操作的事，所以只记警告日志、不上报界面。
+/// 打开设备列表时按地址找设备兜底，用户也无可操作的事，所以只记警告日志、不上报界面。
 async fn run_listener(discovery: Arc<Discovery>, shutdown: watch::Receiver<bool>) {
     let socket = match bind_multicast_listener(discovery.port) {
         Ok(socket) => socket,
@@ -495,7 +526,37 @@ pub(crate) async fn find_device(
     }
 }
 
-/// 登记设备并在信息变化时广播 `DeviceSeen`；listener、sweeper 共用。
+/// 只连这一台一次（用户点了它）：连上就刷新它；连不上，或这个地址上换成了别的设备，
+/// 就把它拿掉。换上来的那台照样登记。
+pub(crate) async fn check_device(discovery: &Discovery, target: &DeviceInfo) {
+    let Some(ip) = target.address else {
+        return;
+    };
+    let scheme = if target.protocol == "https" {
+        "https"
+    } else {
+        "http"
+    };
+    let probed = probe_target(
+        discovery,
+        SocketAddr::new(ip, target.port),
+        scheme,
+        CHECK_TIMEOUT,
+    )
+    .await;
+    let still_there = matches!(&probed, Ok(device) if device.fingerprint == target.fingerprint);
+    if let Ok(device) = probed {
+        record_device(&discovery.devices, &discovery.events, device, ip).await;
+    }
+    if !still_there {
+        let lost = discovery.devices.lock().await.remove(&target.fingerprint);
+        if let Some(device) = lost {
+            let _ = discovery.events.send(ServiceEvent::DeviceLost(device));
+        }
+    }
+}
+
+/// 登记设备并在信息变化时广播 `DeviceSeen`；监听、找设备共用。
 async fn record_device(
     devices: &Arc<Mutex<DeviceTable>>,
     events: &broadcast::Sender<ServiceEvent>,

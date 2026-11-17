@@ -7,8 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::{
     qr_items_from_paths, DeviceListOwner, DirectSendFailure, DirectSendOutcome, DirectSendPhase,
-    DirectSendState, FileBrowser, TransferKind, TransferMessage, TransferSessionPhase,
-    TransferSessionState,
+    DirectSendState, FileBrowser, ReceiverRole, TransferKind, TransferMessage,
+    TransferSessionPhase, TransferSessionState,
 };
 use crate::app::transfer_service::service_config;
 use crate::config::{FavoriteTransferDevice, TransferAcceptMode};
@@ -37,10 +37,11 @@ fn service_config_carries_favorites_with_their_last_address() {
         alias: "Phone".to_owned(),
         custom_alias: false,
         address: Some("192.168.1.9:53317".parse().unwrap()),
+        device_type: None,
         added_at: String::new(),
     }];
 
-    let config = service_config(&user_config);
+    let config = service_config(&user_config, &ReceiverRole::Receiving { _lock: None });
 
     assert_eq!(
         config.favorites,
@@ -56,13 +57,18 @@ fn service_config_follows_the_receive_switch_and_port() {
     let mut user_config = crate::config::default_user_config();
     user_config.transfer_port = 50000;
 
-    let receiving = service_config(&user_config);
+    let receiving = service_config(&user_config, &ReceiverRole::Receiving { _lock: None });
     assert_eq!(receiving.port, 50000);
     assert!(receiving.receiver.is_some());
 
+    // 别的 Bennu 进程在收：这个进程只发不收，端口仍用于发现。
+    let standby = service_config(&user_config, &ReceiverRole::Standby);
+    assert_eq!(standby.port, 50000);
+    assert!(standby.receiver.is_none());
+
     // 关掉接收：没有接收端，端口仍用于发现。
     user_config.transfer_receive_enabled = false;
-    let hidden = service_config(&user_config);
+    let hidden = service_config(&user_config, &ReceiverRole::Receiving { _lock: None });
     assert_eq!(hidden.port, 50000);
     assert!(hidden.receiver.is_none());
 }
@@ -301,7 +307,7 @@ fn finish_direct_send(browser: &mut FileBrowser, fingerprint: &str, outcome: Dir
 }
 
 fn send_of<'a>(browser: &'a FileBrowser, fingerprint: &str) -> &'a DirectSendState {
-    browser.direct_send_to(&sample_device(fingerprint)).unwrap()
+    browser.direct_send_to(fingerprint).unwrap()
 }
 
 fn phase_of(browser: &FileBrowser, fingerprint: &str) -> DirectSendPhase {
@@ -400,7 +406,7 @@ fn direct_send_results_land_on_their_device_and_failures_are_logged_once() {
     );
     assert_eq!(send_of(&browser, "tablet-fp").file_index, 0);
     assert_eq!(phase_of(&browser, "tablet-fp"), finished(1, Vec::new()));
-    assert!(browser.direct_send_to(&sample_device("gone-fp")).is_none());
+    assert!(browser.direct_send_to("gone-fp").is_none());
     // 成功不记日志。
     assert_eq!(logs, vec![logged_failure; 2]);
     // 上传 URL 里的会话令牌必须先脱敏再进日志。
@@ -583,9 +589,12 @@ fn choosing_an_accept_mode_changes_what_the_receiver_is_given() {
     );
     browser.user_config.transfer_receive_pin = Some("4821".to_owned());
 
-    let receiver = service_config(&browser.user_config)
-        .receiver
-        .expect("receiving is on by default");
+    let receiver = service_config(
+        &browser.user_config,
+        &ReceiverRole::Receiving { _lock: None },
+    )
+    .receiver
+    .expect("receiving is on by default");
     assert_eq!(receiver.accept, local_send::AcceptPolicy::AskEveryone);
     assert_eq!(receiver.pin.as_deref(), Some("4821"));
 }

@@ -93,7 +93,7 @@ fn closing_the_window_keeps_sends_that_are_still_running() {
 
     let phone = crate::app::transfer::tests::sample_device("phone-fp");
     assert_eq!(
-        browser.direct_send_to(&phone).unwrap().phase,
+        browser.direct_send_to(&phone.fingerprint).unwrap().phase,
         crate::app::transfer::DirectSendPhase::Sending
     );
 }

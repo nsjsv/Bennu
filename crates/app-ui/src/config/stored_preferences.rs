@@ -139,6 +139,9 @@ pub(crate) struct StoredFavoriteTransferDevice {
     /// 最后一次见到的 "IP:端口";缺省(旧数据)= 还没找到过。
     #[serde(default)]
     pub address: Option<String>,
+    /// 对方自报的设备类型;缺省(旧数据)= 还没见过。
+    #[serde(default)]
+    pub device_type: Option<String>,
     /// ISO 8601 字符串;仅展示用途,解析失败不参与逻辑。
     #[serde(default)]
     pub added_at: String,

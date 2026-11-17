@@ -103,8 +103,19 @@ pub(crate) enum TransferMessage {
     ServiceEvent(ServiceEvent),
     /// 事件流积压丢弃（broadcast Lagged）：整体刷新设备表。
     DevicesRefreshRequested,
-    /// 设备列表手动刷新按钮：清空快照并立即触发一轮子网扫描。
+    /// 设备列表手动刷新按钮：清空快照，服务立刻找一轮整的。
     RefreshDevicesRequested,
+    /// 第几代服务的手动刷新那一轮找完了。
+    DevicesRefreshed(u64),
+    /// 单独检测一台设备（点了它又没东西可发）连完了；结果走服务事件。
+    DeviceChecked {
+        generation: u64,
+        fingerprint: String,
+    },
+    /// 等到了接收锁：之前在收的 Bennu 进程退出了，这个进程接手接收。
+    ReceiverLockAcquired(std::sync::Arc<ReceiverLock>),
+    /// 接手时前一个进程的接收端口放掉了（或等够了）：按接收角色重启服务。
+    ReceiverPortReleased,
     // ---- 设置（R9） ----
     DownloadDirInputChanged(String),
     DownloadDirCommitted,
@@ -158,6 +169,7 @@ pub(crate) struct LocalSendRuntime {
     pub(crate) devices: Vec<DeviceInfo>,
     /// 本服务的接收端没开起来或已停止的原因：随服务换代重置。
     pub(crate) receiver_failure: Option<ReceiverFailure>,
+    pub(crate) search: DeviceSearch,
 }
 
 /// 二维码下载会话状态（与传输窗口同生命周期）。
@@ -200,13 +212,14 @@ impl FileBrowser {
         if tokio::runtime::Handle::try_current().is_err() {
             return;
         }
+        self.claim_receiver_role();
         let previous = self.transfer_runtime.take();
         let generation = previous
             .as_ref()
             .map_or(0, |runtime| runtime.generation + 1);
         // 旧服务的挂起确认随重启作废：Modal 不能指向死会话。
         self.incoming_transfer = None;
-        let config = service_config(&self.user_config);
+        let config = service_config(&self.user_config, &self.transfer_receiver_role);
         // 重启交给服务：旧接收端放掉端口后新接收端才绑定。
         let started = match previous {
             Some(previous) => previous.handle.restart(config),
@@ -220,6 +233,7 @@ impl FileBrowser {
                     generation,
                     devices: Vec::new(),
                     receiver_failure: None,
+                    search: DeviceSearch::default(),
                 });
             }
             Err(error) => {
@@ -389,11 +403,21 @@ impl FileBrowser {
                 }
                 iced::Task::none()
             }
-            TransferMessage::RefreshDevicesRequested => {
-                if let Some(runtime) = self.transfer_runtime.as_mut() {
-                    runtime.devices.clear();
-                    runtime.handle.refresh_devices();
-                }
+            TransferMessage::RefreshDevicesRequested => self.refresh_devices(),
+            TransferMessage::ReceiverLockAcquired(lock) => self.accept_receiver_lock(lock),
+            TransferMessage::ReceiverPortReleased => {
+                self.start_or_restart_local_send_service();
+                iced::Task::none()
+            }
+            TransferMessage::DevicesRefreshed(generation) => {
+                self.accept_devices_refreshed(generation);
+                iced::Task::none()
+            }
+            TransferMessage::DeviceChecked {
+                generation,
+                fingerprint,
+            } => {
+                self.accept_device_checked(generation, &fingerprint);
                 iced::Task::none()
             }
             TransferMessage::DownloadDirInputChanged(value) => {
@@ -725,6 +749,7 @@ fn transfer_service_start_failed(error: &LocalSendError) -> String {
 }
 
 mod device_checks;
+mod device_search;
 mod direct_send;
 mod favorites;
 mod history;
@@ -734,10 +759,12 @@ mod local_send_window;
 mod messages;
 mod qr_links;
 mod receive_tasks;
+mod receiver_role;
 mod settings;
 mod tasks;
 
 pub(crate) use device_checks::{CheckedDevices, DeviceListOwner};
+use device_search::DeviceSearch;
 pub(crate) use direct_send::{
     DirectSendFailure, DirectSendOutcome, DirectSendPhase, DirectSendState, Outgoing,
 };
@@ -751,6 +778,7 @@ pub(crate) use local_send_window::LocalSendPage;
 pub(crate) use local_send_window::{ChooserTarget, StagedItem, StagedSize, StagedTab};
 pub(crate) use messages::{message_link, IncomingMessage, MessageTitle};
 pub(crate) use qr_links::QrLinks;
+pub(crate) use receiver_role::{receiver_lock_subscription, ReceiverLock, ReceiverRole};
 pub(crate) use tasks::{
     ReceivePhase, ReceiveSource, ReceiveTask, TransferKind, TransferTask, TransferTasks,
 };

@@ -546,6 +546,12 @@ impl FileBrowser {
             }
             FileDropTarget::Trash => Some(tr!("Move to Trash")),
             FileDropTarget::LocalSend => Some(tr!("Send with LocalSend")),
+            FileDropTarget::LocalSendDevice(fingerprint) => self
+                .user_config
+                .transfer_favorite_devices
+                .iter()
+                .find(|favorite| favorite.fingerprint == *fingerprint)
+                .map(|favorite| tr!("Send to %1", favorite.alias)),
             FileDropTarget::Tab(tab) => match &tab.destination {
                 TabDropDestination::Trash => Some(tr!("Move to Trash")),
                 TabDropDestination::Directory(directory) => {
@@ -634,6 +640,7 @@ pub(super) fn resolve_file_drag_target(
         target @ Some(
             FileDropTarget::Trash
             | FileDropTarget::LocalSend
+            | FileDropTarget::LocalSendDevice(_)
             | FileDropTarget::SidebarBookmarkSlot(_)
             | FileDropTarget::Tab(_),
         ) => target,

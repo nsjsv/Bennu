@@ -59,6 +59,7 @@ fn a_favorite_is_named_by_its_favorite_name_but_a_plain_device_never_is() {
         alias: "Living room".to_owned(),
         custom_alias: true,
         address: None,
+        device_type: None,
         added_at: String::new(),
     }];
 

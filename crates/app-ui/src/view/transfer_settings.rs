@@ -34,6 +34,11 @@ pub(super) fn transfer_receive_rows(browser: &FileBrowser) -> Vec<SettingsRow<'_
             failure,
         ))));
     }
+    if browser.waits_for_receiver_lock() {
+        rows.push(notice_row(RowNote::Hint(tr!(
+            "Another Bennu window receives files. This window takes over when that one closes."
+        ))));
+    }
     rows.push(accept_mode_row(browser));
     rows.push(switch_row(
         tr!("Require PIN to receive"),

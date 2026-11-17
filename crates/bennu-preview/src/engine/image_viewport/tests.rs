@@ -133,3 +133,54 @@ fn docked_image_controls_show_only_while_the_pointer_is_over_the_image() {
     drop(engine.update_preview_image_viewport(PreviewImageViewportMessage::PointerLeft, PANEL));
     assert_eq!(engine.docked_panel_controls_opacity(), 0.0);
 }
+
+/// 只拉大预览区域、不缩放：适应窗口的图跟着变大，同样的放大倍数要的像素超过了已解出的，
+/// 也要去要原图。区域没变时什么都不做（宿主每条消息后都会问一次）。
+#[test]
+fn widening_the_surface_asks_for_more_pixels_without_zooming() {
+    let mut engine = engine();
+    screen_sized_photo(&mut engine);
+    // 适应 800 宽时放大 1.9 倍显示 1520 像素，还在已解出的 1600 以内。
+    engine.preview_image_viewport.scale = 1.9;
+    assert_eq!(engine.preview_surface_resized(PANEL).units(), 0);
+
+    let wider = PreviewSize {
+        width: 1000.0,
+        height: 750.0,
+    };
+    assert_eq!(engine.preview_surface_resized(wider).units(), 1);
+    assert_eq!(engine.preview_surface_resized(wider).units(), 0);
+}
+
+/// 超大图（整张解超过 64 MB）放大后拉大窗口：开始切块（之后读露出来的块），不整张解。
+#[test]
+fn a_huge_picture_starts_tiling_when_the_surface_grows() {
+    let mut engine = engine();
+    engine.next_original_image_preview_generation();
+    engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
+        ImagePreviewContent::OriginalRaster {
+            path: PathBuf::from("/workspace/huge.jpg"),
+            raster_handle: image::Handle::from_rgba(1, 1, vec![0; 4]),
+            placeholder_handle: image::Handle::from_rgba(1, 1, vec![0; 4]),
+            width: 12000,
+            height: 9000,
+            pixel_width: 3840,
+            has_alpha: false,
+        },
+    )));
+    // 适应 800 宽时放大 4.5 倍显示 3600 像素，屏幕那张够用。
+    engine.preview_image_viewport.scale = 4.5;
+    assert_eq!(engine.preview_surface_resized(PANEL).units(), 0);
+
+    let task = engine.preview_surface_resized(PreviewSize {
+        width: 1000.0,
+        height: 750.0,
+    });
+
+    assert_eq!(task.units(), 1);
+    assert!(matches!(
+        engine.zoom_tiles,
+        Some(crate::engine::zoom_tiles::ZoomTilesState::Building)
+    ));
+    assert!(!engine.full_image_requested);
+}

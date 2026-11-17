@@ -85,6 +85,7 @@ pub(crate) fn handle_window_resized(
     {
         return task;
     }
+    let preview_size = daemon.preview.engine.preview_size;
     Task::batch([
         daemon
             .preview
@@ -92,6 +93,12 @@ pub(crate) fn handle_window_resized(
             .resize_document_preview(preview_scroll_id(PreviewScrollRegion::Document))
             .map(Message::Preview),
         refresh_preview_thumbnail_after_resize(daemon),
+        // 放大的图要的像素跟着窗口大小变：超大图补读露出来的块，其余按需解原图。
+        daemon
+            .preview
+            .engine
+            .preview_surface_resized(preview_size)
+            .map(Message::Preview),
     ])
 }
 

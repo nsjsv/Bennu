@@ -38,6 +38,7 @@ impl super::PreviewEngine {
         };
 
         // 面板/独立窗口两种表面的媒体区尺寸分派，与视图渲染基准同源。
+        self.image_surface = Some(panel_size);
         let panel = Size::new(panel_size.width, panel_size.height);
         let (fit_width, fit_height) = image_preview_size(panel_size, image_width, image_height);
         let fit = Size::new(fit_width, fit_height);
@@ -95,6 +96,25 @@ impl super::PreviewEngine {
             },
         }
         self.load_full_image_when_magnified(panel, fit)
+    }
+
+    /// 预览区域改了大小（窗口拉大、右侧面板变宽变高、底部终端开关）：适应窗口的大小跟着变，
+    /// 放大后要的像素也变了，和缩放、平移之后一样，重新看要不要原尺寸、要读哪些块。大小没变时
+    /// 什么都不做，宿主每条消息处理完都可以问一次，不用在每个改大小的入口各接一遍。
+    pub fn preview_surface_resized(&mut self, panel_size: PreviewSize) -> Task<PreviewMessage> {
+        if self.image_surface == Some(panel_size) {
+            return Task::none();
+        }
+        self.image_surface = Some(panel_size);
+        let Some(PreviewState::Ready(PreviewContent::Image(content))) = &self.preview else {
+            return Task::none();
+        };
+        let (image_width, image_height) = content.dimensions();
+        let (fit_width, fit_height) = image_preview_size(panel_size, image_width, image_height);
+        self.load_full_image_when_magnified(
+            Size::new(panel_size.width, panel_size.height),
+            Size::new(fit_width, fit_height),
+        )
     }
 
     /// 屏幕量好了：记下物理像素（下一张图按它解）和缩放倍数（1:1、文档渲染）。

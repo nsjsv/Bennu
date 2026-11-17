@@ -39,7 +39,18 @@ impl FileBrowser {
         // 清掉;不把槽拆开,就只能在出口重新对齐一次。面板关闭时是空操作。
         let right_preview_panel_command = self.sync_right_preview_panel();
         let fullscreen_command = self.sync_main_window_video_fullscreen();
-        Task::batch([command, right_preview_panel_command, fullscreen_command])
+        // 预览区域的大小由窗口、右侧面板宽度和分隔条、终端开关一起决定，改它的入口很多：
+        // 在出口比一次，变了才让引擎重新看放大后要多少像素（超大图要补读露出来的块）。
+        let preview_surface_command = self
+            .preview_engine
+            .preview_surface_resized(self.preview_surface_viewport())
+            .map(Message::Preview);
+        Task::batch([
+            command,
+            right_preview_panel_command,
+            fullscreen_command,
+            preview_surface_command,
+        ])
     }
 
     /// 消息分派体：自 update 的主 match 提出，出口收敛钩子只在 update 里执行一次。

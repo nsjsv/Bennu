@@ -593,7 +593,7 @@ pub struct VideoPreviewFrame {
     pub picture: Arc<VideoPicture>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PreviewSize {
     pub width: f32,
     pub height: f32,

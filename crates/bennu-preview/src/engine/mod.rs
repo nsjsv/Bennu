@@ -55,6 +55,8 @@ pub struct PreviewEngine {
     pub(crate) zoom_tiles: Option<zoom_tiles::ZoomTilesState>,
     /// 最近一次放大到要更多像素时的视口几何；缩回去就清掉，界面据此决定画不画块。
     pub(crate) zoom_tile_view: Option<crate::zoom_tiles::TileView>,
+    /// 图片最近一次按多大的预览区域排的：区域变了（拉窗口、拖右侧面板）要重新看缩放后要多少像素。
+    pub(crate) image_surface: Option<crate::preview::PreviewSize>,
     /// 预览所在屏幕：物理像素（原图按它解，量不到按 4K）和缩放倍数（1:1、文档按物理像素渲染）。
     pub(crate) display: Option<crate::preview::DisplayMetrics>,
     /// 图片信息层开着没有：换图片时保持（一张张看信息），关预览窗口时关掉。
@@ -149,6 +151,7 @@ impl PreviewEngine {
             full_image_requested: false,
             zoom_tiles: None,
             zoom_tile_view: None,
+            image_surface: None,
             display: None,
             image_info_visible: false,
             preview_load: None,

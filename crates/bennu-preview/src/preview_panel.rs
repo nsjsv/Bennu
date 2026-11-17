@@ -140,6 +140,7 @@ where
                 image_view.display_scale,
                 0.0,
                 None,
+                None,
             )),
             None => column![readable_text(tr!("Loading preview..."))].into(),
         },
@@ -181,6 +182,7 @@ where
             image_view.display_scale,
             preview_bottom_controls_opacity,
             image_view.info,
+            image_view.zoom_tiles,
         )),
         PreviewState::Ready(PreviewContent::AnimatedImage(preview)) => {
             animated_image_preview_panel(preview, size, preview_bottom_controls_opacity)

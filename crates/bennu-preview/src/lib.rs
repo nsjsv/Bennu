@@ -116,3 +116,4 @@ pub mod commands;
 // PreviewEngine 状态机聚合体（预览字段自 app-ui FileBrowser 下沉的
 // 组合宿主），Message::Preview 路由的引擎侧入口。
 pub mod engine;
+pub mod zoom_tiles;

@@ -51,6 +51,10 @@ pub struct PreviewEngine {
     pub original_image_preview_cancel: Option<CancellationToken>,
     /// 这张图已经要过一次原尺寸（放大到超过按屏幕大小解出的像素时），不再重复要。
     pub(crate) full_image_requested: bool,
+    /// 超大图放大后的切块（见 `zoom_tiles`），随原图代际作废。
+    pub(crate) zoom_tiles: Option<zoom_tiles::ZoomTilesState>,
+    /// 最近一次放大到要更多像素时的视口几何；缩回去就清掉，界面据此决定画不画块。
+    pub(crate) zoom_tile_view: Option<crate::zoom_tiles::TileView>,
     /// 预览所在屏幕：物理像素（原图按它解，量不到按 4K）和缩放倍数（1:1、文档按物理像素渲染）。
     pub(crate) display: Option<crate::preview::DisplayMetrics>,
     /// 图片信息层开着没有：换图片时保持（一张张看信息），关预览窗口时关掉。
@@ -143,6 +147,8 @@ impl PreviewEngine {
             original_image_preview_generation: 0,
             original_image_preview_cancel: None,
             full_image_requested: false,
+            zoom_tiles: None,
+            zoom_tile_view: None,
             display: None,
             image_info_visible: false,
             preview_load: None,
@@ -358,6 +364,7 @@ mod video;
 pub mod video_fullscreen;
 mod video_tracks;
 mod windows;
+mod zoom_tiles;
 
 pub use media::{audio_preview_tick_subscription, video_preview_tick_subscription};
 pub use original_image::PendingPreviewThumbnailDisplay;

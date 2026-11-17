@@ -160,6 +160,8 @@ pub struct ImageView<'a> {
     pub display_scale: f32,
     pub info: Option<&'a ImageInfo>,
     pub loading_backdrop: Option<&'a ImagePreviewContent>,
+    /// 超大图放大后要画的块（切好了、正放大时才有）。
+    pub zoom_tiles: Option<&'a crate::zoom_tiles::ZoomTiles>,
 }
 
 /// 图片信息层的内容（后台读文件头得到）；跟着路径走，换了图旧的就不显示。

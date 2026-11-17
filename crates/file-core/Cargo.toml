@@ -41,6 +41,11 @@ xattr = "1.6.1"
 exacl = "0.13.0"
 rustix = { version = "1.1.4", features = ["fs", "mm"] }
 
+[build-dependencies]
+# 编 jpeg_rows.c、找系统 libjpeg-turbo（见 build.rs）。
+cc = "1"
+pkg-config = "0.3"
+
 [dev-dependencies]
 serde_json.workspace = true
 tempfile.workspace = true

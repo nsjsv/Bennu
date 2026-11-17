@@ -19,6 +19,7 @@ use crate::media_controls::{
 use crate::pointer_area::pointer_area;
 use crate::preview::{image_preview_size, ImageInfo, ImagePreviewContent, PreviewSize};
 use crate::preview_message::PreviewMessage;
+use crate::zoom_tiles::{tile_layer, TileView, ZoomTiles};
 
 const ZOOM_PERCENT_WIDTH: f32 = 52.0;
 /// 百分比和 100% 差这么多以内算 1:1（缩放倍率是浮点连乘出来的）。
@@ -31,6 +32,7 @@ pub(crate) fn image_preview_panel<Message>(
     display_scale: f32,
     controls_opacity: f32,
     info: Option<&ImageInfo>,
+    zoom_tiles: Option<&ZoomTiles>,
 ) -> Element<'static, Message>
 where
     Message: 'static + Clone + From<PreviewMessage>,
@@ -53,8 +55,23 @@ where
     } else {
         FilterMethod::Linear
     };
+    // 超大图放大后，屏幕大小那张垫在下面，看得见的块盖在上面（几何和这里摆图同一套）。
+    let tile_view = TileView {
+        panel: Size::new(size.width, size.height),
+        fit: Size::new(fit_width, fit_height),
+        scale: viewport.scale,
+        offset: viewport.offset,
+        display_scale,
+    };
     let media = zoomable_media_area(fit_width, fit_height, size, viewport, |width, height| {
-        image_layers(content, width, height, filter)
+        let layers = image_layers(content, width, height, filter);
+        match zoom_tiles.and_then(|tiles| tile_layer(tiles, &tile_view, filter)) {
+            Some(tiles) => Stack::with_children([layers, tiles])
+                .width(Length::Fixed(width))
+                .height(Length::Fixed(height))
+                .into(),
+            None => layers,
+        }
     });
 
     let mut layers = Stack::with_children([media])

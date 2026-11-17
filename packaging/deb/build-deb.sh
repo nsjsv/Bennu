@@ -50,6 +50,7 @@ install_build_dependencies() {
         libdav1d-dev \
         libfontconfig1-dev \
         libglib2.0-dev \
+        libjpeg-turbo8-dev \
         libnotify-dev \
         libwayland-dev \
         libxkbcommon-dev \
@@ -70,6 +71,7 @@ DEB_DEPENDS=(
     libdav1d7
     libfontconfig1
     libglib2.0-0t64
+    libjpeg-turbo8
     libnotify4
     libwayland-client0
     libxkbcommon-x11-0

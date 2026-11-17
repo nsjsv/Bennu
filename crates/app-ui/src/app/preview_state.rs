@@ -68,6 +68,10 @@ impl FileBrowser {
             PreviewMessage::OriginalImagePreviewLoaded(path, generation, outcome) => {
                 self.accept_original_image_preview(path, generation, outcome)
             }
+            PreviewMessage::ZoomTiles(message) => self
+                .preview_engine
+                .update_zoom_tiles(message)
+                .map(Message::Preview),
             PreviewMessage::RetryImagePreview(path) => self.retry_image_preview(path),
             PreviewMessage::PreviewImageViewport(message) => {
                 self.update_preview_image_viewport(message)

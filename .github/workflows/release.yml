@@ -49,6 +49,7 @@ jobs:
             fontconfig \
             glib2 \
             git \
+            libjpeg-turbo \
             libxkbcommon \
             openssh \
             pkgconf \

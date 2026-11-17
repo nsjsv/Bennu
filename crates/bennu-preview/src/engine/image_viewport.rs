@@ -14,6 +14,7 @@ use crate::preview::{
     image_preview_size, ImagePreviewContent, PreviewContent, PreviewSize, PreviewState,
 };
 use crate::preview_message::PreviewMessage;
+use crate::zoom_tiles::TileView;
 
 /// 显示出来的像素比已解出的多这么多以内不换原图：浮点误差，不值得再解一次。
 const RESOLUTION_UPGRADE_SLACK: f32 = 1.02;
@@ -93,7 +94,7 @@ impl super::PreviewEngine {
                 None => {}
             },
         }
-        self.load_full_image_when_magnified(fit)
+        self.load_full_image_when_magnified(panel, fit)
     }
 
     /// 屏幕量好了：记下物理像素（下一张图按它解）和缩放倍数（1:1、文档渲染）。
@@ -122,11 +123,12 @@ impl super::PreviewEngine {
         DecodeBound::within(display.width, display.height)
     }
 
-    fn load_full_image_when_magnified(&mut self, fit: Size) -> Task<PreviewMessage> {
+    fn load_full_image_when_magnified(&mut self, panel: Size, fit: Size) -> Task<PreviewMessage> {
         let Some(PreviewState::Ready(PreviewContent::Image(ImagePreviewContent::OriginalRaster {
             path,
             raster_handle,
             width,
+            height,
             pixel_width,
             ..
         }))) = &self.preview
@@ -135,10 +137,22 @@ impl super::PreviewEngine {
         };
         let viewport = &self.preview_image_viewport;
         let shown_pixels = fit.width * viewport.scale * self.display_scale();
-        if self.full_image_requested
-            || pixel_width >= width
-            || shown_pixels <= *pixel_width as f32 * RESOLUTION_UPGRADE_SLACK
-        {
+        if pixel_width >= width || shown_pixels <= *pixel_width as f32 * RESOLUTION_UPGRADE_SLACK {
+            self.release_zoom_tiles();
+            return Task::none();
+        }
+        // 整张解超过 64 MB 的不整张解：切块，只读看得见的部分。
+        if file_core::image_decode::tiles::needs_tiling(*width, *height) {
+            let view = TileView {
+                panel,
+                fit,
+                scale: viewport.scale,
+                offset: viewport.offset,
+                display_scale: self.display_scale(),
+            };
+            return self.request_zoom_tiles(path.clone(), view);
+        }
+        if self.full_image_requested {
             return Task::none();
         }
         self.full_image_requested = true;

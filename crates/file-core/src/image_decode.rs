@@ -8,10 +8,13 @@ mod camera_raw;
 mod facts;
 mod ffmpeg_still;
 mod iso_media;
+mod jpeg_rows;
 mod png_rows;
+mod row_reader;
 mod scaled_jpeg;
 mod tiff;
 mod tiff_rows;
+pub mod tiles;
 
 pub use facts::{image_facts, ImageFacts};
 
@@ -150,13 +153,15 @@ fn decode_builtin(
     let mut decoder = reader.into_decoder()?;
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let plan = ShrinkPlan::new(decoder.dimensions(), orientation, bound);
-    let rows = match decode_route(format, &plan, decoder.total_bytes()) {
-        DecodeRoute::PngRows => png_rows::decode(path, plan.stored_target)?,
-        DecodeRoute::TiffRows => tiff_rows::decode(path, plan.stored_target)?,
-        DecodeRoute::ShrinkJpeg | DecodeRoute::Whole => None,
+    let rows = match (decode_route(format, &plan, decoder.total_bytes()), format) {
+        (DecodeRoute::Rows, Some(format)) => row_reader::open(path, format)?,
+        _ => None,
     };
     match rows {
-        Some(pixels) => Ok(Some(plan.finish(DynamicImage::ImageRgba8(pixels)))),
+        Some(mut rows) => {
+            let pixels = row_reader::shrink(rows.as_mut(), plan.stored_target)?;
+            Ok(Some(plan.finish(DynamicImage::ImageRgba8(pixels))))
+        }
         None => decode_whole(decoder, orientation, bound).map(Some),
     }
 }
@@ -167,10 +172,9 @@ fn decode_builtin(
 enum DecodeRoute {
     /// 每边至少缩一半的 JPEG 在解码时就缩小。
     ShrinkJpeg,
-    /// 要缩小、整图又超出解码预算的 PNG 逐行读、边读边缩。
-    PngRows,
-    /// 要缩小的 TIFF 不管多大都按条带/图块边读边缩：image 的 TIFF 解码器整解要两份。
-    TiffRows,
+    /// 逐行读、边读边缩：要缩小、整图又超出解码预算的 PNG；要缩小的 TIFF 不管多大（image 的
+    /// TIFF 解码器整解要两份）。
+    Rows,
     /// 整图解出来再缩；超出预算的占满整个预算独自解。缩小解码不支持的写法（CMYK JPEG、
     /// 隔行 PNG）也退到这里。
     Whole,
@@ -180,9 +184,9 @@ fn decode_route(format: Option<ImageFormat>, plan: &ShrinkPlan, whole_bytes: u64
     match format {
         Some(ImageFormat::Jpeg) if plan.halves() => DecodeRoute::ShrinkJpeg,
         Some(ImageFormat::Png) if plan.shrinks() && whole_bytes > decode_budget::BUDGET_BYTES => {
-            DecodeRoute::PngRows
+            DecodeRoute::Rows
         }
-        Some(ImageFormat::Tiff) if plan.shrinks() => DecodeRoute::TiffRows,
+        Some(ImageFormat::Tiff) if plan.shrinks() => DecodeRoute::Rows,
         _ => DecodeRoute::Whole,
     }
 }
@@ -341,6 +345,9 @@ fn swaps_axes(orientation: Orientation) -> bool {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod row_reader_tests;
 
 #[cfg(test)]
 mod shrink_tests;

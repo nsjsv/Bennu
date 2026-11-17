@@ -45,6 +45,7 @@ install_build_dependencies() {
         libdav1d-devel \
         fontconfig-devel \
         glib2-devel \
+        libjpeg-turbo-devel \
         libnotify-devel \
         libxkbcommon-devel \
         wayland-devel

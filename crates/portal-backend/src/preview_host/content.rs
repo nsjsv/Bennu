@@ -332,6 +332,7 @@ impl PreviewHost {
             PreviewMessage::OriginalImagePreviewLoaded(path, generation, outcome) => self
                 .engine
                 .accept_original_image_preview(path, generation, outcome),
+            PreviewMessage::ZoomTiles(message) => self.engine.update_zoom_tiles(message),
             PreviewMessage::AnimatedImagePreviewLoaded(path, generation, outcome) => {
                 self.engine
                     .accept_animated_image_preview_loaded(path, generation, outcome)

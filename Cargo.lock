@@ -1774,6 +1774,7 @@ name = "file-core"
 version = "0.4.4"
 dependencies = [
  "blake3",
+ "cc",
  "chardetng",
  "chrono",
  "dirs",
@@ -1788,6 +1789,7 @@ dependencies = [
  "md-5",
  "memchr",
  "notify",
+ "pkg-config",
  "png 0.18.1",
  "regex",
  "rustix 1.1.4",

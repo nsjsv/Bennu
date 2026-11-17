@@ -6,7 +6,8 @@ use iced::widget::{image as iced_image, svg};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
-static ORIGINAL_IMAGE_DECODE_SEMAPHORE: Semaphore = Semaphore::const_new(1);
+/// 解原图（整张或切块）一次只解一张：几张超大图同时解会叠出几倍的内存。
+pub(crate) static ORIGINAL_IMAGE_DECODE_SEMAPHORE: Semaphore = Semaphore::const_new(1);
 const ORIGINAL_IMAGE_PLACEHOLDER_MAX_EDGE: u32 = 512;
 
 /// 读图片尺寸失败：没装 ffmpeg 要显示安装命令，其余只显示原因。

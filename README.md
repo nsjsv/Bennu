@@ -132,7 +132,7 @@ Arch Linux is used as the example below. First install the Rust toolchain, build
 
 ```bash
 sudo pacman -S --needed base-devel git rust cargo pkgconf \
-  acl alsa-lib dav1d fontconfig glib2 libnotify libxkbcommon wayland wl-clipboard xdg-utils
+  acl alsa-lib dav1d fontconfig glib2 libjpeg-turbo libnotify libxkbcommon wayland wl-clipboard xdg-utils
 ```
 
 Clone the repository and run:
@@ -174,7 +174,7 @@ sudo pacman -S --needed 7zip ffmpeg ffmpegthumbnailer libreoffice-fresh poppler 
 | Saving network passwords|`secret-tool` provided by `libsecret`|
 | Storage device discovery, mounting, safe removal|`udisks2`|
 
-A missing optional dependency only affects the matching capability. AVIF is supported by the built-in image decoder, which uses `dav1d` at build and run time.
+A missing optional dependency only affects the matching capability. AVIF is supported by the built-in image decoder, which uses `dav1d` at build and run time; very large JPEGs are decoded row by row with the system `libjpeg-turbo` when zoomed in.
 
 ## Platform notes
 

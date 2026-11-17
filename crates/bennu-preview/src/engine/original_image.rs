@@ -38,6 +38,9 @@ impl super::PreviewEngine {
     pub(crate) fn invalidate_original_image_preview(&mut self) {
         self.pending_preview_thumbnail_display = None;
         self.full_image_requested = false;
+        // 切块文件随最后一份共享放掉而删掉（后台读块的任务也许还拿着一份）。
+        self.zoom_tiles = None;
+        self.zoom_tile_view = None;
         if let Some(cancellation) = self.original_image_preview_cancel.take() {
             cancellation.cancel();
         }

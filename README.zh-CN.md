@@ -132,7 +132,7 @@ bennu --version
 
 ```bash
 sudo pacman -S --needed base-devel git rust cargo pkgconf \
-  acl alsa-lib dav1d fontconfig glib2 libnotify libxkbcommon wayland wl-clipboard xdg-utils
+  acl alsa-lib dav1d fontconfig glib2 libjpeg-turbo libnotify libxkbcommon wayland wl-clipboard xdg-utils
 ```
 
 克隆仓库并运行：
@@ -174,7 +174,7 @@ sudo pacman -S --needed 7zip ffmpeg ffmpegthumbnailer libreoffice-fresh poppler 
 | 保存网络密码|`libsecret` 提供的 `secret-tool`|
 | 存储设备发现、挂载与安全移除| `udisks2`|
 
-缺少可选依赖时，只会影响对应能力。AVIF 由内置图片解码器支持，构建和运行时使用 `dav1d`。
+缺少可选依赖时，只会影响对应能力。AVIF 由内置图片解码器支持，构建和运行时使用 `dav1d`；超大 JPEG 放大查看时用系统的 `libjpeg-turbo` 逐行解码。
 
 ## 平台说明
 

@@ -121,9 +121,7 @@ fn a_png_shrunk_row_by_row_matches_the_whole_picture_shrunk() {
     });
     picture.save(&path).expect("save png");
 
-    let rows = png_rows::decode(&path, (150, 100))
-        .expect("decode")
-        .expect("not interlaced");
+    let rows = shrunk_row_by_row(&path, ImageFormat::Png, (150, 100));
     let whole = DynamicImage::ImageRgba8(picture)
         .thumbnail(150, 100)
         .into_rgba8();
@@ -200,9 +198,7 @@ fn a_striped_tiff_is_shrunk_strip_by_strip() {
         .expect("tiff header");
     assert!(decoder.strip_count().expect("strips") > 1);
 
-    let rows = tiff_rows::decode(&path, (80, 60))
-        .expect("decode")
-        .expect("striped RGB16");
+    let rows = shrunk_row_by_row(&path, ImageFormat::Tiff, (80, 60));
     let difference = mean_difference(&rows, &whole_picture_shrunk(&path, (80, 60)));
     assert!(difference < 3.0, "{difference}");
 }
@@ -262,9 +258,7 @@ fn a_tiled_tiff_is_shrunk_one_row_of_tiles_at_a_time() {
     file.extend(0u32.to_le_bytes());
     std::fs::write(&path, file).expect("write tiff");
 
-    let rows = tiff_rows::decode(&path, (20, 12))
-        .expect("decode")
-        .expect("tiled RGB8");
+    let rows = shrunk_row_by_row(&path, ImageFormat::Tiff, (20, 12));
     let difference = mean_difference(&rows, &whole_picture_shrunk(&path, (20, 12)));
     assert!(difference < 3.0, "{difference}");
 }
@@ -295,7 +289,7 @@ fn each_picture_takes_the_cheapest_decode_route() {
             &thumbnail((8000, 8000)),
             over_budget
         ),
-        DecodeRoute::PngRows
+        DecodeRoute::Rows
     );
     assert_eq!(
         decode_route(
@@ -303,7 +297,7 @@ fn each_picture_takes_the_cheapest_decode_route() {
             &thumbnail((4000, 3000)),
             72_000_000
         ),
-        DecodeRoute::TiffRows
+        DecodeRoute::Rows
     );
     assert_eq!(
         decode_route(Some(ImageFormat::Tiff), &thumbnail((200, 100)), 60_000),
@@ -350,4 +344,12 @@ fn whole_decodes_wait_for_room_in_the_shared_budget() {
     drop(full);
     waiter.join().expect("waiter");
     assert!(reserved.load(Ordering::SeqCst));
+}
+
+/// 用逐行读取器边读边缩（这些图都是能逐行读的写法）。
+fn shrunk_row_by_row(path: &Path, format: ImageFormat, target: (u32, u32)) -> RgbaImage {
+    let mut reader = row_reader::open(path, format)
+        .expect("open")
+        .expect("this layout can be read row by row");
+    row_reader::shrink(reader.as_mut(), target).expect("decode")
 }

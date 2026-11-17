@@ -46,6 +46,7 @@ impl super::PreviewEngine {
                     matches!(&self.preview, Some(PreviewState::Loading(path)) if path == loading)
                         .then_some(content)
                 }),
+            zoom_tiles: self.visible_zoom_tiles(),
         }
     }
 

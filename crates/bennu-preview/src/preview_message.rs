@@ -32,6 +32,8 @@ pub enum PreviewMessage {
     RemotePreviewCache(RemotePreviewCacheMessage),
     AnimatedImagePreviewLoaded(PathBuf, u64, Result<AnimatedImagePreview, String>),
     OriginalImagePreviewLoaded(PathBuf, u64, Result<OriginalImagePreview, String>),
+    /// 超大图放大后的切块：切完、块读回来。
+    ZoomTiles(crate::zoom_tiles::ZoomTilesMessage),
     RetryImagePreview(PathBuf),
     FolderPreview(crate::folder_preview::FolderPreviewMessage),
     /// 文件夹预览里双击（或回车）了一项：打开它归宿主（主窗口进入文件夹、用默认程序

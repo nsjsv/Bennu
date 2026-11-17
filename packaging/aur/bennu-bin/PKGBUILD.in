@@ -11,6 +11,7 @@ depends=(
     'dav1d'
     'fontconfig'
     'glib2'
+    'libjpeg-turbo'
     'libnotify'
     'libxkbcommon'
     'wayland'

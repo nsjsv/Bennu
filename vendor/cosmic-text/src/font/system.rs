@@ -397,7 +397,8 @@ impl FontSystem {
         #[cfg(not(target_arch = "wasm32"))]
         let now = std::time::Instant::now();
 
-        db.load_system_fonts();
+        // Bennu 补丁：不逐个解析字体文件，见 `fontconfig_faces`。
+        super::fontconfig_faces::load_system_faces(db);
 
         for source in fonts {
             db.load_font_source(source);

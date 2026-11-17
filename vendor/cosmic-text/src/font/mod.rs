@@ -24,6 +24,10 @@ pub use fallback::{Fallback, PlatformFallback};
 pub use self::system::*;
 mod system;
 
+// Bennu 补丁：系统字体列表从 fontconfig 的缓存读，见模块说明。
+#[cfg(feature = "std")]
+pub mod fontconfig_faces;
+
 struct OwnedFaceData {
     data: Arc<dyn AsRef<[u8]> + Send + Sync>,
     shaper_data: harfrust::ShaperData,

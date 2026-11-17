@@ -344,14 +344,14 @@ fn color_channel_u8(channel: f32) -> u8 {
     (channel.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
-/// 字体库只需扫描一次系统字体;sans-serif 别名绑定到实际存在、尽量带
-/// CJK 字形的家族,保证文件名可渲染。
+/// 字体库复制界面排版的那份系统字体列表（不读字体文件）;sans-serif 别名绑定到实际存在、
+/// 尽量带 CJK 字形的家族,保证文件名可渲染。
 fn font_database() -> Arc<fontdb::Database> {
     static DATABASE: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
     DATABASE
         .get_or_init(|| {
-            let mut database = fontdb::Database::new();
-            database.load_system_fonts();
+            let mut database =
+                fontdb::Database::clone(&iced::advanced::graphics::text::svg_font_database());
             let preferred_families = [
                 "Noto Sans CJK SC",
                 "Noto Sans SC",

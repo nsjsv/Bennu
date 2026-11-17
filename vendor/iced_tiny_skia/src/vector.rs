@@ -87,12 +87,9 @@ impl Cache {
     fn load(&mut self, handle: &Handle) -> Option<&usvg::Tree> {
         let id = handle.id();
 
-        // TODO: Reuse `cosmic-text` font database
+        // Bennu 补丁：与排版共用系统字体列表，不再把每个字体文件解析一遍（见 `svg_font_database`）。
         if self.fontdb.is_none() {
-            let mut fontdb = usvg::fontdb::Database::new();
-            fontdb.load_system_fonts();
-
-            self.fontdb = Some(Arc::new(fontdb));
+            self.fontdb = Some(crate::graphics::text::svg_font_database());
         }
 
         let options = usvg::Options {

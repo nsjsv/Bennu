@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use iced::advanced::graphics::text::cosmic_text::{
-    fontdb, skrifa, Fallback, FontSystem, PlatformFallback,
+    fontconfig_faces, fontdb, skrifa, Fallback, FontSystem, PlatformFallback,
 };
 use skrifa::MetadataProvider;
 use unicode_script::Script;
@@ -254,7 +254,7 @@ pub struct InstalledFonts {
 
 pub fn installed_fonts() -> InstalledFonts {
     let mut database = fontdb::Database::new();
-    database.load_system_fonts();
+    fontconfig_faces::load_system_faces(&mut database);
     let mut families: Vec<(String, fontdb::ID)> = Vec::new();
     for face in database.faces() {
         let Some((name, _)) = face.families.first() else {
@@ -354,3 +354,7 @@ fn parse_fontconfig_family(stdout: &[u8]) -> Option<String> {
 #[cfg(test)]
 #[path = "font_families_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "font_list_tests.rs"]
+mod font_list_tests;

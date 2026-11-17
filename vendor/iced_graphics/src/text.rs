@@ -133,6 +133,28 @@ pub fn font_system() -> &'static RwLock<FontSystem> {
     })
 }
 
+/// Bennu 补丁：画 SVG 时用的字体库，复制排版的那份（只是字体信息，字体文件按需映射）。
+///
+/// 上游 iced_wgpu、iced_tiny_skia 第一次画 SVG 时各自 `load_system_fonts`，把每个字体文件
+/// 再解析一遍：Bennu 的图标都是 SVG，开机后第一次启动、盘又慢时第一帧要多等近 10 秒。排版的
+/// 字体库从 fontconfig 的缓存建，不读字体文件；复制它也不读。
+pub fn svg_font_database() -> Arc<cosmic_text::fontdb::Database> {
+    static DATABASE: OnceLock<Arc<cosmic_text::fontdb::Database>> = OnceLock::new();
+
+    DATABASE
+        .get_or_init(|| {
+            Arc::new(
+                font_system()
+                    .write()
+                    .expect("Write font system")
+                    .raw()
+                    .db()
+                    .clone(),
+            )
+        })
+        .clone()
+}
+
 /// A set of system fonts.
 pub struct FontSystem {
     raw: cosmic_text::FontSystem,

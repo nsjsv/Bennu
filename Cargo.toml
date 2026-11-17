@@ -93,10 +93,14 @@ panic = "abort"
 # iced_winit 在没提交时把下一帧改为按屏幕刷新间隔定时，否则没有帧回调会空转。图片句柄
 # 按编号比（上游逐字节比整张图）。各补丁都有测试。
 #
-# cosmic-text 两处补丁：按名字找字体家族时取字重最接近的一款（src/font/fallback/mod.rs；
+# cosmic-text 三处补丁：按名字找字体家族时取字重最接近的一款（src/font/fallback/mod.rs；
 # 上游只认字重正好相等的，只有 500 字重的文泉驿正黑永远选不上，中文界面回退到日文宋体）；
 # 字形横向落在整像素上（src/layout.rs；上游按 1/4 像素分档，同一个字母光栅化成几种点阵，
-# 等宽代码里的「s」有的清楚有的糊）。测试在 bennu-theme 的 font_families_tests.rs。
+# 等宽代码里的「s」有的清楚有的糊）；系统字体列表从 fontconfig 的缓存读（src/font/
+# fontconfig_faces.rs；上游启动时解析每个字体文件，开机后第一次启动、盘慢时要读上百 MB、
+# 等近 10 秒）。iced_graphics 的 `text::svg_font_database` 让 iced_wgpu、iced_tiny_skia 画 SVG
+# 时复制这份列表（上游第一次画 SVG 时又把每个字体文件解析一遍）。clippy.toml 禁了
+# `load_system_fonts`。测试在 bennu-theme 的 font_families_tests.rs、font_list_tests.rs。
 # 只 vendor 了 src，Cargo.toml 去掉了 vendor 里跑不了的 test/bench 目标。
 [patch.crates-io]
 cosmic-text = { path = "vendor/cosmic-text" }

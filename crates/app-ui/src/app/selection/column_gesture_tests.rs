@@ -260,3 +260,61 @@ fn inside_archive_column_blank_click_collapses_to_inner_directory() {
         vec![current_dir, archive, inner]
     );
 }
+
+/// 按下与松开之间，当前目录在磁盘上变了（家目录里一直被写的日志）并整目录重扫：
+/// 重扫若收掉按下的手势，松开时打不开新栏，留下「选中 A、仍打开 B」。
+#[tokio::test]
+async fn disk_rescan_between_press_and_release_still_opens_the_pressed_column() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().to_path_buf();
+    let bin = root.join("bin");
+    let tmpfs = root.join("tmpfs");
+    std::fs::create_dir(&bin).unwrap();
+    std::fs::create_dir(&tmpfs).unwrap();
+    let scan = || {
+        file_core::discover_directory_with_progress(
+            &root,
+            file_core::ScanOptions::default(),
+            tokio_util::sync::CancellationToken::new(),
+            |_| {},
+        )
+    };
+    let mut browser = browser_with_entries(Vec::new());
+    browser.tab_mut().location = BrowserLocation::Directory(root.clone());
+    let discovery = scan().await.unwrap();
+    browser.set_entries(crate::model::display_entries_in_discovery_order(&discovery).into());
+    browser.tab_mut().directory_discovery = Some(discovery);
+    browser
+        .tab_mut()
+        .expanded_directories
+        .insert(tmpfs.clone(), loaded_directory(Vec::new()));
+    browser.tab_mut().deepest_open_column_directory = Some(tmpfs);
+
+    drop(browser.handle_column_entry_clicked(bin.clone()));
+    drop(
+        browser.reload_observed_directory(file_core::DirectoryEntryChanges {
+            directory: root.clone(),
+            changes: vec![file_core::ResolvedEntryChange::RescanRequired],
+        }),
+    );
+    let request = crate::model::DirectoryLoadRequest {
+        pane_id: browser.active_pane_id(),
+        path: root.clone(),
+        generation: browser.pane().directory_load_generation,
+    };
+    let landed = scan().await.unwrap();
+    drop(browser.accept_directory_discovery(
+        request,
+        crate::model::PrebuiltDirectoryDiscovery::build(landed),
+    ));
+    drop(browser.finish_drag_selection(None));
+
+    assert_eq!(
+        browser.tab().deepest_open_column_directory,
+        Some(bin.clone())
+    );
+    assert_eq!(
+        crate::three_column_view::column_directories(&browser),
+        vec![root, bin]
+    );
+}

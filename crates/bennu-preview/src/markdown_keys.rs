@@ -2,6 +2,7 @@
 //! 快捷键（Ctrl+F、F3、Shift+F3、Esc 关搜索条、Ctrl+=/-/0、Ctrl+滚轮）。点一下内容
 //! 才聚焦（独立预览窗口打开时由 `focus_preview_keyboard` 聚焦），点别处失焦。
 
+use bennu_theme::smooth_scroll::{wheel_direction, WheelDirection};
 use iced::advanced::widget::{self, operation, Operation};
 use iced::advanced::{layout, mouse, overlay, renderer, Clipboard, Layout, Shell, Widget};
 use iced::keyboard;
@@ -151,17 +152,14 @@ where
             Event::Mouse(mouse::Event::WheelScrolled { delta })
                 if state.modifiers.command() && cursor.is_over(bounds) =>
             {
-                let upward = match delta {
-                    mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. } => {
-                        *y > 0.0
-                    }
+                let change = match wheel_direction(*delta) {
+                    Some(WheelDirection::Up) => Some(TextViewChange::ZoomIn),
+                    Some(WheelDirection::Down) => Some(TextViewChange::ZoomOut),
+                    None => None,
                 };
-                let change = if upward {
-                    TextViewChange::ZoomIn
-                } else {
-                    TextViewChange::ZoomOut
-                };
-                shell.publish(viewer_message(TextViewerEvent::ChangeView(change)));
+                if let Some(change) = change {
+                    shell.publish(viewer_message(TextViewerEvent::ChangeView(change)));
+                }
                 shell.capture_event();
                 return;
             }

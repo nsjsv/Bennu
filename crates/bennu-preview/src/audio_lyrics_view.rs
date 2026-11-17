@@ -10,6 +10,7 @@ use iced::widget::{button, column, container, mouse_area, scrollable, Column};
 use iced::{mouse, Element, Length};
 
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::smooth_scroll::wheel_direction;
 use bennu_theme::styles::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, muted_text_color,
     transparent_button_style,
@@ -112,8 +113,11 @@ where
     .into()
 }
 
-/// 滚轮往上（y > 0）看前面的句子；触控板的像素增量按行高折算，至少一行。
+/// 滚轮往上（y > 0）看前面的句子；触控板的像素增量按行高折算，至少一行；手势结束不动。
 fn wheel_lines(delta: mouse::ScrollDelta) -> i32 {
+    if wheel_direction(delta).is_none() {
+        return 0;
+    }
     let (y, per_line) = match delta {
         mouse::ScrollDelta::Lines { y, .. } => (y, 1.0),
         mouse::ScrollDelta::Pixels { y, .. } => (y, WHEEL_PIXELS_PER_LINE),
@@ -180,6 +184,11 @@ mod tests {
         assert_eq!(
             wheel_lines(mouse::ScrollDelta::Pixels { x: 0.0, y: 60.0 }),
             -2
+        );
+        // 手指离开触控板（零位移）不翻句。
+        assert_eq!(
+            wheel_lines(mouse::ScrollDelta::Pixels { x: 0.0, y: 0.0 }),
+            0
         );
     }
 }

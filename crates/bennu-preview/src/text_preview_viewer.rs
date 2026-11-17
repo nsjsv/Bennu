@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use bennu_theme::smooth_scroll::MosInertia;
+use bennu_theme::smooth_scroll::{MosInertia, TouchScroll};
 use iced::advanced::mouse::{click, Click};
 use iced::advanced::text::{Paragraph, Renderer as TextRenderer};
 use iced::advanced::widget::operation::scrollable::{AbsoluteOffset, RelativeOffset};
@@ -133,8 +133,9 @@ struct TextPreviewViewerState {
     thumb_drag: Option<scrollbar::ThumbDrag>,
     /// 拖滑块时滑块跟手画在这个比例上，直到落点的内容到了。
     drag_fraction: Option<f32>,
-    /// 滚轮惯性：查看器自己就是滚动区，在每帧的 tick 里推进，不经过宿主。
+    /// 滚轮惯性、触控板的滑行和回弹：查看器自己就是滚动区，在每帧的 tick 里推进，不经过宿主。
     inertia: MosInertia,
+    touch: TouchScroll,
     reported_viewport: Option<TextViewport>,
     pending_events: Vec<TextViewerEvent>,
 }
@@ -513,7 +514,7 @@ fn apply_jump(
         JumpPlace::Reveal if !stays => -state.viewport_height / 3.0,
         JumpPlace::Top | JumpPlace::Reveal => 0.0,
     };
-    if scroll_viewer_by(state, document, lift) {
+    if scroll_viewer_by(state, document, lift) != 0.0 {
         refresh_retained_content(state, document);
     }
     if jump.cursor.is_some() {
@@ -551,6 +552,7 @@ fn queue_viewport_report(state: &mut TextPreviewViewerState, document: &TextPrev
         return;
     }
     let scrolling = state.inertia.is_active()
+        || state.touch.is_active()
         || state.thumb_drag.is_some()
         || (state.drag_active && state.autoscroll_velocity != 0.0);
     let due = !scrolling
@@ -583,7 +585,7 @@ impl widget::operation::Scrollable for ScrollBridge<'_> {
         _content_bounds: Rectangle,
     ) {
         scroll_viewer_horizontally(self.state, offset.x);
-        if scroll_viewer_by(self.state, self.document, offset.y) {
+        if scroll_viewer_by(self.state, self.document, offset.y) != 0.0 {
             self.state.drag_fraction = None;
             refresh_retained_content(self.state, self.document);
         }

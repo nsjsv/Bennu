@@ -62,8 +62,11 @@ fn scrolling_to_the_end_puts_the_last_line_exactly_at_the_viewport_bottom() {
     assert_eq!(scrollbar::scroll_fraction(&state, &document), 1.0);
 
     // 再往下滚不动；往回滚离开底部。
-    assert!(!scroll_viewer_by(&mut state, &document, 50.0));
-    assert!(scroll_viewer_by(&mut state, &document, -base_line_height()));
+    assert_eq!(scroll_viewer_by(&mut state, &document, 50.0), 0.0);
+    assert_eq!(
+        scroll_viewer_by(&mut state, &document, -base_line_height()),
+        -base_line_height()
+    );
     assert!(!is_at_bottom(&state, &document));
 }
 
@@ -865,3 +868,6 @@ fn the_document_wants_the_range_only_when_it_may_act_on_it() {
     assert!(document.wants_viewport(viewport(120)));
     assert!(document.wants_viewport(viewport(rows.len() - 100)));
 }
+
+#[path = "touch_tests.rs"]
+mod touch_tests;

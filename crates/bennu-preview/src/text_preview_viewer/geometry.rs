@@ -1,6 +1,8 @@
 //! 纵向位置的几何：可见行、按像素逐行滚动、底部钳制、横向滚动。
 
-use super::{TextPreviewViewerState, VisibleRow};
+use bennu_theme::smooth_scroll::{Orientation, ScrollTarget};
+
+use super::{refresh_retained_content, TextPreviewViewerState, VisibleRow};
 use crate::text_document::TextPreviewDocument;
 
 pub(super) fn window_span(document: &TextPreviewDocument) -> (u64, u64) {
@@ -71,7 +73,8 @@ pub(super) fn visible_rows(
     let rows = document.rows();
     let limit = state.viewport_height;
     let mut entries = Vec::new();
-    let mut y = -state.pixel;
+    // 触控板拉过文件头尾时整体挪开画；绘制和点选都从这里取位置，挪开的也点得准。
+    let mut y = -state.pixel - state.touch.displacement().y;
     while index < rows.len() && y < limit {
         let height = row_height(state, rows[index].start);
         if y + height > 0.0 {
@@ -88,15 +91,15 @@ pub(super) fn visible_rows(
 }
 
 /// 按像素滚动：从锚点逐行走。走不出窗口（窗口外的行还没读到）；窗口到文件尾时，
-/// 最后一行底边最多贴住文字视口底边。返回位置是否变了。
+/// 最后一行底边最多贴住文字视口底边。返回实际滚了多远（被夹住的不算），没动是 0。
 pub(super) fn scroll_viewer_by(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     delta_y: f32,
-) -> bool {
+) -> f32 {
     let rows = document.rows();
     let Some(mut index) = anchor_index(state, document) else {
-        return false;
+        return 0.0;
     };
     let before = (state.anchor, state.pixel);
     let mut pixel = state.pixel + delta_y;
@@ -112,16 +115,65 @@ pub(super) fn scroll_viewer_by(
         index -= 1;
         pixel += row_height(state, rows[index].start);
     }
+    let mut clamped = pixel.min(0.0);
     pixel = pixel.max(0.0);
     // 底部钳制：窗口里锚点之后的行加起来不足一个视口时整体上移。
     let (max_index, max_pixel) = bottom_position(state, document);
     if (index, pixel) > (max_index, max_pixel) {
+        let skipped: f32 = (max_index..index)
+            .map(|row| row_height(state, rows[row].start))
+            .sum();
+        clamped = skipped + pixel - max_pixel;
         index = max_index;
         pixel = max_pixel;
     }
     state.anchor = rows[index].start;
     state.pixel = pixel;
-    (state.anchor, state.pixel) != before
+    if (state.anchor, state.pixel) == before {
+        return 0.0;
+    }
+    delta_y - clamped
+}
+
+/// 触控板滚动作用在查看器上。竖向只有文件头、文件尾是边：窗口外还没读进来的行不算，滚不动
+/// 就停在那里等读。横向不越界：横向位置在绘制、点选、查找高亮里各处直接用，越界只在
+/// [`visible_rows`] 这一处给竖向加上。
+pub(super) struct TouchTarget<'a> {
+    pub(super) state: &'a mut TextPreviewViewerState,
+    pub(super) document: &'a TextPreviewDocument,
+}
+
+impl ScrollTarget for TouchTarget<'_> {
+    fn scroll(&mut self, orientation: Orientation, delta: f32) -> (f32, f32) {
+        match orientation {
+            Orientation::Horizontal => {
+                let before = self.state.scroll_x;
+                scroll_viewer_horizontally(self.state, delta);
+                (self.state.scroll_x - before, 0.0)
+            }
+            Orientation::Vertical => {
+                let scrolled = scroll_viewer_by(self.state, self.document, delta);
+                if scrolled != 0.0 {
+                    self.state.drag_fraction = None;
+                    refresh_retained_content(self.state, self.document);
+                }
+                let clamped = delta - scrolled;
+                let at_edge = if clamped < 0.0 {
+                    self.document.at_start()
+                } else {
+                    self.document.at_end()
+                };
+                (scrolled, if at_edge { clamped } else { 0.0 })
+            }
+        }
+    }
+
+    fn extent(&self, orientation: Orientation) -> f32 {
+        match orientation {
+            Orientation::Horizontal => self.state.text_width(),
+            Orientation::Vertical => self.state.viewport_height,
+        }
+    }
 }
 
 /// 不换行时横向滚动，夹在 [0, 最宽行 − 文字区宽] 之间。返回位置是否变了。

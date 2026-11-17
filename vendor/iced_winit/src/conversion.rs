@@ -211,7 +211,7 @@ pub fn window_event(
                 }
             }))
         }
-        WindowEvent::MouseWheel { delta, .. } => match delta {
+        WindowEvent::MouseWheel { delta, phase, .. } => match delta {
             winit::event::MouseScrollDelta::LineDelta(delta_x, delta_y) => {
                 Some(Event::Mouse(mouse::Event::WheelScrolled {
                     delta: mouse::ScrollDelta::Lines {
@@ -220,13 +220,27 @@ pub fn window_event(
                     },
                 }))
             }
+            // iced 的事件不带手势阶段，而松手后的惯性要知道手指何时离开触控板：约定零位移的
+            // 像素滚动就是「手势结束」（Wayland 的 axis_stop），其余阶段的零位移不发。
+            // 像素按逻辑像素给，和光标位置一致：缩放屏上内容才跟手指走一样远。
             winit::event::MouseScrollDelta::PixelDelta(position) => {
-                Some(Event::Mouse(mouse::Event::WheelScrolled {
-                    delta: mouse::ScrollDelta::Pixels {
-                        x: position.x as f32,
-                        y: position.y as f32,
+                let ended = matches!(
+                    phase,
+                    winit::event::TouchPhase::Ended
+                        | winit::event::TouchPhase::Cancelled
+                );
+                let position =
+                    position.to_logical::<f64>(f64::from(scale_factor));
+                let (x, y) = if ended {
+                    (0.0, 0.0)
+                } else {
+                    (position.x as f32, position.y as f32)
+                };
+                (ended || x != 0.0 || y != 0.0).then_some(Event::Mouse(
+                    mouse::Event::WheelScrolled {
+                        delta: mouse::ScrollDelta::Pixels { x, y },
                     },
-                }))
+                ))
             }
         },
         // Ignore keyboard presses/releases during window focus/unfocus

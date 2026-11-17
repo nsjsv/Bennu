@@ -6,6 +6,7 @@
 
 use std::time::Duration;
 
+use bennu_theme::smooth_scroll::{wheel_direction, WheelDirection};
 use iced::advanced::widget::{self, operation, Operation};
 use iced::advanced::{layout, mouse, overlay, renderer, Clipboard, Layout, Shell, Widget};
 use iced::keyboard::{self, key::Named};
@@ -254,11 +255,9 @@ fn document_wheel_message(
     if !modifiers.command() {
         return None;
     }
-    let (mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. }) = delta;
-    let zoom = if y > 0.0 {
-        DocumentZoom::In
-    } else {
-        DocumentZoom::Out
+    let zoom = match wheel_direction(delta)? {
+        WheelDirection::Up => DocumentZoom::In,
+        WheelDirection::Down => DocumentZoom::Out,
     };
     Some(PreviewMessage::DocumentPreview(
         DocumentPreviewMessage::Zoomed(zoom),
@@ -533,6 +532,12 @@ mod tests {
         assert!(
             document_wheel_message(mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 }, none).is_none()
         );
+        // 按着 Ctrl 时手指离开触控板不是一次缩小。
+        assert!(document_wheel_message(
+            mouse::ScrollDelta::Pixels { x: 0.0, y: 0.0 },
+            keyboard::Modifiers::CTRL
+        )
+        .is_none());
     }
 
     #[test]

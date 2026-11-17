@@ -3,12 +3,15 @@
 //! 原来的做法每 60 Hz 一帧：剩余距离走掉 12.5%，输出再过权重 0.23 的一阶滤波。换成连续时间
 //! 的同一模型：剩余距离 `r` 以 λ 指数衰减，输出速度 `v` 以 μ 一阶跟随 `λ·r`；任意时长的位移
 //! 有闭式解，一步算出。帧多帧少、掉不掉帧，同一次拨动走的总距离和时长都一样。
+//!
+//! 每次拨动的距离先按转速加速（见 `acceleration`）。
 
 use std::time::{Duration, Instant};
 
 use iced::{window, Vector};
 
-use super::{SmoothScrollDelta, MOS_SCROLL_SPEED};
+use super::acceleration::WheelAcceleration;
+use super::{SmoothScrollDelta, MOS_SCROLL_SPEED, MOS_SCROLL_STEP};
 
 /// 每 1/60 秒走掉剩余的 12.5%：λ = −ln(1 − 0.125) × 60。
 const DECAY_PER_SECOND: f32 = 8.012_08;
@@ -65,6 +68,8 @@ pub struct MosInertia {
     last_advance: Option<Instant>,
     /// 走过但还没滚出去的不足一像素的部分。
     carry: Vector,
+    /// 最近几次拨动的快慢；惯性停下不清空（连续拨动跨过停顿也算转速）。
+    acceleration: WheelAcceleration,
 }
 
 /// 一帧该滚的整像素，以及什么时候再来。
@@ -77,8 +82,10 @@ pub struct InertiaStep {
 
 impl MosInertia {
     pub fn push(&mut self, delta: SmoothScrollDelta, now: Instant) {
-        self.x.push(delta.x);
-        self.y.push(delta.y);
+        let notches = delta.magnitude() / MOS_SCROLL_STEP;
+        let gain = self.acceleration.multiplier(delta, notches, now);
+        self.x.push(delta.x * gain);
+        self.y.push(delta.y * gain);
         self.last_advance.get_or_insert(now);
     }
 
@@ -114,10 +121,26 @@ impl MosInertia {
         }
     }
 
+    /// 攒够下一个整像素的时刻。速度是从零加速上来的：刚拨时按眼下的速度估，会估成要等很久，
+    /// 等到了一次走一大截（第一下「闪」）；所以按运动的闭式解二分出到达的时刻。
     fn until_next_pixel(&self) -> Duration {
-        let carried = self.carry.x.abs().max(self.carry.y.abs());
-        let speed = self.x.velocity.abs().max(self.y.velocity.abs()).max(1.0);
-        Duration::from_secs_f32(((1.0 - carried) / speed).clamp(0.004, 0.1))
+        let reached = |dt: f32| {
+            let (mut x, mut y) = (self.x, self.y);
+            (self.carry.x + x.advance(dt)).abs() >= 1.0
+                || (self.carry.y + y.advance(dt)).abs() >= 1.0
+        };
+        let (mut early, mut late) = (0.0, MAX_STEP_SECONDS);
+        if reached(late) {
+            for _ in 0..12 {
+                let middle = (early + late) / 2.0;
+                if reached(middle) {
+                    late = middle;
+                } else {
+                    early = middle;
+                }
+            }
+        }
+        Duration::from_secs_f32(late)
     }
 
     pub fn is_active(&self) -> bool {
@@ -125,7 +148,10 @@ impl MosInertia {
     }
 
     pub fn stop(&mut self) {
-        *self = Self::default();
+        *self = Self {
+            acceleration: std::mem::take(&mut self.acceleration),
+            ..Self::default()
+        };
     }
 }
 
@@ -198,16 +224,51 @@ mod tests {
     fn same_direction_adds_up_and_reversing_starts_over() {
         let start = Instant::now();
         let mut inertia = MosInertia::default();
+        // 隔得够久，不加速。
         inertia.push(line_down(), start);
-        inertia.push(line_down(), start);
+        inertia.push(line_down(), start + Duration::from_millis(600));
         assert!((inertia.y.remaining - 2.0 * MOS_SCROLL_STEP * MOS_SCROLL_SPEED).abs() < 1e-3);
 
         let up = SmoothScrollDelta {
             x: 0.0,
             y: -MOS_SCROLL_STEP,
         };
-        inertia.push(up, start);
+        inertia.push(up, start + Duration::from_millis(700));
         assert!((inertia.y.remaining + MOS_SCROLL_STEP * MOS_SCROLL_SPEED).abs() < 1e-3);
+    }
+
+    /// 拨下去马上来的那一帧还走不到一像素：约的下一帧要在第一个像素到的时候（十几毫秒后），
+    /// 不能等 0.1 秒再一下走一大截。
+    #[test]
+    fn the_first_pixel_is_awaited_on_the_accelerating_curve() {
+        let start = Instant::now();
+        let mut inertia = MosInertia::default();
+        inertia.push(line_down(), start);
+        let first = inertia.step(start + Duration::from_micros(100));
+        assert_eq!(first.scroll, Vector::ZERO);
+        let Some(window::RedrawRequest::At(at)) = first.next else {
+            panic!("expected a timed redraw, got {:?}", first.next);
+        };
+        assert!(at - start < Duration::from_millis(20), "{:?}", at - start);
+        let second = inertia.step(at);
+        assert_eq!(second.scroll.y, 1.0);
+    }
+
+    /// 快速连拨：每格走得比慢拨远。
+    #[test]
+    fn fast_notches_go_further_than_slow_ones() {
+        let travel = |gap: Duration| {
+            let start = Instant::now();
+            let mut inertia = MosInertia::default();
+            for notch in 0..6 {
+                inertia.push(line_down(), start + gap * notch);
+            }
+            inertia.y.remaining
+        };
+        let slow = travel(Duration::from_millis(600));
+        let fast = travel(Duration::from_millis(30));
+        assert!((slow - 6.0 * MOS_SCROLL_STEP * MOS_SCROLL_SPEED).abs() < 1e-2);
+        assert!(fast > 1.5 * slow, "{fast} vs {slow}");
     }
 
     #[test]

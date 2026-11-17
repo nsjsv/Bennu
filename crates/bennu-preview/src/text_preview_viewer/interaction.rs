@@ -4,7 +4,9 @@
 use std::time::{Duration, Instant};
 
 use bennu_localization::tr;
-use bennu_theme::smooth_scroll::{wheel_delta_for_axis, SmoothScrollAxis, WheelScrollMode};
+use bennu_theme::smooth_scroll::{
+    is_gesture_end, wheel_delta_for_axis, SmoothScrollAxis, WheelScrollMode,
+};
 use bennu_theme::styles::{context_menu_item_button_style, context_menu_style, muted_text_color};
 use bennu_theme::typography::BODY_SIZE;
 use bennu_theme::ui_colors;
@@ -17,7 +19,7 @@ use iced::{
 };
 
 use super::find::find_shortcut;
-use super::geometry::{scroll_viewer_by, scroll_viewer_horizontally};
+use super::geometry::{scroll_viewer_by, scroll_viewer_horizontally, TouchTarget};
 use super::render::text_bounds;
 use super::selection::{self, apply_key_binding};
 use super::{
@@ -151,6 +153,11 @@ pub(super) fn handle_event(
             }
         }
         Event::Mouse(mouse::Event::WheelScrolled { delta }) if cursor.is_over(bounds) => {
+            // 手指离开触控板：接着滑或弹回（按着 Ctrl 也一样，它没有方向，不能当缩放）。
+            if is_gesture_end(*delta) {
+                state.touch.release(Instant::now());
+                return EventOutcome::redraw();
+            }
             // Ctrl+滚轮缩放字号，其余在查看器里惯性滚动。
             if state.modifiers.command() {
                 let upward = match delta {
@@ -293,8 +300,15 @@ fn tick(
     now: Instant,
 ) -> EventOutcome {
     scrollbar::follow_thumb_drag(state, document);
+    let redraw = [
+        advance_inertia(state, document, now),
+        advance_touch(state, document, now),
+    ]
+    .into_iter()
+    .flatten()
+    .min();
     let mut outcome = EventOutcome {
-        redraw: advance_inertia(state, document, now),
+        redraw,
         ..EventOutcome::default()
     };
     if let Some(notice) = &state.notice {
@@ -320,7 +334,7 @@ fn tick(
     EventOutcome::redraw()
 }
 
-/// 滚轮：一格一格的进惯性，在每帧的 tick 里推进；触控板给的像素直接滚。
+/// 滚轮：一格一格的进惯性，在每帧的 tick 里推进；触控板给的像素跟着手指滚。
 fn wheel_scroll(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
@@ -332,12 +346,35 @@ fn wheel_scroll(
         return;
     };
     match wheel.mode {
-        WheelScrollMode::MosAnimated => state.inertia.push(wheel.delta, Instant::now()),
+        WheelScrollMode::MosAnimated => {
+            state.touch.stop();
+            state.inertia.push(wheel.delta, Instant::now());
+        }
         WheelScrollMode::Direct => {
             state.inertia.stop();
-            scroll_by_pixels(state, document, Vector::new(wheel.delta.x, wheel.delta.y));
+            // 触控板状态借出来，让它通过查看器自己的几何滚（借出期间查看器看到的越界是 0）。
+            let mut touch = std::mem::take(&mut state.touch);
+            touch.follow(
+                Vector::new(wheel.delta.x, wheel.delta.y),
+                Instant::now(),
+                &mut TouchTarget { state, document },
+            );
+            state.touch = touch;
         }
     }
+}
+
+/// 推进触控板的滑行和回弹；返回什么时候再画。
+fn advance_touch(
+    state: &mut TextPreviewViewerState,
+    document: &TextPreviewDocument,
+    now: Instant,
+) -> Option<window::RedrawRequest> {
+    state.touch.next_redraw()?;
+    let mut touch = std::mem::take(&mut state.touch);
+    touch.advance(now, &mut TouchTarget { state, document });
+    state.touch = touch;
+    state.touch.next_redraw()
 }
 
 /// 推进滚轮惯性；返回什么时候再画。滚不动了（到边）惯性就停。
@@ -363,7 +400,7 @@ fn scroll_by_pixels(
     delta: Vector,
 ) -> bool {
     let horizontal = scroll_viewer_horizontally(state, delta.x);
-    let vertical = scroll_viewer_by(state, document, delta.y);
+    let vertical = scroll_viewer_by(state, document, delta.y) != 0.0;
     if vertical {
         state.drag_fraction = None;
         refresh_retained_content(state, document);
@@ -381,7 +418,8 @@ pub(super) fn autoscroll_step(
         state,
         document,
         state.autoscroll_velocity * step.as_secs_f32(),
-    ) {
+    ) != 0.0
+    {
         refresh_retained_content(state, document);
     }
     if let Some(position) = selection::hit_test(state, document, state.drag_pointer) {

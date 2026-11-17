@@ -1,14 +1,18 @@
-//! Mos 式惯性滚动共享层：滚轮增量换算（按 [`SmoothScrollAxis`] 参数化）、按真实时间推进的
-//! 惯性（[`MosInertia`]），以及把惯性放在控件里的一对包装（[`smooth_scroll`]）。不依赖任何
-//! 应用的 Message/区域模型。
+//! 惯性滚动共享层：滚轮增量换算（按 [`SmoothScrollAxis`] 参数化）、按真实时间推进的
+//! 滚轮惯性（Mos 式，[`MosInertia`]，按转速加速）、触控板的跟手/滑行/边缘回弹，以及把这些
+//! 放在控件里的一对包装（[`smooth_scroll`]）。不依赖任何应用的 Message/区域模型。
 
 use iced::mouse;
 
+mod acceleration;
 mod driver;
 mod inertia;
+mod scroller;
+mod touch;
 
 pub use driver::{smooth_scroll, SmoothScroll};
 pub use inertia::{InertiaStep, MosInertia};
+pub use touch::{Orientation, ScrollTarget, TouchScroll};
 
 pub const MOS_SCROLL_STEP: f32 = 33.6;
 pub const MOS_SCROLL_SPEED: f32 = 2.70;
@@ -26,6 +30,31 @@ impl SmoothScrollDelta {
 
     pub fn magnitude(self) -> f32 {
         self.x.abs().max(self.y.abs())
+    }
+}
+
+/// 触控板手势结束（手指离开）：约定是零位移的像素滚动，见 vendored iced_winit 的事件转换。
+pub fn is_gesture_end(delta: mouse::ScrollDelta) -> bool {
+    matches!(delta, mouse::ScrollDelta::Pixels { x, y } if x == 0.0 && y == 0.0)
+}
+
+/// 滚轮往哪边拨：缩放、翻句这类一次走一档的按它走。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WheelDirection {
+    /// 往上（远离用户），y > 0。
+    Up,
+    Down,
+}
+
+/// 竖向拨动的方向；手势结束（[`is_gesture_end`]）没有方向，不是一次往下。
+pub fn wheel_direction(delta: mouse::ScrollDelta) -> Option<WheelDirection> {
+    let (mouse::ScrollDelta::Lines { y, .. } | mouse::ScrollDelta::Pixels { y, .. }) = delta;
+    if y > 0.0 {
+        Some(WheelDirection::Up)
+    } else if y < 0.0 {
+        Some(WheelDirection::Down)
+    } else {
+        None
     }
 }
 

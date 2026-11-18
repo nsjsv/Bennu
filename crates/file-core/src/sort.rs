@@ -7,7 +7,7 @@ use crate::{
     DirectoryEntry, DirectoryMetadataState, DiscoveredDirectoryEntry, FileKind, ScanOptions,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortField {
     Name,
     Size,
@@ -15,7 +15,7 @@ pub enum SortField {
     Modified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SortDirection {
     Ascending,
     Descending,

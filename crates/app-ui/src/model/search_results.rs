@@ -120,7 +120,7 @@ impl BrowserTab {
         if !self.entries.iter().any(|entry| is_removed(entry.path())) {
             return false;
         }
-        search.details.retain(|path, _| !is_removed(path));
+        search.details_mut().retain(|path, _| !is_removed(path));
         self.entries
             .make_mut()
             .retain(|entry| !is_removed(entry.path()));
@@ -180,7 +180,7 @@ impl BrowserTab {
             .map(|entry| entry.name().to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         if placement == SearchHitsPlacement::Replace {
-            search.details.clear();
+            search.details_mut().clear();
         }
         search.remember_details(&hits, &display_names);
         let listing = self.entries.make_mut();
@@ -190,8 +190,9 @@ impl BrowserTab {
         listing.extend(entries);
         let excess = listing.len().saturating_sub(SEARCH_RESULT_TOTAL_LIMIT);
         if excess > 0 {
+            let details = search.details_mut();
             for dropped in listing.drain(..excess) {
-                search.details.remove(dropped.path());
+                details.remove(dropped.path());
             }
             search.note_truncated();
         }

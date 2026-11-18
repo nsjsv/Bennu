@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::rc::Rc;
 
 use file_core::DirectoryEntry;
 use iced::Point;
@@ -9,20 +9,18 @@ use crate::icon_grid_geometry::{
     column_count_for_width, keyboard_target_index, row_count_for_entries, row_height,
     visible_vertical_window, IconGridDirection, ICON_GRID_CONTENT_PADDING,
 };
-use crate::model::{
-    ExpandedDirectoryStatus, IconGridExpandedDirectory, IconGridExpansionState, IconGridViewport,
-};
-use crate::transfer_placeholders::{
-    merge_entries_with_placeholders, TransferPlaceholder, TransferSortOptions,
-};
+use crate::model::{IconGridExpandedDirectory, IconGridExpansionState, IconGridViewport};
+use crate::transfer_placeholders::{TransferPlaceholder, TransferSortOptions};
 use crate::virtual_range::vertical_scroll_delta_to_reveal;
 
+mod cell_plan;
 mod interaction_geometry;
 mod root_group_plan;
 
+pub(crate) use cell_plan::{icon_grid_cell_plan, IconGridCellCache, IconGridCellInputs};
+use cell_plan::{IconGridCellContent, IconGridCellPlan, IconGridCellSpan, IconGridCells};
 use interaction_geometry::IconGridEntryGeometry;
-pub(crate) use root_group_plan::IconGridRootGrouping;
-use root_group_plan::{split_root_cells, IconGridRowsPlan};
+use root_group_plan::{IconGridRootFileGroup, IconGridRowsPlan};
 
 /// 展开子面板的占位注入表:目录 -> (占位, 排序)。由调用方(持有
 /// FileBrowser)一次性派生,布局保持纯几何、不触操作队列;拖放进
@@ -32,30 +30,21 @@ pub(crate) type ExpandedTransferPlaceholderIndex =
 
 /// 网格单元:真实条目或传输占位(根面板与展开子面板均可合入)。
 /// 交互(键盘/命中/揭示)一律只认 Entry,占位纯展示。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum IconGridCell<'a> {
     Entry(IconGridEntryCell<'a>),
-    Placeholder(TransferPlaceholder),
+    Placeholder(&'a TransferPlaceholder),
 }
 
 /// 条目格子与其在所属目录条目数组中的真实下标:分组会把根条目重排,
-/// 展开锚点必须以条目数组下标为键,因此下标在格子构造期确定并随格子
+/// 展开锚点必须以条目数组下标为键,因此下标在排格子时确定并随格子
 /// 走,渲染与布局直接消费,不再按格子顺序隐式计数。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct IconGridEntryCell<'a> {
     pub(crate) entry: &'a DirectoryEntry,
     pub(crate) entry_index: usize,
     /// 同名传输占位的装饰(进度环),渲染时叠加在瓦片图标上。
-    pub(crate) transfer: Option<TransferPlaceholder>,
-}
-
-impl<'a> IconGridCell<'a> {
-    fn entry(&self) -> Option<&'a DirectoryEntry> {
-        match self {
-            Self::Entry(cell) => Some(cell.entry),
-            Self::Placeholder(_) => None,
-        }
-    }
+    pub(crate) transfer: Option<&'a TransferPlaceholder>,
 }
 
 pub(crate) const ICON_GRID_STATUS_HEIGHT: f32 = 48.0;
@@ -84,7 +73,11 @@ pub(crate) struct IconGridVisibleRows {
 pub(crate) struct IconGridRowsLayout<'a> {
     /// 这些格子所在的目录；根面板显示的位置不是目录（回收站）时没有。
     pub(crate) directory: Option<&'a Path>,
-    pub(crate) cells: Arc<[IconGridCell<'a>]>,
+    /// 格子里的条目下标指向这里（这个面板目录的条目）。
+    entries: &'a [DirectoryEntry],
+    cells: Rc<IconGridCells>,
+    /// 这一段排的是 `cells` 的哪一截（分组的根面板每组一截）。
+    span: IconGridCellSpan,
     pub(crate) start_row: usize,
     pub(crate) end_row: usize,
     pub(crate) column_count: usize,
@@ -92,7 +85,44 @@ pub(crate) struct IconGridRowsLayout<'a> {
     pub(crate) height: f32,
 }
 
-impl IconGridRowsLayout<'_> {
+impl<'a> IconGridRowsLayout<'a> {
+    /// 这一段的格子数。
+    pub(crate) fn cell_count(&self) -> usize {
+        self.span.len()
+    }
+
+    /// 段内第 `index` 个格子。
+    pub(crate) fn cell(&self, index: usize) -> Option<IconGridCell<'_>> {
+        if index >= self.span.len() {
+            return None;
+        }
+        Some(match self.cells.content(self.span.start + index)? {
+            IconGridCellContent::Entry {
+                entry_index,
+                transfer,
+            } => IconGridCell::Entry(IconGridEntryCell {
+                entry: self.entries.get(entry_index)?,
+                entry_index,
+                transfer,
+            }),
+            IconGridCellContent::Placeholder(placeholder) => IconGridCell::Placeholder(placeholder),
+        })
+    }
+
+    /// 段内第 `index` 个格子的条目;占位格没有。
+    pub(crate) fn entry(&self, index: usize) -> Option<&'a DirectoryEntry> {
+        if index >= self.span.len() {
+            return None;
+        }
+        self.entries
+            .get(self.cells.entry_index(self.span.start + index)?)
+    }
+
+    /// 段内全部条目(按格子顺序,跳过占位)。
+    pub(crate) fn entries(&self) -> impl Iterator<Item = &'a DirectoryEntry> + '_ {
+        (0..self.cell_count()).filter_map(|index| self.entry(index))
+    }
+
     pub(crate) fn visible_rows(
         &self,
         panel_top: f32,
@@ -239,10 +269,8 @@ pub(crate) struct IconGridNavigationTarget<'a> {
 }
 
 impl<'a> IconGridLayout<'a> {
-    /// 根面板与展开子面板合入传输占位:占位按各自排序插入条目流,
-    /// 几何随合并后单元格数推导;交互(键盘/命中/揭示)只认真实条目。
-    /// 分组开启(仅根面板)时根合并流先按目录置顶、文件段按组划分,
-    /// 划分器与列表共用;子面板/band 永远平铺不分组。
+    /// 测试用:不经窗格缓存,当场排格子再排几何。
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn with_root_transfer_placeholders(
         root_directory: Option<&'a Path>,
@@ -254,28 +282,64 @@ impl<'a> IconGridLayout<'a> {
         height_bound: f32,
         icon_edge: u32,
         expansion: Option<&'a IconGridExpansionState>,
-        root_grouping: Option<IconGridRootGrouping<'_>>,
+        root_grouping: Option<&crate::transfer_placeholder_view::root_grouping::RootGrouping>,
+    ) -> Self {
+        let expansion =
+            expansion.filter(|state| Some(state.context().current_dir.as_path()) == root_directory);
+        let plan = IconGridCellInputs {
+            root: root_entries,
+            root_placeholders,
+            root_sort,
+            grouping: root_grouping,
+            children: visible_expansion_directories(expansion),
+            expanded_placeholders,
+        }
+        .build(0);
+        Self::from_plan(
+            root_directory,
+            root_entries,
+            &plan,
+            viewport_width,
+            height_bound,
+            icon_edge,
+            expansion,
+        )
+    }
+
+    /// 根面板与展开子面板的格子(传输占位已按各自排序合入、根面板已分组)取自 `plan`,
+    /// 这里只排几何:行段、展开带、组头,按格子数推导;交互(键盘/命中/揭示)只认真实条目。
+    pub(crate) fn from_plan(
+        root_directory: Option<&'a Path>,
+        root_entries: &'a [DirectoryEntry],
+        plan: &IconGridCellPlan,
+        viewport_width: f32,
+        height_bound: f32,
+        icon_edge: u32,
+        expansion: Option<&'a IconGridExpansionState>,
     ) -> Self {
         let expansion =
             expansion.filter(|state| Some(state.context().current_dir.as_path()) == root_directory);
         let children_by_parent = expansion.map(index_visible_children);
-        let merged = merge_entries_with_placeholders(root_entries, root_placeholders, root_sort);
-        let (root_cells, root_rows_plan) = split_root_cells(merged, root_entries, root_grouping);
-        // 分组开启时根单元格只含置顶目录,文件组也可能非空——两者皆空才算空态。
-        let root_status = if root_cells.is_empty() && !root_rows_plan.has_any_group_cells() {
-            IconGridPanelStatus::Empty
-        } else {
-            IconGridPanelStatus::Loaded
-        };
-        let root = build_panel(
-            root_directory,
-            root_cells,
-            root_status,
-            viewport_width.max(0.0),
+        let builder = PanelBuilder {
+            width: viewport_width.max(0.0),
             icon_edge,
-            children_by_parent.as_ref(),
-            root_rows_plan,
-            Some(expanded_placeholders),
+            children_by_parent: children_by_parent.as_ref(),
+            plan,
+        };
+        let (lead, groups) = match &plan.root_rows {
+            IconGridRowsPlan::Full => (0..plan.root.len(), &[][..]),
+            IconGridRowsPlan::GroupedFiles {
+                directories,
+                groups,
+            } => (directories.clone(), groups.as_slice()),
+        };
+        let root = builder.panel(
+            root_directory,
+            root_entries,
+            &plan.root,
+            plan.root_status,
+            lead,
+            groups,
         );
         Self {
             icon_edge,
@@ -313,7 +377,8 @@ impl<'a> IconGridLayout<'a> {
 
     pub(crate) fn interactive_entry_paths(&self) -> Vec<PathBuf> {
         if let [IconGridFlowSegment::Rows(rows)] = self.root.flow.as_slice() {
-            return interaction_geometry::rows_entries(&rows.cells)
+            return rows
+                .entries()
                 .map(|entry| entry.path().to_path_buf())
                 .collect();
         }
@@ -340,7 +405,7 @@ impl<'a> IconGridLayout<'a> {
     ) -> Option<IconGridNavigationTarget<'a>> {
         if let [IconGridFlowSegment::Rows(rows)] = self.root.flow.as_slice() {
             // 键盘导航只落在真实条目上;占位格被自然跳过。
-            let entries = interaction_geometry::rows_entries(&rows.cells).collect::<Vec<_>>();
+            let entries = rows.entries().collect::<Vec<_>>();
             let current_index = current_path.and_then(|current_path| {
                 entries
                     .iter()
@@ -432,184 +497,144 @@ impl<'a> IconGridLayout<'a> {
     }
 }
 
-fn build_panel<'a>(
-    directory: Option<&'a Path>,
-    cells: Arc<[IconGridCell<'a>]>,
-    status: IconGridPanelStatus,
+/// 排几何时整棵面板树共用的东西。
+struct PanelBuilder<'a, 'p> {
     width: f32,
     icon_edge: u32,
-    children_by_parent: Option<&IconGridChildrenByParent<'a>>,
-    // 行区计划:Full 铺满全部单元格;GroupedFiles 只把置顶目录铺成行,
-    // 文件段由本函数按组追加[组头条, 组行段](仅根面板使用)。
-    rows_plan: IconGridRowsPlan<'a>,
-    expanded_placeholders: Option<&ExpandedTransferPlaceholderIndex>,
-) -> IconGridPanelLayout<'a> {
-    let column_count = column_count_for_width(width, icon_edge);
-    // 分组根面板的 cells 只含置顶目录,空态判定要连同文件组一起看;
-    // 其余面板 cells 即全部内容。
-    if status != IconGridPanelStatus::Loaded
-        || (cells.is_empty() && !rows_plan.has_any_group_cells())
-    {
-        return IconGridPanelLayout {
-            status,
-            height: ICON_GRID_CONTENT_PADDING * 2.0 + ICON_GRID_STATUS_HEIGHT,
-            flow: Vec::new(),
-        };
-    }
+    children_by_parent: Option<&'p IconGridChildrenByParent<'a>>,
+    plan: &'p IconGridCellPlan,
+}
 
-    // 条目下标 -> 单元格下标:格子自带真实条目下标(见 IconGridEntryCell),
-    // 展开锚点按 path 校验出的条目下标经此映射到行号——分组重排与占位
-    // 插入都不会让锚点漂移。分组根的文件段条目不在本面板 cells 里,落空
-    // 时回退原下标,与既有陈旧锚点的回退一致。
-    let entry_count = cells
-        .iter()
-        .filter_map(|cell| match cell {
-            IconGridCell::Entry(cell) => Some(cell.entry_index + 1),
-            IconGridCell::Placeholder(_) => None,
-        })
-        .max()
-        .unwrap_or(0);
-    let mut entry_cell_positions = vec![usize::MAX; entry_count];
-    for (cell_index, cell) in cells.iter().enumerate() {
-        if let IconGridCell::Entry(cell) = cell {
-            entry_cell_positions[cell.entry_index] = cell_index;
+impl<'a> PanelBuilder<'a, '_> {
+    /// 一个面板的流段。`lead` 是铺成行的那截格子(未分组即全部);`groups` 只在分组的根面板非空,
+    /// 按组追加[组头条, 组行段]。
+    fn panel(
+        &self,
+        directory: Option<&'a Path>,
+        entries: &'a [DirectoryEntry],
+        cells: &Rc<IconGridCells>,
+        status: IconGridPanelStatus,
+        lead: IconGridCellSpan,
+        groups: &[IconGridRootFileGroup],
+    ) -> IconGridPanelLayout<'a> {
+        let icon_edge = self.icon_edge;
+        let column_count = column_count_for_width(self.width, icon_edge);
+        if status != IconGridPanelStatus::Loaded || cells.is_empty() {
+            return IconGridPanelLayout {
+                status,
+                height: ICON_GRID_CONTENT_PADDING * 2.0 + ICON_GRID_STATUS_HEIGHT,
+                flow: Vec::new(),
+            };
         }
-    }
-    let anchor_cell_index = |anchor_index: usize| {
-        entry_cell_positions
-            .get(anchor_index)
-            .copied()
-            .filter(|position| *position != usize::MAX)
-            .unwrap_or(anchor_index)
-    };
-    let total_rows = row_count_for_entries(cells.len(), column_count);
-    let children = children_by_parent
-        .zip(directory)
-        .and_then(|(children, directory)| children.get(directory))
-        .map(Vec::as_slice)
-        .unwrap_or_default();
 
-    let mut flow = Vec::with_capacity(children.len().saturating_mul(2).saturating_add(1));
-    let mut next_row = 0;
-    let mut top = ICON_GRID_CONTENT_PADDING;
-    let mut child_cursor = 0;
-    while child_cursor < children.len() {
-        let anchor_row = anchor_cell_index(children[child_cursor].1.anchor_index) / column_count;
-        let rows_end = anchor_row.saturating_add(1).min(total_rows);
-        if next_row < rows_end {
-            let height = (rows_end - next_row) as f32 * row_height(icon_edge);
-            flow.push(IconGridFlowSegment::Rows(IconGridRowsLayout {
+        // 条目下标 -> 格子位置:格子自带真实条目下标(见 IconGridEntryCell),
+        // 展开锚点按 path 校验出的条目下标经此映射到行号——分组重排与占位
+        // 插入都不会让锚点漂移。不在铺成行的那截里(分组根的文件段)时
+        // 回退原下标,与既有陈旧锚点的回退一致。
+        let anchor_cell_index = |anchor_index: usize| {
+            cells
+                .position_of(anchor_index)
+                .filter(|position| lead.contains(position))
+                .map_or(anchor_index, |position| position - lead.start)
+        };
+        let rows_of = |span: IconGridCellSpan, start_row: usize, end_row: usize, top: f32| {
+            IconGridFlowSegment::Rows(IconGridRowsLayout {
                 directory,
-                cells: Arc::clone(&cells),
-                start_row: next_row,
-                end_row: rows_end,
+                entries,
+                cells: Rc::clone(cells),
+                span,
+                start_row,
+                end_row,
                 column_count,
                 top,
-                height,
-            }));
-            top += height;
-            next_row = rows_end;
-        }
+                height: (end_row - start_row) as f32 * row_height(icon_edge),
+            })
+        };
+        let total_rows = row_count_for_entries(lead.len(), column_count);
+        let children = self
+            .children_by_parent
+            .zip(directory)
+            .and_then(|(children, directory)| children.get(directory))
+            .map(Vec::as_slice)
+            .unwrap_or_default();
 
-        while child_cursor < children.len()
-            && anchor_cell_index(children[child_cursor].1.anchor_index) / column_count == anchor_row
-        {
-            let (child_path, child) = children[child_cursor];
-            let (child_cells, child_status) =
-                expanded_panel_content(child_path, child, expanded_placeholders);
-            let child_panel = build_panel(
-                Some(child_path),
-                child_cells,
-                child_status,
-                width,
-                icon_edge,
-                children_by_parent,
-                IconGridRowsPlan::Full,
-                expanded_placeholders,
-            );
-            let natural_height = child_panel.height;
-            let animation_progress = child.contents.animation_progress.clamp(0.0, 1.0);
-            let height = natural_height * animation_progress;
-            flow.push(IconGridFlowSegment::Band(IconGridBandLayout {
-                directory: child_path,
-                anchor_column: anchor_cell_index(child.anchor_index) % column_count,
-                top,
-                height,
-                natural_height,
-                interactive: child.is_interactive(),
-                panel: Box::new(child_panel),
-            }));
-            top += height;
-            child_cursor += 1;
-        }
-    }
+        let mut flow = Vec::with_capacity(children.len().saturating_mul(2).saturating_add(1));
+        let mut next_row = 0;
+        let mut top = ICON_GRID_CONTENT_PADDING;
+        let mut child_cursor = 0;
+        while child_cursor < children.len() {
+            let anchor_row =
+                anchor_cell_index(children[child_cursor].1.anchor_index) / column_count;
+            let rows_end = anchor_row.saturating_add(1).min(total_rows);
+            if next_row < rows_end {
+                let segment = rows_of(lead.clone(), next_row, rows_end, top);
+                top += segment.height();
+                flow.push(segment);
+                next_row = rows_end;
+            }
 
-    match rows_plan {
-        IconGridRowsPlan::Full => {
-            if next_row < total_rows {
-                let height = (total_rows - next_row) as f32 * row_height(icon_edge);
-                flow.push(IconGridFlowSegment::Rows(IconGridRowsLayout {
-                    directory,
-                    cells,
-                    start_row: next_row,
-                    end_row: total_rows,
-                    column_count,
+            while child_cursor < children.len()
+                && anchor_cell_index(children[child_cursor].1.anchor_index) / column_count
+                    == anchor_row
+            {
+                let (child_path, child) = children[child_cursor];
+                // 排格子与排几何读的是同一份展开状态(指纹里有显示中的展开目录)。
+                let (child_cells, child_status) = &self.plan.children[child_path];
+                let child_panel = self.panel(
+                    Some(child_path),
+                    &child.contents.entries,
+                    child_cells,
+                    *child_status,
+                    0..child_cells.len(),
+                    &[],
+                );
+                let natural_height = child_panel.height;
+                let animation_progress = child.contents.animation_progress.clamp(0.0, 1.0);
+                let height = natural_height * animation_progress;
+                flow.push(IconGridFlowSegment::Band(IconGridBandLayout {
+                    directory: child_path,
+                    anchor_column: anchor_cell_index(child.anchor_index) % column_count,
                     top,
                     height,
+                    natural_height,
+                    interactive: child.is_interactive(),
+                    panel: Box::new(child_panel),
                 }));
                 top += height;
+                child_cursor += 1;
             }
+        }
+        // 展开带只推到锚点行;其后的行区(分组时是置顶目录的行区)接着入流。
+        if next_row < total_rows {
+            let segment = rows_of(lead.clone(), next_row, total_rows, top);
+            top += segment.height();
+            flow.push(segment);
         }
         // 分组根的文件段:每组输出[组头条, 组行段]。组头条是纯展示
         // chrome,高度计入流高与 reveal 数学,但不产生任何交互目标;
         // 划分层保证组非空,组行段至少一行。
-        IconGridRowsPlan::GroupedFiles(groups) => {
-            // 置顶目录的行区先行入流(children 循环只推到 band 锚点行,
-            // 无展开时行区不能因为替换了尾段而丢失)。
-            if next_row < total_rows {
-                let height = (total_rows - next_row) as f32 * row_height(icon_edge);
-                flow.push(IconGridFlowSegment::Rows(IconGridRowsLayout {
-                    directory,
-                    cells,
-                    start_row: next_row,
-                    end_row: total_rows,
-                    column_count,
+        for group in groups {
+            flow.push(IconGridFlowSegment::GroupHeader(
+                IconGridGroupHeaderLayout {
+                    title: group.title.clone(),
+                    index_label: group.index_label.clone(),
+                    count: group.span.len(),
                     top,
-                    height,
-                }));
-                top += height;
-            }
-            for group in groups {
-                flow.push(IconGridFlowSegment::GroupHeader(
-                    IconGridGroupHeaderLayout {
-                        title: group.title,
-                        index_label: group.index_label,
-                        count: group.count,
-                        top,
-                        height: ICON_GRID_GROUP_HEADER_HEIGHT,
-                    },
-                ));
-                top += ICON_GRID_GROUP_HEADER_HEIGHT;
-                let rows = row_count_for_entries(group.cells.len(), column_count);
-                let height = rows as f32 * row_height(icon_edge);
-                flow.push(IconGridFlowSegment::Rows(IconGridRowsLayout {
-                    directory,
-                    cells: group.cells,
-                    start_row: 0,
-                    end_row: rows,
-                    column_count,
-                    top,
-                    height,
-                }));
-                top += height;
-            }
+                    height: ICON_GRID_GROUP_HEADER_HEIGHT,
+                },
+            ));
+            top += ICON_GRID_GROUP_HEADER_HEIGHT;
+            let rows = row_count_for_entries(group.span.len(), column_count);
+            let segment = rows_of(group.span.clone(), 0, rows, top);
+            top += segment.height();
+            flow.push(segment);
         }
-    }
 
-    IconGridPanelLayout {
-        status,
-        height: top + ICON_GRID_CONTENT_PADDING,
-        flow,
+        IconGridPanelLayout {
+            status,
+            height: top + ICON_GRID_CONTENT_PADDING,
+            flow,
+        }
     }
 }
 
@@ -637,67 +662,16 @@ fn index_visible_children(expansion: &IconGridExpansionState) -> IconGridChildre
     children_by_parent
 }
 
-fn expanded_panel_content<'a>(
-    directory_path: &Path,
-    directory: &'a IconGridExpandedDirectory,
-    expanded_placeholders: Option<&ExpandedTransferPlaceholderIndex>,
-) -> (Arc<[IconGridCell<'a>]>, IconGridPanelStatus) {
-    match &directory.contents.status {
-        ExpandedDirectoryStatus::Loading => (Arc::from(Vec::new()), IconGridPanelStatus::Loading),
-        ExpandedDirectoryStatus::Error => (Arc::from(Vec::new()), IconGridPanelStatus::Error),
-        ExpandedDirectoryStatus::Loaded | ExpandedDirectoryStatus::Refreshing => {
-            // 展开子面板与根面板同一规则:目标为该目录的传入占位按该
-            // 目录的排序合入;空目录但有占位时按有内容渲染,顶掉空态。
-            // 子面板不分组,合并序保持条目原序,出现序即条目真实下标。
-            let mut next_entry_index = 0usize;
-            let cells: Vec<IconGridCell> = match expanded_placeholders
-                .and_then(|index| index.get(directory_path))
-                .filter(|(placeholders, _)| !placeholders.is_empty())
-            {
-                Some((placeholders, sort)) => merge_entries_with_placeholders(
-                    &directory.contents.entries,
-                    placeholders,
-                    *sort,
-                )
-                .iter()
-                .map(|item| match item {
-                    crate::transfer_placeholders::MergedTransferItem::Entry { entry, transfer } => {
-                        let entry_index = next_entry_index;
-                        next_entry_index += 1;
-                        IconGridCell::Entry(IconGridEntryCell {
-                            entry,
-                            entry_index,
-                            transfer: transfer.clone(),
-                        })
-                    }
-                    crate::transfer_placeholders::MergedTransferItem::Placeholder(placeholder) => {
-                        IconGridCell::Placeholder(placeholder.clone())
-                    }
-                })
-                .collect(),
-                None => directory
-                    .contents
-                    .entries
-                    .iter()
-                    .map(|entry| {
-                        let entry_index = next_entry_index;
-                        next_entry_index += 1;
-                        IconGridCell::Entry(IconGridEntryCell {
-                            entry,
-                            entry_index,
-                            transfer: None,
-                        })
-                    })
-                    .collect(),
-            };
-            let status = if cells.is_empty() {
-                IconGridPanelStatus::Empty
-            } else {
-                IconGridPanelStatus::Loaded
-            };
-            (cells.into(), status)
-        }
-    }
+/// 显示中的展开目录(排格子的输入)。
+pub(crate) fn visible_expansion_directories(
+    expansion: Option<&IconGridExpansionState>,
+) -> Vec<(&Path, &crate::model::ExpandedDirectory)> {
+    expansion
+        .into_iter()
+        .flat_map(|expansion| expansion.directories())
+        .filter(|(_, directory)| directory.is_visible())
+        .map(|(path, directory)| (path, &directory.contents))
+        .collect()
 }
 
 #[cfg(test)]

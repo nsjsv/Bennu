@@ -107,13 +107,16 @@ fn drain_scheduled_requests(browser: &mut FileBrowser) -> Vec<PathBuf> {
 
 #[test]
 fn measured_viewport_schedules_list_rows_from_shared_geometry() {
-    let entries = (0..120)
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    browser.tab_mut().entries = (0..120)
         .map(|index| image_entry(&format!("/workspace/{index}.png")))
-        .collect::<Vec<_>>();
-    let range = crate::visible_entries::list_entry_range_for_viewport(
-        &entries,
-        &HashMap::new(),
-        crate::visible_entries::ListEntryHeights::uniform(crate::list_view::LIST_ROW_HEIGHT),
+        .collect();
+    let range = crate::transfer_placeholder_view::list_row_layout(
+        &browser,
+        browser.pane_view(browser.active_pane_id()).unwrap(),
+        crate::list_view::LIST_ROW_HEIGHT,
+    )
+    .range_for_viewport(
         crate::list_view::LIST_HEADER_HEIGHT,
         crate::list_view::LIST_HEADER_HEIGHT + crate::list_view::LIST_ROW_HEIGHT * 40.0,
         crate::list_view::LIST_ROW_HEIGHT * 3.0,

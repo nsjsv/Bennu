@@ -32,7 +32,7 @@ pub(crate) struct TransferPlaceholder {
 
 /// 占位插入位置使用的排序配置,来自视图当前目录的实际排序
 /// (根目录为扫描选项,展开目录为各自的 directory_order_phase)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct TransferSortOptions {
     pub(crate) field: SortField,
     pub(crate) direction: SortDirection,
@@ -77,6 +77,24 @@ pub(crate) fn transfer_placeholders_for_directory(
         }
     }
     placeholders
+}
+
+/// 排好的行流/格子按它判断占位变没变:全部字段,含进度(进度画在行里)。
+pub(crate) fn hash_transfer_placeholders(
+    placeholders: &[TransferPlaceholder],
+    state: &mut impl std::hash::Hasher,
+) {
+    use std::hash::Hash;
+    for placeholder in placeholders {
+        (
+            &placeholder.name,
+            placeholder.is_directory,
+            placeholder.progress.map(f32::to_bits),
+            placeholder.total_bytes,
+            placeholder.enqueued_at,
+        )
+            .hash(state);
+    }
 }
 
 /// 占位相对真实条目的排序位置:Greater 表示占位应排在条目之后。
@@ -192,7 +210,11 @@ pub(crate) fn merge_entries_with_placeholders<'a>(
         let transfer = decorations
             .next_if(|(decorated, _)| *decorated == index)
             .map(|(_, placeholder)| placeholder);
-        merged.push(MergedTransferItem::Entry { entry, transfer });
+        merged.push(MergedTransferItem::Entry {
+            entry,
+            index,
+            transfer,
+        });
     }
     merged.extend(pending.map(|placeholder| MergedTransferItem::Placeholder(placeholder.clone())));
     merged
@@ -204,6 +226,8 @@ pub(crate) enum MergedTransferItem<'a> {
     /// 图标槽叠加进度环。
     Entry {
         entry: &'a DirectoryEntry,
+        /// 在所属目录条目里的下标：分组会打乱顺序，展开锚点、缓存的行流都按它找回条目。
+        index: usize,
         transfer: Option<TransferPlaceholder>,
     },
     /// 占位按值携带:条目借用视图数据,占位来自队列派生的临时集合。
@@ -450,7 +474,9 @@ mod tests {
         let rows: Vec<(String, Option<f32>, bool)> = merged
             .iter()
             .map(|item| match item {
-                MergedTransferItem::Entry { entry, transfer } => (
+                MergedTransferItem::Entry {
+                    entry, transfer, ..
+                } => (
                     entry.name().to_string_lossy().into_owned(),
                     transfer.as_ref().and_then(|transfer| transfer.progress),
                     false,

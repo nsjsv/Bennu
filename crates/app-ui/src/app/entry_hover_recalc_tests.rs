@@ -4,6 +4,7 @@
 // 滚动补偿不命中、大图网格同构。
 use std::path::PathBuf;
 
+use bennu_theme::scroll_report::ScrollMotion;
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 use iced::{Point, Rectangle, Size};
 
@@ -62,7 +63,12 @@ fn list_scroll_moves_hover_to_the_entry_under_the_cursor() {
         LIST_HEADER_HEIGHT + 1.5 * LIST_ROW_HEIGHT,
     ));
 
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
 
     assert_eq!(
         browser.hovered_entry,
@@ -82,7 +88,12 @@ fn pointer_motion_records_the_position_that_scroll_recalc_reads() {
     }));
     assert_eq!(browser.cursor_position.get(), Some(position));
 
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
     assert_eq!(
         browser.hovered_entry,
         Some(PathBuf::from("/workspace/b.txt"))
@@ -97,7 +108,12 @@ fn list_scroll_over_header_or_trailing_blank_clears_hover() {
     browser
         .cursor_position
         .set(cursor_at_content_y(LIST_HEADER_HEIGHT / 2.0));
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
     assert_eq!(browser.hovered_entry, None);
 
     // 表尾空白(内容总高之外):同样无处可指。
@@ -106,7 +122,12 @@ fn list_scroll_over_header_or_trailing_blank_clears_hover() {
     browser
         .cursor_position
         .set(cursor_at_content_y(content_height + LIST_ROW_HEIGHT));
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
     assert_eq!(browser.hovered_entry, None);
 }
 
@@ -121,7 +142,12 @@ fn list_scroll_over_group_header_clears_hover() {
         LIST_HEADER_HEIGHT + row_height + crate::list_view::LIST_GROUP_HEADER_HEIGHT + 10.0,
     ));
 
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
 
     assert_eq!(browser.hovered_entry, None);
 }
@@ -133,7 +159,12 @@ fn list_scroll_with_cursor_outside_viewport_keeps_event_channel_hover() {
     // 光标在视口之外(例如在别的窗格):等值守卫语义,不动作。
     browser.cursor_position.set(Some(Point::new(10.0, 10.0)));
 
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
 
     assert_eq!(
         browser.hovered_entry,
@@ -149,7 +180,12 @@ fn scroll_before_any_pointer_event_keeps_event_channel_hover() {
     // 视口盖住窗口原点：旧的 (0,0) 初值会被当成真实光标而重算 hover。
     let viewport_over_origin = Rectangle::new(Point::new(0.0, 0.0), Size::new(600.0, 500.0));
 
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, viewport_over_origin)));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        viewport_over_origin,
+        ScrollMotion::Resting,
+    )));
 
     assert_eq!(
         browser.hovered_entry,
@@ -173,12 +209,22 @@ fn grouping_rail_enter_clears_hover_and_blocks_scroll_recalc() {
     assert_eq!(browser.hovered_entry, None);
 
     // 屏障存续期间滚动:补偿不得越过屏障命中栏下层的行。
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
     assert_eq!(browser.hovered_entry, None);
 
     // 离开索引栏:屏障解除,滚动补偿恢复工作。
     drop(browser.update(Message::FileGroupingRailCursorExited(PANE_ID)));
-    drop(browser.update(Message::ListScrolled(PANE_ID, 0.0, list_viewport())));
+    drop(browser.update(Message::ListScrolled(
+        PANE_ID,
+        0.0,
+        list_viewport(),
+        ScrollMotion::Resting,
+    )));
     assert_eq!(
         browser.hovered_entry,
         Some(PathBuf::from("/workspace/a.txt"))
@@ -224,7 +270,12 @@ fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
     ));
     browser.hovered_entry = Some(PathBuf::from("/workspace/a.txt"));
 
-    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
+    drop(browser.update(Message::IconGridScrolled(
+        PANE_ID,
+        0.0,
+        viewport,
+        ScrollMotion::Resting,
+    )));
 
     assert_eq!(
         browser.hovered_entry,
@@ -233,7 +284,12 @@ fn icon_grid_scroll_moves_hover_to_the_cell_under_the_cursor() {
 
     // 滚回内容内边距上(没有格子):hover 清空。
     browser.cursor_position.set(cursor_at(viewport, 4.0, 4.0));
-    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
+    drop(browser.update(Message::IconGridScrolled(
+        PANE_ID,
+        0.0,
+        viewport,
+        ScrollMotion::Resting,
+    )));
     assert_eq!(browser.hovered_entry, None);
 }
 
@@ -258,7 +314,12 @@ fn icon_grid_scroll_over_group_header_clears_hover() {
         ICON_GRID_CONTENT_PADDING + crate::icon_grid_layout::ICON_GRID_GROUP_HEADER_HEIGHT / 2.0,
     ));
 
-    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
+    drop(browser.update(Message::IconGridScrolled(
+        PANE_ID,
+        0.0,
+        viewport,
+        ScrollMotion::Resting,
+    )));
 
     assert_eq!(browser.hovered_entry, None);
 }
@@ -287,10 +348,20 @@ fn scrolled_grid_hover_tracks_scroll_offset_from_message() {
         ICON_GRID_CONTENT_PADDING + pitch + tile_visual_height(edge) / 2.0,
     ));
 
-    drop(browser.update(Message::IconGridScrolled(PANE_ID, 0.0, viewport)));
+    drop(browser.update(Message::IconGridScrolled(
+        PANE_ID,
+        0.0,
+        viewport,
+        ScrollMotion::Resting,
+    )));
     let before = browser.hovered_entry.clone().expect("hover on row 1");
 
-    drop(browser.update(Message::IconGridScrolled(PANE_ID, pitch, viewport)));
+    drop(browser.update(Message::IconGridScrolled(
+        PANE_ID,
+        pitch,
+        viewport,
+        ScrollMotion::Resting,
+    )));
     let after = browser.hovered_entry.clone().expect("hover on row 2");
 
     let index_of = |path: &PathBuf| {

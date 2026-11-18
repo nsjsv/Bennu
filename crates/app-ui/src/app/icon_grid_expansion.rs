@@ -1,3 +1,6 @@
+#[cfg(test)]
+#[path = "icon_grid_cell_cache_tests.rs"]
+mod cell_cache_tests;
 #[path = "icon_grid_expansion_follow.rs"]
 mod follow;
 #[cfg(test)]
@@ -79,34 +82,41 @@ impl FileBrowser {
                     (
                         placeholders,
                         crate::transfer_placeholder_view::transfer_sort_for_expanded(
-                            self,
+                            crate::transfer_placeholder_view::transfer_sort_for_root(self),
                             &directory.contents,
                         ),
                     ),
                 );
             }
         }
-        // 大图根面板与列表共用同一分组划分器:分组开启时根 cells 先按
+        // 大图根面板与列表共用同一分组划分器:分组开启时根格子先按
         // 目录置顶、文件段按组划分;子面板/band 永远平铺。分组键与列表行流同源。
         let root_grouping =
             crate::transfer_placeholder_view::root_grouping::RootGrouping::for_pane_root(
                 self,
                 pane.location,
             );
-        let root_grouping = root_grouping
-            .as_ref()
-            .map(|grouping| crate::icon_grid_layout::IconGridRootGrouping { grouping });
-        IconGridLayout::with_root_transfer_placeholders(
+        let plan = crate::icon_grid_layout::icon_grid_cell_plan(
+            pane.icon_cells,
+            &crate::icon_grid_layout::IconGridCellInputs {
+                root: pane.entries,
+                root_placeholders,
+                root_sort: crate::transfer_placeholder_view::transfer_sort_for_root(self),
+                grouping: root_grouping.as_ref(),
+                children: crate::icon_grid_layout::visible_expansion_directories(expansion),
+                expanded_placeholders: &expanded_placeholders,
+            },
+            pane.entries.revision(),
+            self.entry_metadata_revision,
+        );
+        IconGridLayout::from_plan(
             pane.current_directory(),
             pane.entries,
-            root_placeholders,
-            crate::transfer_placeholder_view::transfer_sort_for_root(self),
-            &expanded_placeholders,
+            &plan,
             pane.icon_grid_viewport.width,
             self.main_window_height,
             self.user_config.icons_icon_edge(),
             expansion,
-            root_grouping,
         )
     }
 

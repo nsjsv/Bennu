@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use bennu_theme::scroll_report::ScrollMotion;
 use file_core::DirectoryEntry;
 use iced::Task;
 use thumbnails::ThumbnailRequest;
@@ -36,6 +37,25 @@ impl FileBrowser {
         }
         self.schedule_rendered_browser_thumbnails_for_pane(pane_id);
         self.pump_thumbnail_queue()
+    }
+
+    /// 窗格正显示的位置在滚动还是停下了（列表、图标视图）。
+    pub(super) fn note_pane_scroll_motion(&mut self, pane_id: BrowserPaneId, motion: ScrollMotion) {
+        if let Some(location) = self.pane_view(pane_id).map(|pane| pane.location.key()) {
+            self.note_scroll_motion(pane_id, location, motion);
+        }
+    }
+
+    /// 滚动中先不开始做这个位置的缩略图：一闪而过的格子不解码，停下后从可见的做起（处理滚动的
+    /// 函数随后都会 `pump_thumbnail_queue`）。已经在做的照常做完，最多每个核一张。
+    pub(super) fn note_scroll_motion(
+        &mut self,
+        pane_id: BrowserPaneId,
+        location: LocationKey,
+        motion: ScrollMotion,
+    ) {
+        self.thumbnail_cache
+            .note_scroll_motion(thumbnail_scope_for_pane_location(pane_id, location), motion);
     }
 
     pub(super) fn handle_column_scrolled(
@@ -349,41 +369,23 @@ impl FileBrowser {
             self.main_window_height,
             self.user_config.list_view_density,
         );
+        let layout =
+            crate::transfer_placeholder_view::list_row_layout(self, pane, geometry.row_height);
         let range = viewport
             .map(|viewport| {
-                crate::visible_entries::list_entry_range_for_viewport(
-                    pane.entries,
-                    pane.expanded_directories,
-                    crate::visible_entries::ListEntryHeights::at(
-                        pane.location,
-                        geometry.row_height,
-                    ),
+                layout.range_for_viewport(
                     crate::list_view::LIST_HEADER_HEIGHT,
                     viewport.offset_y,
                     viewport.height,
                     OVERSCAN_ROWS,
                 )
             })
-            .unwrap_or_else(|| {
-                crate::visible_entries::initial_list_entry_range(
-                    pane.entries,
-                    pane.expanded_directories,
-                    crate::visible_entries::ListEntryHeights::at(
-                        pane.location,
-                        geometry.row_height,
-                    ),
-                    initial_rows,
-                )
-            });
-        let entries = crate::visible_entries::visible_entries_in_range(
-            pane.entries,
-            pane.expanded_directories,
-            range.start,
-            range.end,
-        );
-        let requests = entries
-            .iter()
-            .filter_map(|visible_entry| request_for_entry(visible_entry.entry, LIST_THUMBNAIL_EDGE))
+            .unwrap_or_else(|| layout.initial_range(initial_rows));
+        let requests = layout
+            .entries_in(pane, range.start..range.end)
+            .filter_map(|(_, visible_entry)| {
+                request_for_entry(visible_entry.entry, LIST_THUMBNAIL_EDGE)
+            })
             .collect::<Vec<_>>();
         tracing::debug!(
             target: "app_ui::thumbnail",

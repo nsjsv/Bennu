@@ -69,25 +69,16 @@ impl FileBrowser {
                     crate::list_view::ListGeometry::for_level(self.user_config().list_view_density);
                 // 与列表渲染同一条合并行流:命中高度、表头留量、组头/占位
                 // 行的跳过规则全部来自它,不另算一套偏移。
-                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                let layout = crate::transfer_placeholder_view::list_row_layout(
                     self,
                     pane,
                     geometry.row_height,
                 );
                 ContentHit {
-                    rail_visible: crate::model::file_group_rail_visible(
-                        &crate::transfer_placeholder_view::list_file_group_rail_entries(
-                            &rows,
-                            geometry.row_height,
-                        ),
-                    ),
-                    entry: crate::transfer_placeholder_view::list_entry_path_at_point(
-                        &rows,
-                        geometry.row_height,
-                        crate::list_view::LIST_HEADER_HEIGHT,
-                        point,
-                    )
-                    .map(Path::to_path_buf),
+                    rail_visible: crate::model::file_group_rail_visible(layout.rail_entries()),
+                    entry: layout
+                        .entry_path_at(pane, crate::list_view::LIST_HEADER_HEIGHT, point)
+                        .map(Path::to_path_buf),
                 }
             }
             ScrolledView::IconGrid => {

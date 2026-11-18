@@ -48,8 +48,10 @@ pub(crate) async fn discover_archive_directory(
     })?;
 
     let mut entries = Vec::with_capacity(children.len());
+    let mut hidden_entries = 0;
     for (name, info) in children {
         let is_hidden = is_hidden_name(&name);
+        hidden_entries += usize::from(is_hidden);
         if !options.includes_entry(is_hidden) {
             continue;
         }
@@ -74,6 +76,7 @@ pub(crate) async fn discover_archive_directory(
         order,
         metadata_resolver,
         warnings: Vec::new(),
+        hidden_entries,
     })
 }
 

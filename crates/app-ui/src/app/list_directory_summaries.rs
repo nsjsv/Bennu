@@ -86,23 +86,6 @@ impl FileBrowser {
             .uses_recursive_total_size();
         let mut commands = Vec::new();
 
-        // 底部工具栏常显当前目录文件总大小：当前目录摘要与列表条目摘要共用
-        // 本漏斗调度，导航/增量失效/文件操作后的重算自动覆盖，无需新触发点。
-        // "当前目录"与地址栏同源：多栏模式取最深打开的栏，而非栏浏览根。
-        // 递归量对底栏无意义，显式关闭。
-        let displayed_dir = self
-            .pane_view(pane_id)
-            .and_then(|pane| pane.address_bar_directory())
-            .map(Path::to_path_buf);
-        if let Some(displayed_dir) = displayed_dir {
-            if let Some(request) = self
-                .list_directory_summary_cache
-                .start_request(displayed_dir, false)
-            {
-                commands.push(load_list_directory_summary_command(request));
-            }
-        }
-
         for directory in self.rendered_list_directories_for_pane(pane_id, viewport_override) {
             if let Some(loaded_child_count) = directory.loaded_child_count {
                 self.list_directory_summary_cache
@@ -150,9 +133,7 @@ impl FileBrowser {
     }
 
     /// 底部工具栏常显统计：按窗格顺序，每窗格给出选中统计与当前目录
-    /// 可见文件总大小。"当前目录"与地址栏同源（多栏取最深打开的栏）。
-    /// 可见口径 = 文件系统事实按 show_hidden_files 推导，缓存条目保持不含配置。
-    /// 隐藏条目数取原样事实，两种开关状态都原样呈现。
+    /// 可见文件总大小、隐藏条目数（见 `displayed_directory_totals`）。
     pub(crate) fn pane_status_strip_entries(
         &self,
     ) -> Vec<crate::selection_summary::PaneStatusStripEntry> {
@@ -160,29 +141,15 @@ impl FileBrowser {
             .iter()
             .filter_map(|pane| {
                 let pane_view = self.pane_view(pane.id)?;
-                let summary = pane_view.address_bar_directory().and_then(|displayed_dir| {
-                    self.list_directory_summary_cache
-                        .summary_for_path(displayed_dir)
-                });
+                let totals = self.displayed_directory_totals(pane.id);
                 Some(crate::selection_summary::PaneStatusStripEntry {
                     selection: self.pane_selection_summary(pane_view),
-                    visible_files_total_size_bytes: summary
-                        .and_then(|summary| self.visible_files_total_size_for_summary(summary)),
-                    hidden_entry_count: summary.and_then(|summary| summary.hidden_entry_count),
+                    visible_files_total_size_bytes: totals
+                        .and_then(|totals| totals.visible_files_bytes),
+                    hidden_entry_count: totals.map(|totals| totals.hidden_entries),
                 })
             })
             .collect()
-    }
-
-    fn visible_files_total_size_for_summary(
-        &self,
-        summary: crate::model::ListDirectorySummary,
-    ) -> Option<u64> {
-        let files_total = summary.files_total_size_bytes?;
-        if self.user_config.show_hidden_files {
-            return Some(files_total);
-        }
-        Some(files_total.saturating_sub(summary.hidden_files_total_size_bytes.unwrap_or(0)))
     }
 
     pub(super) fn invalidate_list_directory_summary(&mut self, path: &Path) {
@@ -391,13 +358,11 @@ impl FileBrowser {
 
         let list_density = self.user_config.list_view_density;
         let row_height = crate::list_view::ListGeometry::for_level(list_density).row_height;
+        let layout = crate::transfer_placeholder_view::list_row_layout(self, pane, row_height);
         let range = viewport_override
             .or(pane.list_viewport)
             .map(|viewport| {
-                crate::visible_entries::list_entry_range_for_viewport(
-                    pane.entries,
-                    pane.expanded_directories,
-                    crate::visible_entries::ListEntryHeights::at(pane.location, row_height),
+                layout.range_for_viewport(
                     crate::list_view::LIST_HEADER_HEIGHT,
                     viewport.offset_y,
                     viewport.height,
@@ -405,32 +370,27 @@ impl FileBrowser {
                 )
             })
             .unwrap_or_else(|| {
-                crate::visible_entries::initial_list_entry_range(
-                    pane.entries,
-                    pane.expanded_directories,
-                    crate::visible_entries::ListEntryHeights::at(pane.location, row_height),
-                    crate::list_view::list_initial_rows(window_height, list_density),
-                )
+                layout.initial_range(crate::list_view::list_initial_rows(
+                    window_height,
+                    list_density,
+                ))
             });
 
-        crate::visible_entries::visible_entries_in_range(
-            pane.entries,
-            pane.expanded_directories,
-            range.start,
-            range.end,
-        )
-        .into_iter()
-        .filter_map(|visible_entry| {
-            (visible_entry.entry.kind() == FileKind::Directory).then(|| RenderedListDirectory {
-                path: visible_entry.entry.path().to_path_buf(),
-                loaded_child_count: pane
-                    .expanded_directories
-                    .get(visible_entry.entry.path())
-                    .filter(|expanded| matches!(expanded.status, ExpandedDirectoryStatus::Loaded))
-                    .map(|expanded| expanded.entries.len()),
+        layout
+            .entries_in(pane, range.start..range.end)
+            .filter_map(|(_, visible_entry)| {
+                (visible_entry.entry.kind() == FileKind::Directory).then(|| RenderedListDirectory {
+                    path: visible_entry.entry.path().to_path_buf(),
+                    loaded_child_count: pane
+                        .expanded_directories
+                        .get(visible_entry.entry.path())
+                        .filter(|expanded| {
+                            matches!(expanded.status, ExpandedDirectoryStatus::Loaded)
+                        })
+                        .map(|expanded| expanded.entries.len()),
+                })
             })
-        })
-        .collect()
+            .collect()
     }
 
     fn list_directory_paths_for_pane(&self, pane_id: BrowserPaneId) -> Vec<std::path::PathBuf> {
@@ -706,9 +666,6 @@ mod tests {
                     bytes: size,
                     complete: true,
                 }),
-                files_total_size_bytes: Some(size),
-                hidden_files_total_size_bytes: Some(0),
-                hidden_entry_count: Some(0),
             }
         ));
     }
@@ -728,24 +685,6 @@ mod tests {
             browser.user_config.list_directory_size_display_mode,
             ListDirectorySizeDisplayMode::RecursiveTotalSize
         );
-    }
-
-    #[test]
-    fn status_strip_reports_deepest_open_column_in_columns_mode() {
-        let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
-        let root = PathBuf::from("/workspace");
-        let column = root.join("sub");
-        browser.tab_mut().location = BrowserLocation::Directory(root.clone());
-        browser.tab_mut().deepest_open_column_directory = Some(column.clone());
-        remember_summary(&mut browser, &root, 10, 1000);
-        remember_summary(&mut browser, &column, 4, 256);
-
-        let entries = browser.pane_status_strip_entries();
-
-        assert_eq!(entries.len(), 1);
-        // 多栏模式下"当前目录"与地址栏同源：最深打开的栏，而非栏浏览根。
-        assert_eq!(entries[0].visible_files_total_size_bytes, Some(256));
     }
 
     #[test]

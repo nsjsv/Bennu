@@ -15,7 +15,7 @@ pub use message::MessageId;
 
 /// 界面语言。语言设置（UiLanguageSetting 与 TOML 存取）属 app-ui 存储域，经 re-export
 /// 同源引用本枚举，避免两侧各持一份定义产生分叉。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiLanguage {
     English,
     Chinese,

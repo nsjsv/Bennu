@@ -4,6 +4,7 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
 
 use file_core::DirectoryEntry;
@@ -13,15 +14,30 @@ use hashbrown::{DefaultHashBuilder, HashTable};
 ///
 /// 按路径找条目的索引第一次用到时才建，只存位置（8 万项约 0.5 MB）。`make_mut` 一律换掉它：增删、换序、
 /// 原地改路径（重命名迁移）之后索引不会和条目对不上。
+///
+/// 版本号认内容：新建、`make_mut` 换新号，克隆沿用。由它派生的数据（列表行流）靠它判断要不要重算；
+/// 不能比 `Arc` 指针，独占时 `make_mut` 原地改，指针不变。
 #[derive(Clone, Default)]
 pub(crate) struct DirectoryEntrySnapshot {
     entries: Arc<Vec<DirectoryEntry>>,
     positions: Arc<OnceLock<HashTable<u32>>>,
+    revision: u64,
+}
+
+/// 内容版本号：全进程一个计数器，不同来源、不同标签的号不会撞上。0 留给空快照。
+pub(crate) fn next_content_revision() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 
 impl DirectoryEntrySnapshot {
     /// 路径对应的条目。
     pub(crate) fn find(&self, path: &Path) -> Option<&DirectoryEntry> {
+        self.position(path).map(|position| &self.entries[position])
+    }
+
+    /// 路径对应的条目在第几项。
+    pub(crate) fn position(&self, path: &Path) -> Option<usize> {
         let positions = self
             .positions
             .get_or_init(|| index_positions(&self.entries));
@@ -29,13 +45,18 @@ impl DirectoryEntrySnapshot {
             .find(path_hash(path), |&position| {
                 self.entries[position as usize].path() == path
             })
-            .map(|&position| &self.entries[position as usize])
+            .map(|&position| position as usize)
     }
 
     /// 改条目：还有别的持有者时先复制一份；按路径找的索引作废。
     pub(crate) fn make_mut(&mut self) -> &mut Vec<DirectoryEntry> {
         self.positions = Arc::default();
+        self.revision = next_content_revision();
         Arc::make_mut(&mut self.entries)
+    }
+
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// 与 `other` 是不是同一份条目（没有复制过）。
@@ -75,6 +96,7 @@ impl From<Vec<DirectoryEntry>> for DirectoryEntrySnapshot {
         Self {
             entries: Arc::new(entries),
             positions: Arc::default(),
+            revision: next_content_revision(),
         }
     }
 }

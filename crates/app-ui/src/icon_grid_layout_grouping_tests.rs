@@ -139,12 +139,12 @@ fn grouped_root_places_directory_cells_and_placeholders_first_without_headers() 
         _ => panic!("directory cells must lead the grouped flow"),
     };
     assert!(matches!(
-        &directory_rows.cells[0],
-        IconGridCell::Placeholder(placeholder) if placeholder.name == "dir-incoming"
+        directory_rows.cell(0),
+        Some(IconGridCell::Placeholder(placeholder)) if placeholder.name == "dir-incoming"
     ));
     assert!(matches!(
-        &directory_rows.cells[1],
-        IconGridCell::Entry(cell) if cell.entry.path() == Path::new("/workspace/root")
+        directory_rows.cell(1),
+        Some(IconGridCell::Entry(cell)) if cell.entry.path() == Path::new("/workspace/root")
     ));
     assert!(matches!(flow[1], IconGridFlowSegment::GroupHeader(_)));
 

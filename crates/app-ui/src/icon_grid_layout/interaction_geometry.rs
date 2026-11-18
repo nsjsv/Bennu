@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use file_core::DirectoryEntry;
 use iced::Point;
 
-use super::{IconGridCell, IconGridFlowSegment, IconGridPanelLayout};
+use super::{IconGridFlowSegment, IconGridPanelLayout};
 use crate::icon_grid_geometry::{
     grid_gap, row_height, tile_visual_height, tile_width, ICON_GRID_CONTENT_PADDING,
 };
@@ -48,12 +48,12 @@ pub(super) fn collect_visible_entries<'a>(
                     continue;
                 };
                 for row in visible_rows.start_row..visible_rows.end_row {
-                    let start = row.saturating_mul(rows.column_count).min(rows.cells.len());
+                    let start = row.saturating_mul(rows.column_count).min(rows.cell_count());
                     let end = start
                         .saturating_add(rows.column_count)
-                        .min(rows.cells.len());
-                    for cell in &rows.cells[start..end] {
-                        if let Some(entry) = cell.entry() {
+                        .min(rows.cell_count());
+                    for index in start..end {
+                        if let Some(entry) = rows.entry(index) {
                             collected.push(super::IconGridVisibleEntry { entry });
                         }
                     }
@@ -96,15 +96,15 @@ pub(super) fn collect_interactive_entries<'a>(
             IconGridFlowSegment::Rows(rows) => {
                 let rows_top = panel_top + rows.top;
                 for row in rows.start_row..rows.end_row {
-                    let start = row.saturating_mul(rows.column_count).min(rows.cells.len());
+                    let start = row.saturating_mul(rows.column_count).min(rows.cell_count());
                     let end = start
                         .saturating_add(rows.column_count)
-                        .min(rows.cells.len());
+                        .min(rows.cell_count());
                     let top = rows_top
                         + row.saturating_sub(rows.start_row) as f32 * row_height(icon_edge);
                     // 交互几何按单元格列位计算;占位格不产生交互事实。
-                    for (column, cell) in rows.cells[start..end].iter().enumerate() {
-                        if let Some(entry) = cell.entry() {
+                    for (column, index) in (start..end).enumerate() {
+                        if let Some(entry) = rows.entry(index) {
                             collected.push(IconGridEntryGeometry {
                                 directory: rows.directory,
                                 entry,
@@ -135,12 +135,6 @@ pub(super) fn collect_interactive_entries<'a>(
     }
 }
 
-pub(super) fn rows_entries<'cells, 'a>(
-    cells: &'cells [IconGridCell<'a>],
-) -> impl Iterator<Item = &'a DirectoryEntry> + 'cells {
-    cells.iter().filter_map(IconGridCell::entry)
-}
-
 pub(super) fn collect_interactive_paths(
     panel: &IconGridPanelLayout<'_>,
     candidates: &HashSet<&Path>,
@@ -149,7 +143,7 @@ pub(super) fn collect_interactive_paths(
     for segment in &panel.flow {
         match segment {
             IconGridFlowSegment::Rows(rows) => {
-                for entry in rows_entries(&rows.cells) {
+                for entry in rows.entries() {
                     if candidates.contains(entry.path()) {
                         matches.insert(entry.path().to_path_buf());
                     }
@@ -176,19 +170,16 @@ pub(super) fn find_interactive_entry<'a>(
                 let start = rows
                     .start_row
                     .saturating_mul(rows.column_count)
-                    .min(rows.cells.len());
+                    .min(rows.cell_count());
                 let end = rows
                     .end_row
                     .saturating_mul(rows.column_count)
-                    .min(rows.cells.len());
-                let Some(relative_index) = rows.cells[start..end]
-                    .iter()
-                    .position(|cell| cell.entry().is_some_and(|entry| entry.path() == path))
-                else {
-                    continue;
-                };
-                let index = relative_index + start;
-                let Some(entry) = rows.cells[index].entry() else {
+                    .min(rows.cell_count());
+                let Some((index, entry)) = (start..end).find_map(|index| {
+                    rows.entry(index)
+                        .filter(|entry| entry.path() == path)
+                        .map(|entry| (index, entry))
+                }) else {
                     continue;
                 };
                 let row = index / rows.column_count;
@@ -268,7 +259,7 @@ pub(super) fn find_interactive_entry_at_point<'a>(
                     continue;
                 }
                 let cell_index = row.saturating_mul(rows.column_count) + column;
-                if let Some(entry) = rows.cells.get(cell_index).and_then(IconGridCell::entry) {
+                if let Some(entry) = rows.entry(cell_index) {
                     return Some(entry);
                 }
             }

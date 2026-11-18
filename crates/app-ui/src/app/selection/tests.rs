@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::model::BrowserLocation;
+use bennu_theme::scroll_report::ScrollMotion;
 use file_core::{DirectoryEntry, EntryMetadata, FileKind};
 use iced::{Point, Rectangle, Size};
 
@@ -226,6 +227,7 @@ fn scroll_motion_preserves_waiting_marquee_phase() {
         pane_id,
         10.0,
         scroll_viewport(),
+        ScrollMotion::Resting,
     )));
 
     let marquee = browser
@@ -269,6 +271,7 @@ fn file_view_scroll_messages_move_the_active_marquee_anchor() {
         pane_id,
         15.0,
         scroll_viewport(),
+        ScrollMotion::Resting,
     )));
     assert_eq!(
         browser
@@ -291,6 +294,7 @@ fn file_view_scroll_messages_move_the_active_marquee_anchor() {
         pane_id,
         25.0,
         scroll_viewport(),
+        ScrollMotion::Resting,
     )));
     assert_eq!(
         browser
@@ -319,6 +323,7 @@ fn file_view_scroll_messages_move_the_active_marquee_anchor() {
         directory.clone(),
         45.0,
         400.0,
+        ScrollMotion::Resting,
     )));
     assert_eq!(
         browser
@@ -334,6 +339,7 @@ fn file_view_scroll_messages_move_the_active_marquee_anchor() {
         PathBuf::from("/workspace/other"),
         100.0,
         400.0,
+        ScrollMotion::Resting,
     )));
     assert_eq!(
         browser

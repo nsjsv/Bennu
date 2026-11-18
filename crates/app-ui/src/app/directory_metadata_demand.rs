@@ -9,7 +9,7 @@ use file_core::{
 use iced::Task;
 
 use super::global_error::GlobalErrorSource;
-use super::{DirectoryMetadataDemandKey, FileBrowser};
+use super::FileBrowser;
 use crate::commands::load_directory_metadata_command;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryMetadataLoadContext, DirectoryMetadataLoadFailure,
@@ -27,8 +27,7 @@ struct DirectoryMetadataDemandSource {
 
 impl FileBrowser {
     pub(super) fn clear_directory_metadata_demands_for_pane(&mut self, pane_id: BrowserPaneId) {
-        self.directory_metadata_in_flight
-            .retain(|key| key.context.pane_id() != pane_id);
+        self.directory_metadata_in_flight.forget_pane(pane_id);
     }
 
     pub(super) fn schedule_visible_directory_metadata(
@@ -42,7 +41,9 @@ impl FileBrowser {
         let selected_demand = self.schedule_selected_directory_metadata(pane_id);
         let visible_demand =
             self.schedule_list_visible_directory_metadata(pane_id, viewport_override);
-        Task::batch([selected_demand, visible_demand])
+        // 可见行、选中的先发：它们是小请求，不用等整个目录补完。
+        let displayed_demand = self.schedule_displayed_directory_metadata(pane_id);
+        Task::batch([selected_demand, visible_demand, displayed_demand])
     }
 
     /// 选中条目的文件系统元数据 demand:底部统计栏要显示选中文件的真实
@@ -167,7 +168,7 @@ impl FileBrowser {
         )
     }
 
-    fn directory_load_cancel_for_pane(
+    pub(super) fn directory_load_cancel_for_pane(
         &self,
         pane_id: BrowserPaneId,
     ) -> tokio_util::sync::CancellationToken {
@@ -215,13 +216,11 @@ impl FileBrowser {
             )]);
             let list_density = self.user_config.list_view_density;
             let row_height = crate::list_view::ListGeometry::for_level(list_density).row_height;
+            let layout = crate::transfer_placeholder_view::list_row_layout(self, pane, row_height);
             let range = viewport_override
                 .or(pane.list_viewport)
                 .map(|viewport| {
-                    crate::visible_entries::list_entry_range_for_viewport(
-                        pane.entries,
-                        pane.expanded_directories,
-                        crate::visible_entries::ListEntryHeights::at(pane.location, row_height),
+                    layout.range_for_viewport(
                         crate::list_view::LIST_HEADER_HEIGHT,
                         viewport.offset_y,
                         viewport.height,
@@ -229,19 +228,12 @@ impl FileBrowser {
                     )
                 })
                 .unwrap_or_else(|| {
-                    crate::visible_entries::initial_list_entry_range(
-                        pane.entries,
-                        pane.expanded_directories,
-                        crate::visible_entries::ListEntryHeights::at(pane.location, row_height),
-                        crate::list_view::list_initial_rows(window_height, list_density),
-                    )
+                    layout.initial_range(crate::list_view::list_initial_rows(
+                        window_height,
+                        list_density,
+                    ))
                 });
-            for visible in crate::visible_entries::visible_entries_in_range(
-                pane.entries,
-                pane.expanded_directories,
-                range.start,
-                range.end,
-            ) {
+            for (_, visible) in layout.entries_in(pane, range.start..range.end) {
                 let Some(index) = visible.entry.discovery_index() else {
                     continue;
                 };
@@ -351,35 +343,30 @@ impl FileBrowser {
         }
     }
 
-    fn schedule_directory_metadata_requirement(
+    pub(super) fn schedule_directory_metadata_requirement(
         &mut self,
         context: DirectoryMetadataLoadContext,
         discovery: &DirectoryDiscovery,
         cancellation: tokio_util::sync::CancellationToken,
         requirement: DirectoryMetadataRequirement,
-        mut targets: Vec<usize>,
+        targets: impl IntoIterator<Item = usize>,
     ) -> Task<Message> {
-        targets.sort_unstable();
-        targets.dedup();
-        targets.retain(|index| {
-            let Some(entry) = discovery.entries.get(*index) else {
-                return false;
-            };
-            let pending = match requirement {
-                DirectoryMetadataRequirement::Filesystem => {
-                    matches!(entry.filesystem_metadata(), DirectoryMetadataState::Pending)
-                }
-                DirectoryMetadataRequirement::IdentityNames => {
-                    matches!(entry.identity_names(), DirectoryMetadataState::Pending)
-                }
-            };
-            let key = DirectoryMetadataDemandKey {
-                context: context.clone(),
-                requirement,
-                index: *index,
-            };
-            pending && self.directory_metadata_in_flight.insert(key)
+        let pending = targets.into_iter().filter(|index| {
+            discovery
+                .entries
+                .get(*index)
+                .is_some_and(|entry| match requirement {
+                    DirectoryMetadataRequirement::Filesystem => {
+                        matches!(entry.filesystem_metadata(), DirectoryMetadataState::Pending)
+                    }
+                    DirectoryMetadataRequirement::IdentityNames => {
+                        matches!(entry.identity_names(), DirectoryMetadataState::Pending)
+                    }
+                })
         });
+        let targets = self
+            .directory_metadata_in_flight
+            .start(&context, requirement, pending);
         if targets.is_empty() {
             return Task::none();
         }
@@ -435,14 +422,13 @@ impl FileBrowser {
         request: DirectoryMetadataLoadRequest,
         outcome: Result<DirectoryMetadataResolution, DirectoryMetadataLoadFailure>,
     ) -> Task<Message> {
-        for index in &request.targets {
-            self.directory_metadata_in_flight
-                .remove(&DirectoryMetadataDemandKey {
-                    context: request.context.clone(),
-                    requirement: request.requirement,
-                    index: *index,
-                });
-        }
+        // 过期的请求也照样写了条目里的格子（同一条目可能还在别的快照里显示），一律算一次。
+        self.entry_metadata_revision += 1;
+        self.directory_metadata_in_flight.finish(
+            &request.context,
+            request.requirement,
+            &request.targets,
+        );
         if !self.directory_metadata_request_is_current(&request) {
             return Task::none();
         }
@@ -665,10 +651,30 @@ mod tests {
         (directory, discovery)
     }
 
+    /// 全是子文件夹的目录：状态栏的总大小只要文件，这里只剩按可见行的请求，测得到它的规则。
+    async fn discovered_folders_fixture(
+        entry_count: usize,
+        options: ScanOptions,
+    ) -> (tempfile::TempDir, DirectoryDiscovery) {
+        let directory = tempfile::tempdir().unwrap();
+        for index in 0..entry_count {
+            std::fs::create_dir(directory.path().join(format!("folder-{index:04}"))).unwrap();
+        }
+        let discovery = discover_directory_with_progress(
+            directory.path(),
+            options,
+            CancellationToken::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        (directory, discovery)
+    }
+
     #[tokio::test]
     async fn visible_metadata_demand_is_bounded_and_deduplicated() {
         let options = ScanOptions::default();
-        let (directory, discovery) = discovered_fixture(300, options.clone()).await;
+        let (directory, discovery) = discovered_folders_fixture(300, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
@@ -688,6 +694,31 @@ mod tests {
             browser.directory_metadata_in_flight.len(),
             first_demand_count
         );
+    }
+
+    /// 状态栏的总大小要当前目录每个文件的大小：一次全要，之后不重复要。
+    #[tokio::test]
+    async fn every_file_size_of_the_displayed_directory_is_demanded_once() {
+        let options = ScanOptions::default();
+        let (directory, discovery) = discovered_fixture(300, options.clone()).await;
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
+        browser.options = options;
+        browser.tab_mut().location = BrowserLocation::Directory(directory.path().to_path_buf());
+        let request = browser.next_directory_load_request(directory.path().to_path_buf());
+
+        drop(browser.accept_directory_discovery(
+            request,
+            crate::model::PrebuiltDirectoryDiscovery::build(discovery),
+        ));
+        assert_eq!(browser.directory_metadata_in_flight.len(), 300);
+        assert!(browser
+            .directory_metadata_in_flight
+            .iter()
+            .all(|key| key.requirement == DirectoryMetadataRequirement::Filesystem));
+
+        drop(browser.schedule_visible_directory_metadata(BrowserPaneId::PRIMARY, None));
+        assert_eq!(browser.directory_metadata_in_flight.len(), 300);
     }
 
     #[tokio::test]
@@ -717,7 +748,7 @@ mod tests {
                     DirectoryMetadataLoadContext::Root {
                         collection_generation,
                         ..
-                    } if collection_generation == browser.pane().directory_load_generation
+                    } if *collection_generation == browser.pane().directory_load_generation
                 )
         }));
     }
@@ -927,7 +958,7 @@ mod tests {
     #[tokio::test]
     async fn owner_column_requests_identity_names_without_offscreen_filesystem_demand() {
         let options = ScanOptions::default();
-        let (directory, discovery) = discovered_fixture(2, options.clone()).await;
+        let (directory, discovery) = discovered_folders_fixture(2, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.tab_mut().choose_view_mode(BrowserViewMode::List);
         browser.options = options;
@@ -969,7 +1000,7 @@ mod tests {
     #[tokio::test]
     async fn switching_to_list_demands_visible_rows_despite_stale_shared_viewport() {
         let options = ScanOptions::default();
-        let (directory, discovery) = discovered_fixture(2, options.clone()).await;
+        let (directory, discovery) = discovered_folders_fixture(2, options.clone()).await;
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         browser.options = options;

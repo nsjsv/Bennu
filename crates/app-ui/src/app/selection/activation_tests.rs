@@ -375,10 +375,10 @@ fn list_double_click_keeps_visible_placeholders_while_canonical_entries_load() {
     assert_eq!(placeholder.entries.len(), 2);
     assert_eq!(placeholder.entries[0].entry.path(), directory);
     assert_eq!(placeholder.entries[0].depth, 0);
-    assert_eq!(placeholder.entries[0].row_index, 0);
+    assert_eq!(placeholder.entries[0].stripe_index, 0);
     assert_eq!(placeholder.entries[1].entry.path(), child);
     assert_eq!(placeholder.entries[1].depth, 1);
-    assert_eq!(placeholder.entries[1].row_index, 1);
+    assert_eq!(placeholder.entries[1].stripe_index, 1);
     assert_eq!(placeholder.before_height, 0.0);
     assert_eq!(placeholder.after_height, 0.0);
 }

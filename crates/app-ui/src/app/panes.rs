@@ -37,6 +37,8 @@ pub(crate) struct BrowserPaneView<'a> {
     pub(crate) expanded_directories: &'a HashMap<PathBuf, ExpandedDirectory>,
     pub(crate) column_viewports: &'a HashMap<PathBuf, ColumnViewport>,
     pub(crate) list_viewport: Option<ColumnViewport>,
+    pub(crate) list_rows: &'a crate::transfer_placeholder_view::ListRowCache,
+    pub(crate) icon_cells: &'a crate::icon_grid_layout::IconGridCellCache,
     pub(crate) icon_grid_viewport: IconGridViewport,
     pub(crate) view_mode: BrowserViewMode,
     /// 视图按钮亮的是用户的选择；回收站选了分栏时实际按列表显示（`view_mode`）。
@@ -220,6 +222,8 @@ impl FileBrowser {
             expanded_directories: &tab.expanded_directories,
             column_viewports: &pane.column_viewports,
             list_viewport: pane.list_viewport,
+            list_rows: &pane.list_rows,
+            icon_cells: &pane.icon_cells,
             icon_grid_viewport: self.icon_grid_viewport_for(pane_id, &tab.location),
             view_mode: tab.view_mode(),
             chosen_view_mode: tab.chosen_view_mode(),

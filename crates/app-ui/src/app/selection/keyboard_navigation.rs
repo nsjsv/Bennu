@@ -299,18 +299,12 @@ impl FileBrowser {
                 // 键盘跟随与列表渲染消费同一合并行流(含占位/状态行),
                 // 占位行在选中项上方时不漏算位移。
                 let pane = self.pane_view(pane_id)?;
-                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                let (item_offset, item_height) = crate::transfer_placeholder_view::list_row_layout(
                     self,
                     pane,
                     geometry.row_height,
-                );
-                let (item_offset, item_height) =
-                    crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
-                        &rows,
-                        path,
-                        geometry.row_height,
-                        LIST_HEADER_HEIGHT,
-                    )?;
+                )
+                .vertical_bounds(pane, path, LIST_HEADER_HEIGHT)?;
                 (
                     ScrollbarRegion::PaneList(pane_id),
                     vertical_scroll_delta_to_reveal(
@@ -813,17 +807,8 @@ mod tests {
             let pane = browser
                 .pane_view(browser.active_pane_id())
                 .expect("active pane");
-            let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
-                browser,
-                pane,
-                LIST_ROW_HEIGHT,
-            );
-            crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
-                &rows,
-                sibling.path(),
-                LIST_ROW_HEIGHT,
-                LIST_HEADER_HEIGHT,
-            )
+            crate::transfer_placeholder_view::list_row_layout(browser, pane, LIST_ROW_HEIGHT)
+                .vertical_bounds(pane, sibling.path(), LIST_HEADER_HEIGHT)
         };
 
         // 展开状态行计入:目录行 + 状态行之后才是 sibling。

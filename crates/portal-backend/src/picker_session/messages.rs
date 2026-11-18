@@ -2,6 +2,7 @@
 //! 分布在各子模块，本文件只定义消息形状。
 
 use bennu_theme::address_bar::AddressSuggestionRequest;
+use bennu_theme::scroll_report::ScrollMotion;
 
 use super::scrollbar::ScrollbarViewport;
 use super::sidebar::SidebarEntryId;
@@ -110,10 +111,17 @@ pub(crate) enum SessionMessage {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
     },
-    /// 视口回传（列表/大图/各栏由 `report_scroll` 在需要时报告，栏容器走 on_scroll）。
+    /// 多栏栏容器（横向，很少滚动）的视口回传，走 on_scroll。
     ScrollbarViewportChanged {
         region: SessionScrollRegion,
         viewport: ScrollbarViewport,
+    },
+    /// 列表/大图/各栏的位置报告（`report_scroll` 在需要时报告），带此刻在动还是停下：
+    /// 在动时先不做缩略图。
+    ScrollReported {
+        region: SessionScrollRegion,
+        viewport: ScrollbarViewport,
+        motion: ScrollMotion,
     },
     /// 缩略图加载回信（main 层 drain 出队后 Task::perform 的结果）；
     /// key 已不在 in_flight 的迟到回信（换目录后）由会话直接丢弃。

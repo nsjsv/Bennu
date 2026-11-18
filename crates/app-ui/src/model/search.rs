@@ -337,8 +337,10 @@ pub(crate) struct SearchWorkspaceState {
     chosen_order: Option<order::ChosenSearchOrder>,
     pub(crate) run: SearchRunState,
     pub(crate) window: SearchResultWindow,
-    /// 已到结果的摘要与高亮，按路径找；与标签条目一一对应。
-    pub(crate) details: HashMap<PathBuf, SearchHitDetail>,
+    /// 已到结果的摘要与高亮，按路径找；与标签条目一一对应。改动只走 `details_mut`：列表里有摘要的行
+    /// 高一行，行流按 `details_revision` 判断要不要重排。
+    details: HashMap<PathBuf, SearchHitDetail>,
+    details_revision: u64,
 }
 
 impl SearchWorkspaceState {
@@ -360,6 +362,7 @@ impl SearchWorkspaceState {
             run: SearchRunState::new(),
             window: SearchResultWindow::new(),
             details: HashMap::new(),
+            details_revision: 0,
         }
     }
 
@@ -518,7 +521,7 @@ impl SearchWorkspaceState {
         self.run.next_cursor = None;
         self.run.pending_indexed_request = Some(request);
         self.window.begin_loading();
-        self.details.clear();
+        self.details_mut().clear();
         (request, cancellation)
     }
 
@@ -624,7 +627,7 @@ impl SearchWorkspaceState {
         self.run.next_cursor = None;
         self.run.pending_indexed_request = None;
         self.window.begin_loading();
-        self.details.clear();
+        self.details_mut().clear();
         cancellation
     }
 
@@ -639,13 +642,14 @@ impl SearchWorkspaceState {
     /// 命中转成详情（摘要、高亮）记下；高亮按这次查询的词与匹配方式算。
     pub(crate) fn remember_details(&mut self, hits: &[SearchHit], display_names: &[String]) {
         let highlighter = self.highlighter();
+        let details = self.details_mut();
         for (hit, display_name) in hits.iter().zip(display_names) {
             let snippet = hit.snippet.clone().filter(|snippet| !snippet.is_empty());
             let snippet_highlights = snippet
                 .as_deref()
                 .map(|snippet| content_match_ranges(snippet, &highlighter.terms))
                 .unwrap_or_default();
-            self.details.insert(
+            details.insert(
                 hit.path.clone(),
                 SearchHitDetail {
                     snippet,
@@ -661,15 +665,30 @@ impl SearchWorkspaceState {
     /// 新的显示名）。
     pub(crate) fn migrate_details(&mut self, moved: Vec<(PathBuf, PathBuf, String)>) {
         let highlighter = self.highlighter();
-        let details = moved
+        let details = self.details_mut();
+        let migrated = moved
             .into_iter()
             .filter_map(|(previous, migrated, display_name)| {
-                let mut detail = self.details.remove(&previous)?;
+                let mut detail = details.remove(&previous)?;
                 detail.name_highlights = highlighter.name_ranges(&display_name);
                 Some((migrated, detail))
             })
             .collect::<Vec<_>>();
-        self.details.extend(details);
+        details.extend(migrated);
+    }
+
+    pub(crate) fn details_mut(&mut self) -> &mut HashMap<PathBuf, SearchHitDetail> {
+        self.details_revision = super::browser_panes::next_content_revision();
+        &mut self.details
+    }
+
+    pub(crate) fn details_revision(&self) -> u64 {
+        self.details_revision
+    }
+
+    #[cfg(test)]
+    pub(crate) fn detail_count(&self) -> usize {
+        self.details.len()
     }
 
     fn highlighter(&self) -> SearchHighlighter {
@@ -728,7 +747,7 @@ impl SearchWorkspaceState {
         self.window.failure = None;
         self.window.completion = None;
         self.window.truncated = false;
-        self.details.clear();
+        self.details_mut().clear();
     }
 
     pub(crate) fn reject_query(&mut self, message: String) {

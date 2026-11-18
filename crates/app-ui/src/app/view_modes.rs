@@ -182,18 +182,9 @@ impl FileBrowser {
             // 列表渲染的是"真实条目+传输占位+状态行"的合并行流,reveal
             // 落点必须按同一条流推算,占位行在选中项上方时不漏算。
             let pane = self.pane_view(pane_id)?;
-            let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
-                self,
-                pane,
-                geometry.row_height,
-            );
             let (item_offset, item_height) =
-                crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
-                    &rows,
-                    path,
-                    geometry.row_height,
-                    LIST_HEADER_HEIGHT,
-                )?;
+                crate::transfer_placeholder_view::list_row_layout(self, pane, geometry.row_height)
+                    .vertical_bounds(pane, path, LIST_HEADER_HEIGHT)?;
             Some(reveal_target_y(
                 self.pane().list_viewport.as_ref(),
                 item_offset,
@@ -247,24 +238,14 @@ impl FileBrowser {
                     let geometry = crate::list_view::ListGeometry::for_level(
                         self.user_config.list_view_density,
                     );
-                    // 粗估守卫:行数乘积是内容高度下界,偏移在此之内必然合法,
-                    // 免去常规帧的精确遍历;疑似越界才做含展开状态行的精确计算。
-                    let flat_lower_bound =
-                        LIST_HEADER_HEIGHT + pane.entries.len() as f32 * geometry.row_height;
-                    if viewport.offset_y <= (flat_lower_bound - viewport.height).max(0.0) {
-                        continue;
-                    }
-                    // 精确口径与列表渲染同流:真实条目+传输占位+展开状态行。
-                    let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
-                        self,
-                        pane,
-                        geometry.row_height,
-                    );
+                    // 与列表渲染同流:真实条目+传输占位+展开状态行。
                     let content_height = LIST_HEADER_HEIGHT
-                        + crate::transfer_placeholder_view::list_transfer_rows_content_height(
-                            &rows,
+                        + crate::transfer_placeholder_view::list_row_layout(
+                            self,
+                            pane,
                             geometry.row_height,
-                        );
+                        )
+                        .content_height();
                     let max_offset = (content_height - viewport.height).max(0.0);
                     if viewport.offset_y > max_offset {
                         pending.push(Reclamp::List {
@@ -398,18 +379,12 @@ impl FileBrowser {
                     crate::list_view::ListGeometry::for_level(self.user_config.list_view_density);
                 // 与列表渲染同一合并行流(含占位/状态行),落点才与实际行位置一致。
                 let pane = self.pane_view(pane_id)?;
-                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                let (item_offset, item_height) = crate::transfer_placeholder_view::list_row_layout(
                     self,
                     pane,
                     geometry.row_height,
-                );
-                let (item_offset, item_height) =
-                    crate::transfer_placeholder_view::list_transfer_rows_vertical_bounds(
-                        &rows,
-                        path,
-                        geometry.row_height,
-                        LIST_HEADER_HEIGHT,
-                    )?;
+                )
+                .vertical_bounds(pane, path, LIST_HEADER_HEIGHT)?;
                 let viewport = self.pane().list_viewport.as_ref();
                 (
                     ScrollbarRegion::PaneList(pane_id),

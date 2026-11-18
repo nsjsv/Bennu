@@ -1,5 +1,7 @@
 //! 列表条目行的高度：文件夹里等高，搜索结果里有摘要的行多一行摘要。
 
+use std::hash::{Hash, Hasher};
+
 use file_core::DirectoryEntry;
 
 use crate::model::{BrowserLocation, SearchWorkspaceState};
@@ -13,14 +15,6 @@ pub(crate) struct ListEntryHeights<'a> {
 }
 
 impl<'a> ListEntryHeights<'a> {
-    #[cfg(test)]
-    pub(crate) fn uniform(row_height: f32) -> Self {
-        Self {
-            row_height,
-            snippets: None,
-        }
-    }
-
     pub(crate) fn at(location: &'a BrowserLocation, row_height: f32) -> Self {
         Self {
             row_height,
@@ -50,27 +44,30 @@ impl<'a> ListEntryHeights<'a> {
             _ => 0.0,
         }
     }
+}
 
-    pub(super) fn is_uniform(&self) -> bool {
-        self.snippets.is_none()
+/// 排好的行流按它判断行高变没变：行高，搜索里再加摘要表的版本号。
+impl Hash for ListEntryHeights<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.row_height.to_bits().hash(state);
+        self.snippets
+            .map(|(search, height)| (search.details_revision(), height.to_bits()))
+            .hash(state);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::PathBuf;
 
     use super::ListEntryHeights;
     use crate::model::BrowserLocation;
-    use crate::visible_entries::list_entry_range_for_viewport;
 
     #[test]
     fn search_rows_with_a_snippet_are_taller_in_the_viewport_range() {
         use file_search::{MatchSource, SearchFileKind, SearchHit, SearchQuery, SearchResultBatch};
 
         use crate::model::search::{SearchWorkspaceSessionId, SearchWorkspaceState};
-        use crate::model::BrowserTab;
 
         let hit = |name: &str, snippet: Option<&str>| SearchHit {
             path: PathBuf::from(format!("/workspace/{name}")),
@@ -84,7 +81,8 @@ mod tests {
             snippet: snippet.map(str::to_owned),
             match_source: MatchSource::Content,
         };
-        let mut tab = BrowserTab::directory(1, PathBuf::from("/workspace"));
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        let tab = browser.tab_mut();
         tab.location = BrowserLocation::Search(Box::new(SearchWorkspaceState::new(
             PathBuf::from("/workspace"),
             PathBuf::from("/home/test"),
@@ -124,15 +122,12 @@ mod tests {
         assert_eq!(heights.snippet_height(&tab.entries[1]), 0.0);
 
         // 视口从第一行之后开始：第一行比普通行高出一行摘要。
-        let range = list_entry_range_for_viewport(
-            &tab.entries,
-            &HashMap::new(),
-            heights,
-            0.0,
-            46.0 + snippet,
-            10.0,
-            0,
-        );
+        let range = crate::transfer_placeholder_view::list_row_layout(
+            &browser,
+            browser.pane_view(browser.active_pane_id()).unwrap(),
+            46.0,
+        )
+        .range_for_viewport(0.0, 46.0 + snippet, 10.0, 0);
         assert_eq!(range.start, 1);
         assert_eq!(range.before_height, 46.0 + snippet);
         assert_eq!(range.after_height, 46.0);

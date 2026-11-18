@@ -31,7 +31,7 @@ pub(crate) use load_requests::{
 };
 
 mod entry_snapshot;
-pub(crate) use entry_snapshot::DirectoryEntrySnapshot;
+pub(crate) use entry_snapshot::{next_content_revision, DirectoryEntrySnapshot};
 
 pub(crate) fn empty_directory_entry_snapshot() -> DirectoryEntrySnapshot {
     DirectoryEntrySnapshot::default()
@@ -215,7 +215,8 @@ pub(crate) struct DirectoryLoadingPlaceholderEntry {
     pub(crate) entry: DirectoryEntry,
     pub(crate) depth: usize,
     pub(crate) animation_progress: f32,
-    pub(crate) row_index: usize,
+    /// 正常列表里这一行的条纹序号（行流的条纹规则见 `ListTransferRow`）。
+    pub(crate) stripe_index: usize,
     pub(crate) trailing_status_height: f32,
 }
 
@@ -235,6 +236,12 @@ pub(crate) struct BrowserPane {
     /// 列表视图主区域的滚动位置。主区域可能是回收站，没有目录可当键，所以与
     /// 多栏各栏分开存。
     pub(crate) list_viewport: Option<ColumnViewport>,
+    /// 列表视图上次排好的行流（派生数据，输入变了自己重排，见 `list_row_layout`）。
+    pub(crate) list_rows: crate::transfer_placeholder_view::ListRowCache,
+    /// 图标视图上次排好的格子（同上，见 `icon_grid_cell_plan`）。
+    pub(crate) icon_cells: crate::icon_grid_layout::IconGridCellCache,
+    /// 状态栏上次算的当前目录统计（同上，见 `directory_file_totals`）。
+    pub(crate) directory_totals: crate::selection_summary::DirectoryTotalsCache,
     pub(crate) directory_load_generation: u64,
     pub(crate) directory_load_cancel: Option<CancellationToken>,
 }
@@ -275,6 +282,9 @@ impl BrowserPane {
             column_browser_viewport: ColumnBrowserViewport::default(),
             column_viewports: HashMap::new(),
             list_viewport: None,
+            list_rows: Default::default(),
+            icon_cells: Default::default(),
+            directory_totals: Default::default(),
             directory_load_generation: 0,
             directory_load_cancel: None,
         }

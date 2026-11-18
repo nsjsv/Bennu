@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use super::*;
 use crate::icon_grid_geometry::visible_entry_range;
 use crate::model::{
-    BrowserPaneId, ExpandedDirectory, IconGridExpansionAnchor, IconGridExpansionContext,
-    IconGridExpansionSessionId,
+    BrowserPaneId, ExpandedDirectory, ExpandedDirectoryStatus, IconGridExpansionAnchor,
+    IconGridExpansionContext, IconGridExpansionSessionId,
 };
 use crate::transfer_placeholder_view::root_grouping;
 use file_core::{EntryMetadata, FileKind};
@@ -82,9 +82,7 @@ impl<'a> IconGridLayout<'a> {
             height_bound,
             icon_edge,
             expansion,
-            Some(crate::icon_grid_layout::IconGridRootGrouping {
-                grouping: &grouping,
-            }),
+            Some(&grouping),
         )
     }
 }
@@ -543,8 +541,11 @@ fn expansion_band_merges_transfer_placeholders_for_its_directory() {
             IconGridFlowSegment::Band(_) | IconGridFlowSegment::GroupHeader(_) => None,
         })
         .unwrap();
-    assert_eq!(band_rows.cells.len(), 1);
-    assert!(matches!(band_rows.cells[0], IconGridCell::Placeholder(_)));
+    assert_eq!(band_rows.cell_count(), 1);
+    assert!(matches!(
+        band_rows.cell(0),
+        Some(IconGridCell::Placeholder(_))
+    ));
     // 占位格子不产生交互事实。
     let matching = layout.interactive_paths_matching(&[PathBuf::from("/workspace/root")]);
     assert_eq!(matching.len(), 1);

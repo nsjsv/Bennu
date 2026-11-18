@@ -87,7 +87,7 @@ fn clearing_the_query_cancels_the_pending_page_and_empties_the_results() {
     assert!(tab.entries.is_empty());
     assert!(tab.selected_paths.is_empty());
     let search = search(&tab);
-    assert!(search.details.is_empty());
+    assert!(search.detail_count() == 0);
     assert!(search.run.active_query.is_none());
     assert!(search.run.pending_indexed_request.is_none());
     assert!(!search.window.is_loading);
@@ -225,7 +225,7 @@ fn results_beyond_the_total_limit_drop_the_oldest_with_their_details() {
     assert_eq!(tab.entries.len(), SEARCH_RESULT_TOTAL_LIMIT);
     let search = search(&tab);
     assert!(search.window.truncated);
-    assert_eq!(search.details.len(), SEARCH_RESULT_TOTAL_LIMIT);
+    assert_eq!(search.detail_count(), SEARCH_RESULT_TOTAL_LIMIT);
     let excess = total - SEARCH_RESULT_TOTAL_LIMIT;
     assert_eq!(tab.entries[0].path(), hit(excess).path);
     assert!(search.detail(&hit(0).path).is_none());

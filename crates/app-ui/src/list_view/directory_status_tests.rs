@@ -52,15 +52,15 @@ fn expanded_directory_status_row_exists(browser: &FileBrowser) -> bool {
     let pane = browser
         .pane_view(browser.active_pane_id())
         .expect("active pane");
-    let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+    let layout = crate::transfer_placeholder_view::list_row_layout(
         browser,
         pane,
         ListGeometry::for_level(browser.user_config().list_view_density).row_height,
     );
-    rows.iter().any(|row| {
+    (0..layout.len()).any(|row| {
         matches!(
-            row,
-            crate::transfer_placeholder_view::ListTransferRow::DirectoryStatusRow { .. }
+            layout.row(pane, row),
+            Some(crate::transfer_placeholder_view::ListTransferRow::DirectoryStatusRow { .. })
         )
     })
 }
@@ -87,4 +87,29 @@ fn loaded_expanded_directory_with_children_has_no_status_row() {
     let browser = browser_with_expanded_directory(ExpandedDirectoryStatus::Loaded, vec![child]);
 
     assert!(!expanded_directory_status_row_exists(&browser));
+}
+
+#[test]
+fn refreshing_expanded_directory_keeps_showing_its_children() {
+    // 磁盘变化触发的重扫期间照常显示旧条目,结果落地整体替换;子行消失再出现就是一闪。
+    let child = test_directory_entry(PathBuf::from("/workspace/project/src"));
+    let browser = browser_with_expanded_directory(ExpandedDirectoryStatus::Refreshing, vec![child]);
+    let pane = browser
+        .pane_view(browser.active_pane_id())
+        .expect("active pane");
+    let layout = crate::transfer_placeholder_view::list_row_layout(
+        &browser,
+        pane,
+        ListGeometry::for_level(browser.user_config().list_view_density).row_height,
+    );
+
+    let paths = (0..layout.len())
+        .filter_map(|row| match layout.row(pane, row)? {
+            crate::transfer_placeholder_view::ListTransferRow::Entry { visible, .. } => {
+                Some(visible.entry.path().to_path_buf())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(paths.contains(&PathBuf::from("/workspace/project/src")));
 }

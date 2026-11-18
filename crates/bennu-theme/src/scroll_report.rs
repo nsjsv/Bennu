@@ -9,6 +9,9 @@
 //! 3. 里面的控件这次发了消息（点击、悬停进出），或按了键、按下松开了鼠标：报告排在这些消息前面，
 //!    应用处理输入时手里的位置就是准的（键盘走订阅，比控件的消息晚一轮到）；
 //! 4. 停下来了：位置一段时间没变。
+//!
+//! 每次报告都说明此刻在动还是停下了（`ScrollMotion`）。报告过「在动」之后一定还会报告一次「停下」：
+//! 应用按它决定什么时候开始做费时的事（缩略图），滚动中一闪而过的格子不做。
 
 use std::ops::Range;
 use std::time::{Duration, Instant};
@@ -31,12 +34,19 @@ pub struct ScrollPosition {
     pub content_bounds: Rectangle,
 }
 
+/// 报告时滚动区在动还是停下了。第一次见到的滚动区算停下（刚打开的目录不用等）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollMotion {
+    Moving,
+    Resting,
+}
+
 /// 包在滚动区（连同它的惯性驱动器）外面。`quiet` 是纵向偏移里应用不用知道的范围（按它已经排出来的
 /// 内容算），空范围（`0.0..0.0`）表示每次变化都要报告。
 pub fn report_scroll<'a, Message, Theme, Renderer>(
     scroller: impl Into<Element<'a, Message, Theme, Renderer>>,
     quiet: Range<f32>,
-    on_report: impl Fn(ScrollPosition) -> Message + 'a,
+    on_report: impl Fn(ScrollPosition, ScrollMotion) -> Message + 'a,
 ) -> Element<'a, Message, Theme, Renderer>
 where
     Message: 'a,
@@ -53,20 +63,25 @@ where
 struct ScrollReport<'a, Message, Theme, Renderer> {
     content: Element<'a, Message, Theme, Renderer>,
     quiet: Range<f32>,
-    on_report: Box<dyn Fn(ScrollPosition) -> Message + 'a>,
+    on_report: Box<dyn Fn(ScrollPosition, ScrollMotion) -> Message + 'a>,
 }
 
 #[derive(Debug, Default)]
 struct ReportState {
-    /// 上次报告的是哪个滚动区、在哪儿：同一位置的控件状态可能换给了另一个滚动区（换目录）。
-    reported: Option<(Option<widget::Id>, ScrollPosition)>,
-    /// 最近看到的偏移，和它从什么时候起没再变。
-    resting: Option<(Vector, Instant)>,
+    /// 上次报告的是哪个滚动区、在哪儿、在不在动：同一位置的控件状态可能换给了另一个滚动区（换目录）。
+    reported: Option<(Option<widget::Id>, ScrollPosition, ScrollMotion)>,
+    /// 最近看到的偏移，和它最后一次变是什么时候（第一次见到不算变）。
+    seen: Option<Vector>,
+    moved_at: Option<Instant>,
 }
 
 enum Observation {
-    Report,
-    /// 位置还没报过但现在不用报：到这个时刻还没动就算停下。
+    /// 报告；还在动时到 `check_at` 再看一次，那时没再动就报告停下。
+    Report {
+        motion: ScrollMotion,
+        check_at: Option<Instant>,
+    },
+    /// 现在不用报：到这个时刻还没动就算停下。
     CheckAt(Instant),
     UpToDate,
 }
@@ -80,29 +95,37 @@ impl ReportState {
         acting: bool,
         now: Instant,
     ) -> Observation {
-        let since = match self.resting {
-            Some((offset, since)) if offset == position.offset => since,
-            _ => now,
+        if self.seen.is_some_and(|offset| offset != position.offset) {
+            self.moved_at = Some(now);
+        }
+        self.seen = Some(position.offset);
+        let settles_at = self.moved_at.map(|at| at + SETTLE).filter(|at| now < *at);
+        let motion = match settles_at {
+            Some(_) => ScrollMotion::Moving,
+            None => ScrollMotion::Resting,
         };
-        self.resting = Some((position.offset, since));
-        let observation = match &self.reported {
-            Some((reported_id, reported)) if *reported_id == id && *reported == position => {
-                return Observation::UpToDate;
+        let observation = match (&self.reported, settles_at) {
+            (Some((reported_id, reported, reported_motion)), _)
+                if *reported_id == id && *reported == position && *reported_motion == motion =>
+            {
+                return settles_at.map_or(Observation::UpToDate, Observation::CheckAt);
             }
-            Some((reported_id, reported))
+            (Some((reported_id, reported, _)), Some(settles_at))
                 if *reported_id == id
                     && reported.bounds == position.bounds
                     && reported.content_bounds.size() == position.content_bounds.size()
                     && !acting
-                    && quiet.contains(&position.offset.y)
-                    && now < since + SETTLE =>
+                    && quiet.contains(&position.offset.y) =>
             {
-                Observation::CheckAt(since + SETTLE)
+                Observation::CheckAt(settles_at)
             }
-            _ => Observation::Report,
+            _ => Observation::Report {
+                motion,
+                check_at: settles_at,
+            },
         };
-        if let Observation::Report = observation {
-            self.reported = Some((id, position));
+        if let Observation::Report { motion, .. } = observation {
+            self.reported = Some((id, position, motion));
         }
         observation
     }
@@ -205,7 +228,12 @@ where
             };
             let state = state.downcast_mut::<ReportState>();
             match state.observe(id, position, &self.quiet, acting, now) {
-                Observation::Report => shell.publish((self.on_report)(position)),
+                Observation::Report { motion, check_at } => {
+                    shell.publish((self.on_report)(position, motion));
+                    if let Some(at) = check_at {
+                        shell.request_redraw_at(at);
+                    }
+                }
                 Observation::CheckAt(at) => shell.request_redraw_at(at),
                 Observation::UpToDate => {}
             }

@@ -9,7 +9,10 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Note {
+    /// 在动时报告的位置。
     At(f32),
+    /// 停下时报告的位置。
+    Rest(f32),
     Entered(usize),
 }
 
@@ -33,7 +36,10 @@ impl Harness {
         let mut element = report_scroll(
             scrollable(rows).id(widget::Id::new("list")).height(ROW),
             quiet,
-            |position| Note::At(position.offset.y),
+            |position, motion| match motion {
+                ScrollMotion::Moving => Note::At(position.offset.y),
+                ScrollMotion::Resting => Note::Rest(position.offset.y),
+            },
         );
         let mut tree = Tree::new(&element);
         let node = element.as_widget_mut().layout(
@@ -110,7 +116,7 @@ fn key_press() -> Event {
 fn the_first_frame_reports_and_an_unchanged_position_stays_quiet() {
     let mut harness = Harness::new(0.0..1_000.0, false);
     let start = Instant::now();
-    assert_eq!(harness.frame(start).0, vec![Note::At(0.0)]);
+    assert_eq!(harness.frame(start).0, vec![Note::Rest(0.0)]);
     assert_eq!(
         harness.frame(start + Duration::from_millis(16)),
         (Vec::new(), window::RedrawRequest::Wait)
@@ -135,7 +141,7 @@ fn moving_within_the_quiet_range_is_reported_once_it_settles() {
     let moved = start + Duration::from_millis(32);
     assert!(harness.frame(moved).0.is_empty());
     assert!(harness.frame(moved + SETTLE / 2).0.is_empty());
-    assert_eq!(harness.frame(moved + SETTLE).0, vec![Note::At(80.0)]);
+    assert_eq!(harness.frame(moved + SETTLE).0, vec![Note::Rest(80.0)]);
 }
 
 /// 出了应用给的范围马上报告。
@@ -163,7 +169,7 @@ fn a_message_from_inside_comes_after_the_current_position() {
     let start = Instant::now();
     assert_eq!(
         harness.frame(start).0,
-        vec![Note::At(0.0), Note::Entered(0)]
+        vec![Note::Rest(0.0), Note::Entered(0)]
     );
     harness.scroll_to(ROW);
     assert_eq!(
@@ -199,4 +205,24 @@ fn an_empty_quiet_range_reports_every_change() {
             vec![Note::At(y)]
         );
     }
+}
+
+/// 在动时报告过的位置，停在那儿不动了也要再报告一次「停下」：应用等它才开始做缩略图。
+#[test]
+fn a_moving_report_is_always_followed_by_a_resting_one() {
+    let mut harness = Harness::new(0.0..50.0, false);
+    let start = Instant::now();
+    harness.frame(start);
+    harness.scroll_to(80.0);
+    let moved = start + Duration::from_millis(16);
+    assert_eq!(
+        harness.frame(moved),
+        (vec![Note::At(80.0)], window::RedrawRequest::At(moved + SETTLE))
+    );
+    assert!(harness.frame(moved + SETTLE / 2).0.is_empty());
+    assert_eq!(harness.frame(moved + SETTLE).0, vec![Note::Rest(80.0)]);
+    assert_eq!(
+        harness.frame(moved + SETTLE * 2),
+        (Vec::new(), window::RedrawRequest::Wait)
+    );
 }

@@ -588,14 +588,12 @@ impl FileBrowser {
         let row_height =
             crate::list_view::ListGeometry::for_level(self.user_config.list_view_density)
                 .row_height;
-        let range = self
-            .pane()
+        let pane = self.pane_view(self.active_pane_id())?;
+        let layout = crate::transfer_placeholder_view::list_row_layout(self, pane, row_height);
+        let range = pane
             .list_viewport
             .map(|viewport| {
-                crate::visible_entries::list_entry_range_for_viewport(
-                    &tab.entries,
-                    &tab.expanded_directories,
-                    crate::visible_entries::ListEntryHeights::at(&tab.location, row_height),
+                layout.range_for_viewport(
                     crate::list_view::LIST_HEADER_HEIGHT,
                     viewport.offset_y,
                     viewport.height,
@@ -603,42 +601,36 @@ impl FileBrowser {
                 )
             })
             .unwrap_or_else(|| {
-                crate::visible_entries::initial_list_entry_range(
-                    &tab.entries,
-                    &tab.expanded_directories,
-                    crate::visible_entries::ListEntryHeights::at(&tab.location, row_height),
-                    crate::list_view::list_initial_rows(
-                        self.main_window_height,
-                        self.user_config.list_view_density,
-                    ),
-                )
+                layout.initial_range(crate::list_view::list_initial_rows(
+                    self.main_window_height,
+                    self.user_config.list_view_density,
+                ))
             });
-        let entries = crate::visible_entries::visible_entries_in_range(
-            &tab.entries,
-            &tab.expanded_directories,
-            range.start,
-            range.end,
-        )
-        .into_iter()
-        .enumerate()
-        .map(
-            |(range_offset, visible_entry)| DirectoryLoadingPlaceholderEntry {
-                entry: visible_entry.entry.clone(),
-                depth: visible_entry.depth,
-                animation_progress: visible_entry.animation_progress,
-                row_index: range.start + range_offset,
-                trailing_status_height: tab
-                    .expanded_directories
-                    .get(visible_entry.entry.path())
-                    .map(|expanded| {
-                        crate::visible_entries::visible_entry_status_row_height(
-                            expanded, row_height,
-                        )
-                    })
-                    .unwrap_or(0.0),
-            },
-        )
-        .collect();
+        // 条纹照抄正在显示的那份行流，换目录时这几行的颜色不跳。
+        let entries = (range.start..range.end)
+            .filter_map(|row| match layout.row(pane, row)? {
+                crate::transfer_placeholder_view::ListTransferRow::Entry {
+                    visible,
+                    stripe_index,
+                    ..
+                } => Some(DirectoryLoadingPlaceholderEntry {
+                    entry: visible.entry.clone(),
+                    depth: visible.depth,
+                    animation_progress: visible.animation_progress,
+                    stripe_index,
+                    trailing_status_height: tab
+                        .expanded_directories
+                        .get(visible.entry.path())
+                        .map(|expanded| {
+                            crate::visible_entries::visible_entry_status_row_height(
+                                expanded, row_height,
+                            )
+                        })
+                        .unwrap_or(0.0),
+                }),
+                _ => None,
+            })
+            .collect();
 
         Some(DirectoryLoadingPlaceholder {
             before_height: range.before_height,
@@ -847,10 +839,12 @@ mod tests {
         };
         browser.pane_mut().list_viewport = Some(viewport);
         let previous_entries = browser.tab().entries.clone();
-        let expected_range = crate::visible_entries::list_entry_range_for_viewport(
-            &previous_entries,
-            &browser.tab().expanded_directories,
-            crate::visible_entries::ListEntryHeights::uniform(crate::list_view::LIST_ROW_HEIGHT),
+        let expected_range = crate::transfer_placeholder_view::list_row_layout(
+            &browser,
+            browser.pane_view(browser.active_pane_id()).unwrap(),
+            crate::list_view::LIST_ROW_HEIGHT,
+        )
+        .range_for_viewport(
             crate::list_view::LIST_HEADER_HEIGHT,
             viewport.offset_y,
             viewport.height,
@@ -875,11 +869,11 @@ mod tests {
         assert_eq!(placeholder.before_height, expected_range.before_height);
         assert_eq!(placeholder.after_height, expected_range.after_height);
         assert_eq!(
-            placeholder.entries.first().map(|entry| entry.row_index),
+            placeholder.entries.first().map(|entry| entry.stripe_index),
             Some(expected_range.start)
         );
         assert_eq!(
-            placeholder.entries.last().map(|entry| entry.row_index),
+            placeholder.entries.last().map(|entry| entry.stripe_index),
             Some(expected_range.end - 1)
         );
         assert_eq!(
@@ -903,10 +897,9 @@ mod tests {
     }
 
     #[test]
-    fn loading_placeholder_row_indices_count_only_entry_rows() {
-        // Pending 加载占位流与正常行流同一条纹规则:只有条目行计数,
-        // 展开状态行只贡献 trailing 高度 spacer、不占条纹序号,行序号
-        // 与条目序一一对应。
+    fn loading_placeholder_rows_keep_the_stripes_of_the_list() {
+        // Pending 加载占位流照抄正常行流的条纹:展开状态行也占一个条纹序号,
+        // 状态行本身在占位流里只是条目后的 trailing 高度 spacer。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let abandoned = PathBuf::from("/workspace/leaving");
         let project = DirectoryEntry::new(
@@ -964,10 +957,10 @@ mod tests {
             placeholder
                 .entries
                 .iter()
-                .map(|entry| entry.row_index)
+                .map(|entry| entry.stripe_index)
                 .collect::<Vec<_>>(),
-            [0, 1],
-            "状态行 spacer 不占条纹序号,f.txt 的行序号仍是 1"
+            [0, 2],
+            "状态行占了 1 号条纹,f.txt 与正常列表一样是 2"
         );
         assert!(placeholder.entries[0].trailing_status_height > 0.0);
     }

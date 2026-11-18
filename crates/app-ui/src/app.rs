@@ -18,7 +18,9 @@ pub(crate) mod convert;
 mod desktop_activation;
 mod directory_expansion_loading;
 mod directory_metadata_demand;
+mod directory_metadata_in_flight;
 mod directory_recovery;
+mod displayed_directory_totals;
 mod entry_changes;
 mod entry_hover_recalc;
 mod events;
@@ -34,6 +36,8 @@ mod icon_grid_file_operation_tests;
 #[cfg(test)]
 mod icon_grid_invariant_tests;
 mod list_directory_summaries;
+#[cfg(test)]
+mod list_row_cache_tests;
 #[cfg(test)]
 mod list_size_sorting_tests;
 mod list_view_settings;
@@ -105,7 +109,7 @@ use desktop_linux::{
     DesktopActivationEvent, DesktopActivationRuntime, NetworkConnectionId, StorageDeviceId,
     TerminalEmulator,
 };
-use file_core::{DirectoryMetadataRequirement, ScanOptions};
+use file_core::ScanOptions;
 use iced::event;
 use iced::keyboard;
 use iced::window;
@@ -182,13 +186,6 @@ const OPERATION_PROGRESS_ANIMATION_INTERVAL: Duration = Duration::from_millis(80
 const SEARCH_SERVICE_STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const APPLICATION_LOG_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DirectoryMetadataDemandKey {
-    context: crate::model::DirectoryMetadataLoadContext,
-    requirement: DirectoryMetadataRequirement,
-    index: usize,
-}
-
 pub(crate) struct FileBrowser {
     pub(crate) home_dir: PathBuf,
     pub(crate) trash_refresh: TrashRefreshState,
@@ -208,7 +205,10 @@ pub(crate) struct FileBrowser {
     /// 视图模块）。
     pub(crate) preview_engine: bennu_preview::engine::PreviewEngine,
     next_directory_metadata_request_generation: u64,
-    directory_metadata_in_flight: HashSet<DirectoryMetadataDemandKey>,
+    directory_metadata_in_flight: directory_metadata_in_flight::DirectoryMetadataInFlight,
+    /// 补文件信息的结果每到一次加一。信息是后台写进条目里的一次性格子，条目快照不变，
+    /// 按大小、日期分组的列表行流靠它知道要重排。
+    pub(crate) entry_metadata_revision: u64,
     main_window: window::Id,
     maximized_windows: HashSet<window::Id>,
     wayland_dnd: Option<wayland_dnd::WaylandDndRuntime>,
@@ -622,7 +622,8 @@ impl FileBrowser {
                 windows::preview_window_identity(),
             ),
             next_directory_metadata_request_generation: 1,
-            directory_metadata_in_flight: HashSet::new(),
+            directory_metadata_in_flight: Default::default(),
+            entry_metadata_revision: 0,
             main_window,
             maximized_windows: HashSet::new(),
             wayland_dnd: None,

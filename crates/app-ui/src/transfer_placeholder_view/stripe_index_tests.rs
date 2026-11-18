@@ -2,14 +2,13 @@
 // 覆盖:组头不消耗序号、占位/状态行各占一个序号、展开子目录与根目录
 // 共用一个计数器、组间不重置、None 模式下序号 == 原条目序(回归锚点)、
 // 占位插入前后同一行条纹不变(修复传输期条纹跳变的老缺陷)。
-// 占位注入直接预置行流构建器的占位缓存,与渲染走同一条合并路径,
+// 占位直接交给行流构建器的根目录,与渲染走同一条合并路径,
 // 不需要为测试拼装真实操作队列任务。
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
 
-use super::list_rows::push_root_transfer_rows;
+use super::list_rows::list_row_layout_with_root_placeholders;
 use super::*;
 use crate::config;
 use crate::model::BrowserLocation;
@@ -78,51 +77,36 @@ fn expanded(entries: Vec<DirectoryEntry>, status: ExpandedDirectoryStatus) -> Ex
     }
 }
 
-/// 走真实行流构建器:占位经预置缓存从同一条合并路径进入行流。
-fn build_rows_with_placeholders(
+/// 走真实行流构建器:占位直接给根目录,从同一条合并路径进入行流。
+/// 返回每行的条纹序号(组头行无条纹,记 usize::MAX 哨兵),供相位断言。
+fn stripes_with_placeholders(
     browser: &crate::app::FileBrowser,
     placeholders: Vec<TransferPlaceholder>,
-) -> Vec<ListTransferRow<'_>> {
+) -> Vec<usize> {
     let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
     let row_height =
         crate::list_view::ListGeometry::for_level(browser.user_config().list_view_density)
             .row_height;
-    let mut placeholder_cache = HashMap::new();
-    if let Some(directory) = browser.tab().current_directory() {
-        placeholder_cache.insert(directory.to_path_buf(), placeholders);
-    }
-    let mut rows = Vec::new();
-    push_root_transfer_rows(
-        browser,
-        pane,
-        row_height,
-        &mut placeholder_cache,
-        &mut 0,
-        &mut rows,
-    );
-    rows
-}
-
-fn group_header_count(rows: &[ListTransferRow<'_>]) -> usize {
-    rows.iter()
-        .filter(|row| matches!(row, ListTransferRow::GroupHeader { .. }))
-        .count()
-}
-
-fn build_rows(browser: &crate::app::FileBrowser) -> Vec<ListTransferRow<'_>> {
-    build_rows_with_placeholders(browser, Vec::new())
-}
-
-/// 每行的条纹序号(组头行无条纹,记 usize::MAX 哨兵),供相位断言。
-fn stripe_sequence(rows: &[ListTransferRow<'_>]) -> Vec<usize> {
-    rows.iter()
-        .map(|row| match row {
+    let layout = list_row_layout_with_root_placeholders(browser, pane, row_height, placeholders);
+    (0..layout.len())
+        .map(|row| match layout.row(pane, row).unwrap() {
             ListTransferRow::Entry { stripe_index, .. }
             | ListTransferRow::Placeholder { stripe_index, .. }
-            | ListTransferRow::DirectoryStatusRow { stripe_index, .. } => *stripe_index,
+            | ListTransferRow::DirectoryStatusRow { stripe_index, .. } => stripe_index,
             ListTransferRow::GroupHeader { .. } => usize::MAX,
         })
         .collect()
+}
+
+fn stripes(browser: &crate::app::FileBrowser) -> Vec<usize> {
+    stripes_with_placeholders(browser, Vec::new())
+}
+
+fn group_header_count(browser: &crate::app::FileBrowser) -> usize {
+    stripes(browser)
+        .into_iter()
+        .filter(|stripe| *stripe == usize::MAX)
+        .count()
 }
 
 #[test]
@@ -135,19 +119,15 @@ fn placeholder_row_consumes_its_own_stripe() {
         file_entry("/workspace/a.txt"),
         file_entry("/workspace/z.txt"),
     ];
-    let plain_browser = browser_with_entries(entries.to_vec(), FileGroupingMode::None);
-    let without_placeholder = build_rows(&plain_browser);
-    let placeholder_browser = browser_with_entries(entries.to_vec(), FileGroupingMode::None);
-    let with_placeholder =
-        build_rows_with_placeholders(&placeholder_browser, vec![file_placeholder("incoming.txt")]);
+    let browser = browser_with_entries(entries.to_vec(), FileGroupingMode::None);
 
     assert_eq!(
-        stripe_sequence(&without_placeholder),
+        stripes(&browser),
         [0, 1],
         "None 模式回归锚点:无 chrome 行时条纹序号 == 条目序"
     );
     assert_eq!(
-        stripe_sequence(&with_placeholder),
+        stripes_with_placeholders(&browser, vec![file_placeholder("incoming.txt")]),
         [0, 1, 2],
         "占位行消耗序号:三行严格交替,不再与下一行同相"
     );
@@ -163,9 +143,8 @@ fn group_headers_neither_consume_nor_reset_stripes() {
         file_entry("/workspace/zebra.txt"),
     ];
     let browser = browser_with_entries(entries.to_vec(), FileGroupingMode::NameInitial);
-    let rows = build_rows(&browser);
 
-    assert_eq!(stripe_sequence(&rows), [usize::MAX, 0, 1, usize::MAX, 2]);
+    assert_eq!(stripes(&browser), [usize::MAX, 0, 1, usize::MAX, 2]);
 }
 
 #[test]
@@ -196,10 +175,8 @@ fn expanded_directories_continue_the_visible_row_stripes() {
             ExpandedDirectoryStatus::Loaded,
         ),
     );
-    let rows = build_rows(&browser);
-
     // project | src | main.rs | two.rs | f.txt
-    assert_eq!(stripe_sequence(&rows), [0, 1, 2, 3, 4]);
+    assert_eq!(stripes(&browser), [0, 1, 2, 3, 4]);
 }
 
 #[test]
@@ -217,9 +194,7 @@ fn expansion_status_row_consumes_its_own_stripe() {
         PathBuf::from("/workspace/project"),
         expanded(Vec::new(), ExpandedDirectoryStatus::Error),
     );
-    let rows = build_rows(&browser);
-
-    assert_eq!(stripe_sequence(&rows), [0, 1, 2]);
+    assert_eq!(stripes(&browser), [0, 1, 2]);
 }
 
 #[test]
@@ -231,9 +206,10 @@ fn placeholder_conversion_keeps_its_row_stripe_stable() {
         file_entry("/workspace/z.txt"),
     ];
     let placeholder_browser = browser_with_entries(entries.to_vec(), FileGroupingMode::None);
-    let placeholder_rows =
-        build_rows_with_placeholders(&placeholder_browser, vec![file_placeholder("m.txt")]);
-    assert_eq!(stripe_sequence(&placeholder_rows), [0, 1, 2]);
+    assert_eq!(
+        stripes_with_placeholders(&placeholder_browser, vec![file_placeholder("m.txt")]),
+        [0, 1, 2]
+    );
 
     // m.txt 落地成真实条目:条纹按条目序 0/1/2,原占位所在的第 2 行
     // 在转换前后都是 1。
@@ -245,8 +221,7 @@ fn placeholder_conversion_keeps_its_row_stripe_stable() {
         ],
         FileGroupingMode::None,
     );
-    let merged_rows = build_rows(&merged_browser);
-    assert_eq!(stripe_sequence(&merged_rows), [0, 1, 2]);
+    assert_eq!(stripes(&merged_browser), [0, 1, 2]);
 }
 
 #[test]
@@ -272,7 +247,7 @@ fn grouping_splits_the_root_level_but_never_expanded_children() {
         ),
     );
 
-    assert_eq!(group_header_count(&build_rows(&browser)), 2);
+    assert_eq!(group_header_count(&browser), 2);
 }
 
 #[test]
@@ -287,5 +262,5 @@ fn grouping_also_splits_a_root_that_is_not_a_directory() {
     );
     browser.tab_mut().location = BrowserLocation::Trash;
 
-    assert_eq!(group_header_count(&build_rows(&browser)), 2);
+    assert_eq!(group_header_count(&browser), 2);
 }

@@ -7,7 +7,6 @@ use std::time::SystemTime;
 
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
-use tokio::fs;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 
@@ -313,18 +312,9 @@ pub async fn resolve_directory_metadata(
     let counters = Arc::new(DirectoryMetadataCounters::default());
     match requirement {
         DirectoryMetadataRequirement::Filesystem => {
-            for index in &targets {
-                if cancellation.is_cancelled() {
-                    return Err(FileError::Cancelled);
-                }
-                resolver
-                    .resolve_filesystem_metadata(
-                        &resolver.entries[*index],
-                        &cancellation,
-                        &counters,
-                    )
-                    .await?;
-            }
+            resolver
+                .resolve_filesystem_metadata_in_bulk(&targets, &cancellation, &counters)
+                .await?;
         }
         DirectoryMetadataRequirement::IdentityNames => {
             resolver
@@ -359,46 +349,63 @@ pub async fn resolve_directory_metadata(
     })
 }
 
+/// 一批里每个线程至少分这么多条：少于它不值得开线程（可见的几十行就在一个线程里做完）。
+const FILESYSTEM_ENTRIES_PER_WORKER: usize = 2048;
+
 impl DirectoryMetadataResolver {
-    async fn resolve_filesystem_metadata(
+    /// 一批条目的文件信息在阻塞线程里一口气补完，条目多时按核数分块并行。原来每条各走一次异步
+    /// 文件调用（每次都要换一次线程），10 万个条目光是来回调度就比 stat 本身贵；状态栏总大小
+    /// 要补全目录，这条路径必须便宜。已经补上或正在由别的请求补的条目跳过。
+    async fn resolve_filesystem_metadata_in_bulk(
         &self,
-        entry: &DiscoveredDirectoryEntry,
+        targets: &BTreeSet<usize>,
         cancellation: &CancellationToken,
-        counters: &DirectoryMetadataCounters,
+        counters: &Arc<DirectoryMetadataCounters>,
     ) -> Result<(), FileError> {
-        let path = entry.path().to_path_buf();
-        let is_symlink = entry.is_symlink();
-        entry
-            .inner
-            .filesystem_metadata
-            .get_or_try_init(|| async {
-                if cancellation.is_cancelled() {
-                    return Err(FileError::Cancelled);
+        let pending = targets
+            .iter()
+            .map(|index| self.entries[*index].clone())
+            .filter(|entry| !entry.inner.filesystem_metadata.initialized())
+            .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return Ok(());
+        }
+        let worker_cancellation = cancellation.clone();
+        let counters = Arc::clone(counters);
+        tokio::task::spawn_blocking(move || {
+            let workers = std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(1)
+                .min(pending.len().div_ceil(FILESYSTEM_ENTRIES_PER_WORKER))
+                .max(1);
+            let chunk = pending.len().div_ceil(workers);
+            std::thread::scope(|scope| {
+                for entries in pending.chunks(chunk) {
+                    let (cancellation, counters) = (&worker_cancellation, &counters);
+                    scope.spawn(move || {
+                        for entry in entries {
+                            if cancellation.is_cancelled() {
+                                return;
+                            }
+                            counters.filesystem_calls.fetch_add(1, Ordering::Relaxed);
+                            // 别的请求正在补这一条时 set 失败，留给它。
+                            let _ = entry
+                                .inner
+                                .filesystem_metadata
+                                .set(read_filesystem_metadata(entry.path(), entry.is_symlink()));
+                        }
+                    });
                 }
-                counters.filesystem_calls.fetch_add(1, Ordering::Relaxed);
-                let symlink_metadata = match fs::symlink_metadata(&path).await {
-                    Ok(metadata) => metadata,
-                    Err(source) => {
-                        return Ok(Err(DirectoryMetadataUnavailable::new(source.to_string())))
-                    }
-                };
-                let is_broken_symlink = if is_symlink {
-                    matches!(
-                        fs::metadata(&path).await,
-                        Err(error) if error.kind() == std::io::ErrorKind::NotFound
-                    )
-                } else {
-                    false
-                };
-                if cancellation.is_cancelled() {
-                    return Err(FileError::Cancelled);
-                }
-                Ok(Ok(directory_filesystem_metadata(
-                    &symlink_metadata,
-                    is_broken_symlink,
-                )))
-            })
-            .await?;
+            });
+        })
+        .await
+        .map_err(|error| FileError::InvalidInput {
+            path: self.path.clone(),
+            message: format!("directory metadata worker failed: {error}"),
+        })?;
+        if cancellation.is_cancelled() {
+            return Err(FileError::Cancelled);
+        }
         Ok(())
     }
 
@@ -408,13 +415,8 @@ impl DirectoryMetadataResolver {
         cancellation: &CancellationToken,
         counters: Arc<DirectoryMetadataCounters>,
     ) -> Result<(), FileError> {
-        for index in targets {
-            if cancellation.is_cancelled() {
-                return Err(FileError::Cancelled);
-            }
-            self.resolve_filesystem_metadata(&self.entries[*index], cancellation, &counters)
-                .await?;
-        }
+        self.resolve_filesystem_metadata_in_bulk(targets, cancellation, &counters)
+            .await?;
 
         let mut user_ids = BTreeSet::new();
         let mut group_ids = BTreeSet::new();
@@ -576,6 +578,21 @@ pub(crate) fn complete_entry_from_metadata(
         OnceCell::new_with(Some(Ok(filesystem_metadata))),
         OnceCell::new_with(Some(Ok(identity_names))),
     )))
+}
+
+/// 一个条目的文件信息：链接本身的（不跟随），链接是不是断的另看一次。
+fn read_filesystem_metadata(
+    path: &Path,
+    is_symlink: bool,
+) -> Result<DirectoryFilesystemMetadata, DirectoryMetadataUnavailable> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|source| DirectoryMetadataUnavailable::new(source.to_string()))?;
+    let is_broken_symlink = is_symlink
+        && matches!(
+            std::fs::metadata(path),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+    Ok(directory_filesystem_metadata(&metadata, is_broken_symlink))
 }
 
 fn directory_filesystem_metadata(

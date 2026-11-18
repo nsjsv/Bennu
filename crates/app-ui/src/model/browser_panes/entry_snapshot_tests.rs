@@ -82,3 +82,18 @@ fn clones_share_entries_until_one_changes() {
     assert!(changed.find(Path::new("/dir/a")).is_none());
     assert!(original.find(Path::new("/dir/a")).is_some());
 }
+
+/// 版本号认内容：克隆沿用，任何一次改动（哪怕独占、原地改）都换新号，两份不同的快照号不同。
+#[test]
+fn revision_changes_with_content_only() {
+    let mut snapshot = DirectoryEntrySnapshot::from(vec![entry("/dir/a")]);
+    let other = DirectoryEntrySnapshot::from(vec![entry("/dir/a")]);
+    let clone = snapshot.clone();
+    assert_eq!(clone.revision(), snapshot.revision());
+    assert_ne!(other.revision(), snapshot.revision());
+
+    drop(clone);
+    let before = snapshot.revision();
+    snapshot.make_mut()[0].relocate(PathBuf::from("/dir/b"));
+    assert_ne!(snapshot.revision(), before);
+}

@@ -946,11 +946,19 @@ impl FileBrowser {
             Message::ColumnBrowserScrolled(pane_id, offset_x, width) => {
                 self.handle_column_browser_scrolled(pane_id, offset_x, width)
             }
-            Message::ColumnScrolled(pane_id, directory, offset_y, height) => Task::batch([
-                self.handle_column_scrolled(pane_id, directory, offset_y, height),
-                self.request_browser_session_save(),
-            ]),
-            Message::ListScrolled(pane_id, offset_y, viewport) => {
+            Message::ColumnScrolled(pane_id, directory, offset_y, height, motion) => {
+                self.note_scroll_motion(
+                    pane_id,
+                    crate::model::LocationKey::Directory(directory.clone()),
+                    motion,
+                );
+                Task::batch([
+                    self.handle_column_scrolled(pane_id, directory, offset_y, height),
+                    self.request_browser_session_save(),
+                ])
+            }
+            Message::ListScrolled(pane_id, offset_y, viewport, motion) => {
+                self.note_pane_scroll_motion(pane_id, motion);
                 let scrolled = self.handle_list_scrolled(pane_id, offset_y, viewport.height);
                 self.recalculate_hovered_entry_after_scroll(
                     pane_id,
@@ -970,7 +978,8 @@ impl FileBrowser {
                     self.request_browser_session_save(),
                 ])
             }
-            Message::IconGridScrolled(pane_id, offset_y, viewport) => {
+            Message::IconGridScrolled(pane_id, offset_y, viewport, motion) => {
+                self.note_pane_scroll_motion(pane_id, motion);
                 let scrolled = self.handle_icon_grid_scrolled(
                     pane_id,
                     offset_y,

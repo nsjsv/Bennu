@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use bennu_state::TaskQueueStore;
+use bennu_theme::scroll_report::ScrollMotion;
 use bennu_theme::{AppearanceMode, ColorSchemePreset, MatugenColors, ThemeMode};
 use desktop_linux::{
     DesktopActivationEvent, DesktopClipboardContent, FileClipboardOperation,
@@ -708,14 +709,15 @@ pub(crate) enum Message {
     ViewDensityWheel(ScrollbarRegion, mouse::ScrollDelta),
     WindowChromeAnimationTick,
     ColumnBrowserScrolled(BrowserPaneId, f32, f32),
-    ColumnScrolled(BrowserPaneId, PathBuf, f32, f32),
+    ColumnScrolled(BrowserPaneId, PathBuf, f32, f32, ScrollMotion),
     /// 列表滚动位置(`report_scroll` 只在应用需要时报告:越过已排行的余量、
     /// 有输入、停下):offset_y 为内容偏移,viewport 是滚动区的可视区
     /// 窗口坐标矩形——hover 滚动补偿用它把存量光标位置换算成行流内
     /// 落点,与渲染同源,不另推布局。
-    ListScrolled(BrowserPaneId, f32, iced::Rectangle),
+    /// 最后一项说此刻在动还是停下了:滚动中先不开始做缩略图。
+    ListScrolled(BrowserPaneId, f32, iced::Rectangle, ScrollMotion),
     /// 大图滚动位置:语义同 ListScrolled,网格无表头,flow 顶点即内容偏移。
-    IconGridScrolled(BrowserPaneId, f32, iced::Rectangle),
+    IconGridScrolled(BrowserPaneId, f32, iced::Rectangle, ScrollMotion),
     ColumnResizeStarted(BrowserPaneId, usize),
     OpenDirectoryFromMiddleClick(BrowserPaneId, PathBuf),
     /// 中键点击压缩包条目：直接按右键「智能解压」规则解压，替代旧的开

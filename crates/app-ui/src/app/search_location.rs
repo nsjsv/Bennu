@@ -13,9 +13,7 @@ use crate::model::{
     DirectoryCollectionPhase, ListColumnKind, Message, NavigationMode, SearchWorkspaceSessionId,
     SearchWorkspaceState,
 };
-use crate::transfer_placeholder_view::{
-    build_list_transfer_rows, list_transfer_rows_content_height,
-};
+use crate::transfer_placeholder_view::list_row_layout;
 
 impl FileBrowser {
     /// 这次搜索所在的标签（任一窗格）。
@@ -141,11 +139,10 @@ impl FileBrowser {
                 };
                 let row_height =
                     ListGeometry::for_level(self.user_config.list_view_density).row_height;
-                let rows = build_list_transfer_rows(self, pane, row_height);
                 (
                     viewport.offset_y,
                     viewport.height,
-                    LIST_HEADER_HEIGHT + list_transfer_rows_content_height(&rows, row_height),
+                    LIST_HEADER_HEIGHT + list_row_layout(self, pane, row_height).content_height(),
                 )
             }
         };

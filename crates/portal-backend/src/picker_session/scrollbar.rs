@@ -6,7 +6,7 @@
 //! 内所有窗口的控件树，widget Id 必须带会话命名空间（请求路径），
 //! 才能保证只命中本窗口的滚动容器。
 
-use bennu_theme::scroll_report::ScrollPosition;
+use bennu_theme::scroll_report::{ScrollMotion, ScrollPosition};
 use bennu_theme::scrollbar::scrollbar_layout_probe;
 use bennu_theme::smooth_scroll::SmoothScrollAxis;
 use iced::advanced::widget as advanced_widget;
@@ -73,6 +73,7 @@ impl SessionMessage {
             self,
             SessionMessage::ScrollbarLayoutVerified { .. }
                 | SessionMessage::ScrollbarViewportChanged { .. }
+                | SessionMessage::ScrollReported { .. }
         )
     }
 }
@@ -84,47 +85,40 @@ pub(crate) fn scrollbar_on_scroll(
 ) -> impl Fn(scrollable::Viewport) -> SessionMessage {
     move |viewport| {
         let absolute_offset = viewport.absolute_offset();
-        let bounds = viewport.bounds();
-        let content_bounds = viewport.content_bounds();
-        viewport_changed(
+        SessionMessage::ScrollbarViewportChanged {
             region,
-            Vector::new(absolute_offset.x, absolute_offset.y),
-            bounds.size(),
-            content_bounds.size(),
-        )
+            viewport: scrollbar_viewport(
+                Vector::new(absolute_offset.x, absolute_offset.y),
+                viewport.bounds().size(),
+                viewport.content_bounds().size(),
+            ),
+        }
     }
 }
 
 /// `report_scroll` 回调：列表、大图和各栏只在需要时（越过缩略图余量、有输入、停下）报告位置。
 pub(crate) fn scrollbar_report(
     region: SessionScrollRegion,
-) -> impl Fn(ScrollPosition) -> SessionMessage {
-    move |position| {
-        viewport_changed(
-            region,
+) -> impl Fn(ScrollPosition, ScrollMotion) -> SessionMessage {
+    move |position, motion| SessionMessage::ScrollReported {
+        region,
+        viewport: scrollbar_viewport(
             position.offset,
             position.bounds.size(),
             position.content_bounds.size(),
-        )
+        ),
+        motion,
     }
 }
 
-fn viewport_changed(
-    region: SessionScrollRegion,
-    offset: Vector,
-    viewport: Size,
-    content: Size,
-) -> SessionMessage {
-    SessionMessage::ScrollbarViewportChanged {
-        region,
-        viewport: ScrollbarViewport {
-            offset_x: offset.x,
-            offset_y: offset.y,
-            viewport_width: viewport.width,
-            viewport_height: viewport.height,
-            content_width: content.width,
-            content_height: content.height,
-        },
+fn scrollbar_viewport(offset: Vector, viewport: Size, content: Size) -> ScrollbarViewport {
+    ScrollbarViewport {
+        offset_x: offset.x,
+        offset_y: offset.y,
+        viewport_width: viewport.width,
+        viewport_height: viewport.height,
+        content_width: content.width,
+        content_height: content.height,
     }
 }
 
@@ -167,12 +161,23 @@ impl PickerSession {
             }
             SessionMessage::ScrollbarViewportChanged { region, viewport } => {
                 self.scroll_viewports.insert(region, viewport);
-                // 列表/多栏栏视口更新：可见区间变化，重算缩略图请求（main 层
-                // 在本入口返回后统一 drain 发起）。
+                Vec::new()
+            }
+            SessionMessage::ScrollReported {
+                region,
+                viewport,
+                motion,
+            } => {
+                self.scroll_viewports.insert(region, viewport);
+                // 列表/多栏栏滚动：在动时清掉排着的、先不做（一闪而过的格子不解码）；停下后
+                // 按眼前的可见区间重新排（main 层在本入口返回后统一 drain 发起）。
                 if region == SessionScrollRegion::List
                     || matches!(region, SessionScrollRegion::ColumnsLane(_))
                 {
-                    self.schedule_visible_thumbnails();
+                    self.thumbnails.note_scroll_motion(motion);
+                    if motion == ScrollMotion::Resting {
+                        self.schedule_visible_thumbnails();
+                    }
                 }
                 Vec::new()
             }
@@ -318,9 +323,10 @@ mod tests {
     fn viewport_changed_updates_cache() {
         let mut session = test_session();
 
-        session.handle_scroll_message(SessionMessage::ScrollbarViewportChanged {
+        session.handle_scroll_message(SessionMessage::ScrollReported {
             region: SessionScrollRegion::List,
             viewport: overflowing_viewport(),
+            motion: ScrollMotion::Resting,
         });
 
         assert_eq!(

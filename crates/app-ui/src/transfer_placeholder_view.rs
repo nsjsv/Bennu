@@ -4,7 +4,7 @@
 //! 交互,键盘导航按路径匹配时自动跳过。
 
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
@@ -14,7 +14,7 @@ use bennu_theme::measured_text::{
 };
 use file_core::DirectoryEntry;
 use iced::widget::{column, container, row, Space};
-use iced::{Alignment, Element, Length, Point};
+use iced::{Alignment, Element, Length};
 
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
@@ -30,17 +30,20 @@ use crate::transfer_placeholders::{
     merge_entries_with_placeholders, transfer_placeholders_for_directory, MergedTransferItem,
     TransferPlaceholder, TransferSortOptions,
 };
-use crate::virtual_range::VirtualRange;
-use crate::visible_entries::{VisibleEntry, VisibleEntryStatusRow};
 
 /// 根目录分组划分:目录置顶 + 文件段按组分段,列表/大图的当前目录
 /// 共用(网格侧经 icon_grid_layout 的分组入参消费)。
 #[path = "transfer_placeholder_view/root_grouping.rs"]
 pub(crate) mod root_grouping;
 
+#[path = "transfer_placeholder_view/list_row_layout.rs"]
+mod list_row_layout;
+#[cfg(test)]
+pub(crate) use list_row_layout::ListRowLayout;
+pub(crate) use list_row_layout::ListTransferRow;
 #[path = "transfer_placeholder_view/list_rows.rs"]
 mod list_rows;
-pub(crate) use list_rows::build_list_transfer_rows;
+pub(crate) use list_rows::{list_row_layout, ListRowCache};
 
 /// 占位图标槽:类型图标 + 外圈传输进度环。空进度画纯 track 环,与
 /// spring ring 的 progress=0 形态一致。
@@ -230,9 +233,9 @@ pub(crate) fn transfer_sort_for_root(browser: &FileBrowser) -> TransferSortOptio
 }
 
 /// 展开目录的排序配置:条目顺序由各自 directory_order_phase 记录,
-/// directories_first 沿用全局扫描选项。
+/// directories_first 沿用根目录的(全局扫描选项)。
 pub(crate) fn transfer_sort_for_expanded(
-    browser: &FileBrowser,
+    root: TransferSortOptions,
     expanded: &ExpandedDirectory,
 ) -> TransferSortOptions {
     let (field, direction) = match expanded.directory_order_phase {
@@ -244,193 +247,8 @@ pub(crate) fn transfer_sort_for_expanded(
     TransferSortOptions {
         field,
         direction,
-        directories_first: browser.options.directories_first,
+        directories_first: root.directories_first,
     }
-}
-
-/// 列表视图的合并行流:真实条目行、展开状态行与传输占位行交错,
-/// 一次性摊平后供虚拟范围计算与行渲染共用。
-///
-/// 条纹相位不变量:整条行流共用一个计数器,按屏幕自上而下的顺序,
-/// 条目/占位/展开状态行各消耗一个序号,只有组头行透传(它是分隔
-/// chrome,不算数据行)。旧实现每个展开目录段各自从 0 起算,子段结束
-/// 后根段接着旧值继续,展开处出现连续两行同色;QTreeView 的
-/// alternatingRowColors 同样按可见行全局交替。
-pub(crate) enum ListTransferRow<'a> {
-    Entry {
-        visible: VisibleEntry<'a>,
-        /// 同名传输占位改为装饰挂在真实行上(图标叠加进度环),不再单独成行。
-        transfer: Option<TransferPlaceholder>,
-        stripe_index: usize,
-        /// 搜索结果里正文摘要那一行的高度；没有摘要为 0。
-        snippet_height: f32,
-    },
-    DirectoryStatusRow {
-        status: VisibleEntryStatusRow,
-        depth: usize,
-        height: f32,
-        stripe_index: usize,
-    },
-    Placeholder {
-        placeholder: TransferPlaceholder,
-        stripe_index: usize,
-    },
-    /// 根目录分组标题行:仅分组开启时插入文件段之前,title 与
-    /// index_label 都是构造时本地化的成品文案(后者供索引栏派生)。
-    /// entry_path()=None 使其与占位行同一机制地断开选中连排、不进任何
-    /// 条目集合。
-    GroupHeader {
-        title: String,
-        index_label: String,
-        count: usize,
-        height: f32,
-    },
-}
-
-impl ListTransferRow<'_> {
-    /// 与渲染同口径:条目行按展开动画进度收缩(list_entry_row 的容器
-    /// 高度),状态行按各自动画高度,占位行恒定整行高,组头行按自身
-    /// chrome 高度——虚拟范围/内容高/reveal 数学全部基于本函数累计。
-    fn height(&self, row_height: f32) -> f32 {
-        match self {
-            Self::DirectoryStatusRow { height, .. } | Self::GroupHeader { height, .. } => *height,
-            Self::Entry {
-                visible,
-                snippet_height,
-                ..
-            } => (row_height + snippet_height) * visible.animation_progress.clamp(0.0, 1.0),
-            Self::Placeholder { .. } => row_height,
-        }
-    }
-
-    /// 选中连排(selection run)计算只看真实条目;占位与状态行天然断开。
-    fn entry_path(&self) -> Option<&Path> {
-        match self {
-            Self::Entry { visible, .. } => Some(visible.entry.path()),
-            Self::DirectoryStatusRow { .. }
-            | Self::GroupHeader { .. }
-            | Self::Placeholder { .. } => None,
-        }
-    }
-}
-
-/// 虚拟范围:与列表条目范围同口径(状态行高度按动画比例计入)。
-pub(crate) fn list_transfer_rows_range_for_viewport(
-    rows: &[ListTransferRow],
-    row_height: f32,
-    header_height: f32,
-    viewport_offset: f32,
-    viewport_height: f32,
-    overscan_rows: usize,
-) -> VirtualRange {
-    if row_height <= f32::EPSILON || viewport_height <= f32::EPSILON {
-        return VirtualRange::empty();
-    }
-    let viewport_top = viewport_offset.max(0.0);
-    let overscan_height = overscan_rows as f32 * row_height;
-    transfer_rows_height_range(
-        rows,
-        row_height,
-        (viewport_top - header_height - overscan_height).max(0.0),
-        (viewport_top + viewport_height - header_height).max(0.0) + overscan_height,
-    )
-}
-
-pub(crate) fn initial_list_transfer_rows_range(
-    rows: &[ListTransferRow],
-    row_height: f32,
-    initial_rows: usize,
-) -> VirtualRange {
-    if row_height <= f32::EPSILON || initial_rows == 0 {
-        return VirtualRange::empty();
-    }
-    let mut total_height = 0.0;
-    let mut initial_height = 0.0;
-    for (index, row) in rows.iter().enumerate() {
-        let height = row.height(row_height);
-        total_height += height;
-        if index < initial_rows {
-            initial_height += height;
-        }
-    }
-    VirtualRange {
-        start: 0,
-        end: initial_rows.min(rows.len()),
-        before_height: 0.0,
-        after_height: (total_height - initial_height).max(0.0),
-    }
-}
-
-fn transfer_rows_height_range(
-    rows: &[ListTransferRow],
-    row_height: f32,
-    top: f32,
-    bottom: f32,
-) -> VirtualRange {
-    let mut row_count = 0;
-    let mut total_height = 0.0;
-    let mut start = None;
-    let mut end = 0;
-    let mut before_height = 0.0;
-    let mut rendered_end_height = 0.0;
-
-    for row in rows {
-        let index = row_count;
-        row_count += 1;
-        let block_top = total_height;
-        total_height += row.height(row_height);
-
-        let include = total_height > top && block_top < bottom;
-        if include {
-            if start.is_none() {
-                start = Some(index);
-                before_height = block_top;
-            }
-            end = index + 1;
-            rendered_end_height = total_height;
-        }
-    }
-
-    let start = start.unwrap_or(row_count);
-    if start == row_count {
-        before_height = total_height;
-        rendered_end_height = total_height;
-        end = row_count;
-    }
-    VirtualRange {
-        start,
-        end,
-        before_height,
-        after_height: (total_height - rendered_end_height).max(0.0),
-    }
-}
-
-/// 选中连排位置:邻居行只在相邻真实条目同被选中时延续连排。
-pub(crate) fn selection_run_position_in_transfer_rows(
-    rows: &[ListTransferRow],
-    index: usize,
-    selected_paths: &std::collections::HashSet<PathBuf>,
-) -> Option<crate::file_entry_presentation::SelectionRunPosition> {
-    let row = rows.get(index)?;
-    let entry_path = row.entry_path()?;
-    if !selected_paths.contains(entry_path) {
-        return None;
-    }
-    let previous_selected = index
-        .checked_sub(1)
-        .and_then(|previous| rows.get(previous))
-        .and_then(|neighbor| neighbor.entry_path())
-        .is_some_and(|path| selected_paths.contains(path));
-    let next_selected = rows
-        .get(index + 1)
-        .and_then(|neighbor| neighbor.entry_path())
-        .is_some_and(|path| selected_paths.contains(path));
-    Some(
-        crate::file_entry_presentation::SelectionRunPosition::from_neighbors(
-            previous_selected,
-            next_selected,
-        ),
-    )
 }
 
 /// 任一 pane 目录的排序配置:当前目录用扫描选项,其余目录用各自展开
@@ -446,81 +264,8 @@ pub(crate) fn transfer_sort_for_pane_directory(
     }
     pane.expanded_directories
         .get(directory)
-        .map(|expanded| transfer_sort_for_expanded(browser, expanded))
+        .map(|expanded| transfer_sort_for_expanded(transfer_sort_for_root(browser), expanded))
         .unwrap_or_else(|| transfer_sort_for_root(browser))
-}
-
-/// 条目在列表合并行流中的纵向位置:reveal/键盘跟随数学与列表渲染
-/// 消费同一条行流,占位行与展开状态行都计入,落点才与实际渲染一致。
-pub(crate) fn list_transfer_rows_vertical_bounds(
-    rows: &[ListTransferRow],
-    path: &Path,
-    row_height: f32,
-    header_height: f32,
-) -> Option<(f32, f32)> {
-    let mut offset = header_height;
-    for row in rows {
-        let height = row.height(row_height);
-        if let ListTransferRow::Entry { visible, .. } = row {
-            if visible.entry.path() == path {
-                return Some((offset, height));
-            }
-        }
-        offset += height;
-    }
-    None
-}
-
-/// 光标落点 → 条目路径:沿行流按 `row.height` 累计命中 Entry 行,与
-/// 虚拟范围/reveal 用同一份高度口径,滚动后的 hover 补偿重算才有与
-/// 渲染一致的落点。组头/状态行/占位行不是条目,命中即返回 None;
-/// 落点越过最后一行(表尾空白)同样为 None。
-pub(crate) fn list_entry_path_at_point<'a>(
-    rows: &'a [ListTransferRow<'a>],
-    row_height: f32,
-    header_height: f32,
-    point: Point,
-) -> Option<&'a Path> {
-    if row_height <= f32::EPSILON {
-        return None;
-    }
-    let mut offset = header_height;
-    for row in rows {
-        let height = row.height(row_height);
-        if let ListTransferRow::Entry { visible, .. } = row {
-            if point.y >= offset && point.y < offset + height {
-                return Some(visible.entry.path());
-            }
-        }
-        offset += height;
-    }
-    None
-}
-
-/// 列表合并行流总高:视口越界自愈的最大偏移口径,与渲染累计高度一致。
-pub(crate) fn list_transfer_rows_content_height(rows: &[ListTransferRow], row_height: f32) -> f32 {
-    rows.iter().map(|row| row.height(row_height)).sum()
-}
-
-/// 分组索引栏条目:沿合并行流按 `row.height` 累计遇到组头行记下
-/// "组短标签 → 组头顶点偏移"。与虚拟范围/内容高/reveal 用同一份行高
-/// 口径,派生结果与渲染天然对齐,不另建第二份分组状态。
-pub(crate) fn list_file_group_rail_entries(
-    rows: &[ListTransferRow],
-    row_height: f32,
-) -> Vec<crate::model::FileGroupRailEntry> {
-    let mut offset = 0.0;
-    let mut entries = Vec::new();
-    for row in rows {
-        if let ListTransferRow::GroupHeader { index_label, .. } = row {
-            entries.push(crate::model::FileGroupRailEntry {
-                index_label: index_label.clone(),
-                top_offset: offset,
-            });
-        }
-        offset += row.height(row_height);
-    }
-    entries
 }
 
 fn column_directory_entries<'a>(

@@ -246,20 +246,22 @@ fn directory_column<'a>(
                     break;
                 };
                 rows.push(match item {
-                    crate::transfer_placeholders::MergedTransferItem::Entry { entry, transfer } => {
-                        column_entry_row(
-                            browser,
-                            pane,
-                            entry,
-                            transfer.as_ref(),
-                            active_child,
-                            selection_run_position_in_merged_items(
-                                &merged_items,
-                                item_index,
-                                pane.selected_paths,
-                            ),
-                        )
-                    }
+                    crate::transfer_placeholders::MergedTransferItem::Entry {
+                        entry,
+                        transfer,
+                        ..
+                    } => column_entry_row(
+                        browser,
+                        pane,
+                        entry,
+                        transfer.as_ref(),
+                        active_child,
+                        selection_run_position_in_merged_items(
+                            &merged_items,
+                            item_index,
+                            pane.selected_paths,
+                        ),
+                    ),
                     crate::transfer_placeholders::MergedTransferItem::Placeholder(placeholder) => {
                         crate::transfer_placeholder_view::transfer_placeholder_column_row(
                             placeholder,
@@ -322,12 +324,13 @@ fn directory_column<'a>(
         } else {
             covered
         },
-        move |position| {
+        move |position, motion| {
             Message::ColumnScrolled(
                 pane.id,
                 scroll_directory.clone(),
                 position.offset.y,
                 position.bounds.height,
+                motion,
             )
         },
     );
@@ -766,6 +769,9 @@ mod tests {
             expanded_directories,
             column_viewports,
             list_viewport: None,
+            // 这些测试不排列表行流、图标格子，借一份不回收的空缓存就够。
+            list_rows: Box::leak(Box::default()),
+            icon_cells: Box::leak(Box::default()),
             icon_grid_viewport: crate::model::IconGridViewport::default(),
             view_mode: crate::model::BrowserViewMode::Columns,
             chosen_view_mode: crate::model::BrowserViewMode::Columns,

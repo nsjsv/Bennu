@@ -132,7 +132,9 @@ pub(crate) fn icon_grid_view<'a>(
     let grid_scroll = report_scroll(
         smooth.drive(enhanced_scrollbar(grid_scroll, ScrollbarAxis::Vertical)),
         quiet,
-        move |position| Message::IconGridScrolled(pane_id, position.offset.y, position.bounds),
+        move |position, motion| {
+            Message::IconGridScrolled(pane_id, position.offset.y, position.bounds, motion)
+        },
     );
 
     let pane_surface: Element<'a, Message> = container(grid_scroll)
@@ -164,7 +166,7 @@ pub(crate) fn icon_grid_view<'a>(
 }
 
 fn start_cell_index(rows: &IconGridRowsLayout, row: usize) -> usize {
-    row.saturating_mul(rows.column_count).min(rows.cells.len())
+    row.saturating_mul(rows.column_count).min(rows.cell_count())
 }
 
 fn render_panel<'a>(
@@ -253,12 +255,12 @@ fn render_rows<'a>(
         let start = start_cell_index(rows, row_index);
         let end = start
             .saturating_add(rows.column_count)
-            .min(rows.cells.len());
+            .min(rows.cell_count());
         let mut row = Row::new()
             .spacing(grid_gap(icon_edge))
             .align_y(Alignment::Start)
             .height(Length::Fixed(row_height));
-        for cell in &rows.cells[start..end] {
+        for cell in (start..end).filter_map(|index| rows.cell(index)) {
             match cell {
                 // 展开锚点以条目数组下标为键,格子自带真实下标:分组重排
                 // 后按格子顺序计数会错位,这里直接消费格子携带的下标。
@@ -269,7 +271,7 @@ fn render_rows<'a>(
                         rows.directory,
                         cell.entry_index,
                         cell.entry,
-                        cell.transfer.as_ref(),
+                        cell.transfer,
                         input,
                     ));
                 }

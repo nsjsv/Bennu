@@ -3,6 +3,7 @@
 //! 目录(含目录占位)稳定置顶,文件段经 `partition_files_into_groups`
 //! 做稳定划分——组内保持合并流原序(沿用现有排序),组间按秩排列。
 
+use std::hash::{Hash, Hasher};
 use std::time::SystemTime;
 
 use file_core::{FileKind, SortDirection};
@@ -41,6 +42,14 @@ impl RootGrouping {
             language: current_language(),
             now: SystemTime::now(),
         })
+    }
+
+    /// 划分读不读条目里的文件信息(大小、时间)。这些信息补上时条目快照不变,排好的行流要另外知道。
+    pub(crate) fn reads_entry_metadata(&self) -> bool {
+        !matches!(
+            self.mode,
+            FileGroupingMode::NameInitial | FileGroupingMode::Kind | FileGroupingMode::None
+        )
     }
 
     /// 文件段(已剔除置顶目录)的稳定划分:组内保持输入序,降序只反转
@@ -133,6 +142,24 @@ impl RootGrouping {
                 _ => None,
             },
         }
+    }
+}
+
+/// 排好的行流按它判断分组变没变:只算划分读的。日期分组按「今天」分桶,过了零点(UTC,与
+/// `date_group_key` 一致)组就变了,所以算今天是哪天,不算此刻。
+impl Hash for RootGrouping {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.mode.hash(state);
+        self.direction.hash(state);
+        self.language.hash(state);
+        matches!(
+            self.mode,
+            FileGroupingMode::ModifiedTime
+                | FileGroupingMode::CreatedTime
+                | FileGroupingMode::AccessedTime
+        )
+        .then(|| time::OffsetDateTime::from(self.now).date().to_julian_day())
+        .hash(state);
     }
 }
 

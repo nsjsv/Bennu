@@ -8,10 +8,11 @@ use std::time::SystemTime;
 
 use file_core::{DirectoryEntry, EntryMetadata, FileKind, SortDirection, SortField};
 
+use super::list_row_layout::ListRowLayout;
 use super::*;
 use crate::config::{self, UiLanguage};
 use crate::file_entry_presentation::SelectionRunPosition;
-use crate::model::{BrowserLocation, FileGroupingMode};
+use crate::model::{BrowserLocation, BrowserPaneId, FileGroupingMode};
 use crate::transfer_placeholders::{TransferPlaceholder, TransferSortOptions};
 
 fn file_entry(path: &str, len: u64) -> DirectoryEntry {
@@ -72,52 +73,44 @@ fn merged_name(item: &MergedTransferItem<'_>) -> String {
     }
 }
 
-fn entry_row(entry: &DirectoryEntry) -> ListTransferRow<'_> {
-    entry_row_with_stripe(entry, 0)
+/// 根层条目为 /d/a.txt、/d/z.txt 的窗格,和一份行高 40 的空行流(0 号段是根层)。
+fn browser_with_a_and_z() -> crate::app::FileBrowser {
+    let (mut browser, _) = crate::app::FileBrowser::new(config::default_user_config());
+    browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/d"));
+    browser.tab_mut().entries = vec![file_entry("/d/a.txt", 1), file_entry("/d/z.txt", 1)].into();
+    browser
 }
 
-fn entry_row_with_stripe(entry: &DirectoryEntry, stripe_index: usize) -> ListTransferRow<'_> {
-    ListTransferRow::Entry {
-        visible: VisibleEntry {
-            entry,
-            depth: 0,
-            animation_progress: 1.0,
-        },
-        transfer: None,
-        stripe_index,
-        snippet_height: 0.0,
-    }
+fn layout() -> ListRowLayout {
+    let mut layout = ListRowLayout::new(0, 40.0);
+    layout.add_segment(None, 0, 1.0);
+    layout
 }
 
-fn group_header(title: &str, count: usize) -> ListTransferRow<'static> {
-    ListTransferRow::GroupHeader {
-        title: title.to_owned(),
-        index_label: title.to_owned(),
-        count,
-        height: crate::list_view::LIST_GROUP_HEADER_HEIGHT,
-    }
+fn header(rows: &mut ListRowLayout, title: &str) {
+    rows.push_group_header(title.to_owned(), title.to_owned(), 1);
 }
 
 #[test]
 fn group_header_height_enters_virtual_content_and_reveal_math() {
-    let entries = [file_entry("/d/a.txt", 1), file_entry("/d/z.txt", 1)];
+    let browser = browser_with_a_and_z();
+    let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
     // 行高 40 + 组头 32:内容高、初始窗口、视口范围、reveal 落点全部同口径。
-    let rows = [
-        group_header("A", 1),
-        entry_row(&entries[0]),
-        group_header("B", 1),
-        entry_row(&entries[1]),
-    ];
+    let mut rows = layout();
+    header(&mut rows, "A");
+    rows.push_entry(0, 0, 0.0, None);
+    header(&mut rows, "B");
+    rows.push_entry(0, 1, 0.0, None);
 
-    assert_eq!(list_transfer_rows_content_height(&rows, 40.0), 144.0);
+    assert_eq!(rows.content_height(), 144.0);
 
-    let initial = initial_list_transfer_rows_range(&rows, 40.0, 2);
+    let initial = rows.initial_range(2);
     assert_eq!(initial.start, 0);
     assert_eq!(initial.end, 2);
     assert_eq!(initial.before_height, 0.0);
     assert_eq!(initial.after_height, 144.0 - 72.0);
 
-    let viewport = list_transfer_rows_range_for_viewport(&rows, 40.0, 30.0, 0.0, 100.0, 0);
+    let viewport = rows.range_for_viewport(30.0, 0.0, 100.0, 0);
     assert_eq!(viewport.start, 0);
     assert_eq!(viewport.end, 2);
     assert_eq!(viewport.before_height, 0.0);
@@ -125,35 +118,32 @@ fn group_header_height_enters_virtual_content_and_reveal_math() {
 
     // reveal 数学:第二个组头(32)与首条目行(40)都计入 z.txt 之前的偏移。
     assert_eq!(
-        list_transfer_rows_vertical_bounds(&rows, Path::new("/d/z.txt"), 40.0, 30.0),
+        rows.vertical_bounds(pane, Path::new("/d/z.txt"), 30.0),
         Some((30.0 + 32.0 + 40.0 + 32.0, 40.0))
     );
 }
 
 #[test]
 fn selection_run_breaks_at_group_header_rows() {
-    let entries = [file_entry("/d/a.txt", 1), file_entry("/d/z.txt", 1)];
-    let rows = [
-        entry_row(&entries[0]),
-        group_header("A", 1),
-        entry_row(&entries[1]),
-    ];
+    let browser = browser_with_a_and_z();
+    let pane = browser.pane_view(BrowserPaneId::PRIMARY).unwrap();
+    let mut rows = layout();
+    rows.push_entry(0, 0, 0.0, None);
+    header(&mut rows, "A");
+    rows.push_entry(0, 1, 0.0, None);
     let selected: HashSet<PathBuf> = ["/d/a.txt", "/d/z.txt"]
         .map(PathBuf::from)
         .into_iter()
         .collect();
 
     // 组头行自身不是条目,不参与连排;两侧条目被它断开成独立单选连排。
+    assert_eq!(rows.selection_run_position(pane, 1, &selected), None);
     assert_eq!(
-        selection_run_position_in_transfer_rows(&rows, 1, &selected),
-        None
-    );
-    assert_eq!(
-        selection_run_position_in_transfer_rows(&rows, 0, &selected),
+        rows.selection_run_position(pane, 0, &selected),
         Some(SelectionRunPosition::Single)
     );
     assert_eq!(
-        selection_run_position_in_transfer_rows(&rows, 2, &selected),
+        rows.selection_run_position(pane, 2, &selected),
         Some(SelectionRunPosition::Single)
     );
 }
@@ -198,8 +188,10 @@ fn partition_emits_header_counts_and_reverses_sections_on_descending() {
     ];
     let files: Vec<MergedTransferItem<'_>> = entries
         .iter()
-        .map(|entry| MergedTransferItem::Entry {
+        .enumerate()
+        .map(|(index, entry)| MergedTransferItem::Entry {
             entry,
+            index,
             transfer: None,
         })
         .collect();
@@ -241,14 +233,17 @@ fn size_grouping_sends_unknown_placeholder_size_to_last_bucket() {
     let files = vec![
         MergedTransferItem::Entry {
             entry: &entries[0],
+            index: 0,
             transfer: None,
         },
         MergedTransferItem::Entry {
             entry: &entries[1],
+            index: 1,
             transfer: None,
         },
         MergedTransferItem::Entry {
             entry: &entries[2],
+            index: 2,
             transfer: None,
         },
         MergedTransferItem::Placeholder(placeholder),
@@ -289,37 +284,34 @@ fn grouping_applies_only_when_enabled() {
 fn rail_entries_derive_from_row_stream_with_render_height_accumulation() {
     // 索引定位与渲染高度累计同口径:组头顶点偏移 = 之前所有行高之和,
     // 末组顶点 + 组头自身高 + 末行 = 内容总高。
-    let entries = [file_entry("/d/a.txt", 1), file_entry("/d/z.txt", 1)];
-    let rows = [
-        group_header("A", 1),
-        entry_row(&entries[0]),
-        group_header("Z", 1),
-        entry_row(&entries[1]),
-    ];
+    let mut rows = layout();
+    header(&mut rows, "A");
+    rows.push_entry(0, 0, 0.0, None);
+    header(&mut rows, "Z");
+    rows.push_entry(0, 1, 0.0, None);
 
-    let rail = list_file_group_rail_entries(&rows, 40.0);
+    let rail = rows.rail_entries();
     assert_eq!(rail.len(), 2);
     assert_eq!(rail[0].index_label, "A");
     assert_eq!(rail[0].top_offset, 0.0);
     assert_eq!(rail[1].index_label, "Z");
     assert_eq!(rail[1].top_offset, 32.0 + 40.0);
-    let content_height = list_transfer_rows_content_height(&rows, 40.0);
     assert_eq!(
         rail.last().unwrap().top_offset + 32.0 + 40.0,
-        content_height
+        rows.content_height()
     );
 
     // 门控:两组才显示索引栏。
-    assert!(crate::model::file_group_rail_visible(&rail));
+    assert!(crate::model::file_group_rail_visible(rail));
 }
 
 #[test]
 fn rail_entries_stay_empty_without_group_header_rows() {
     // 分组关闭(None)/展开子目录平铺时行流没有组头行,索引栏无数据,
     // 渲染层按可见门控直接不挂叠层。
-    let entries = [file_entry("/d/a.txt", 1), file_entry("/d/z.txt", 1)];
-    let rows = [entry_row(&entries[0]), entry_row(&entries[1])];
-    let rail = list_file_group_rail_entries(&rows, 40.0);
-    assert!(rail.is_empty());
-    assert!(!crate::model::file_group_rail_visible(&rail));
+    let mut rows = layout();
+    rows.push_entry(0, 0, 0.0, None);
+    rows.push_entry(0, 1, 0.0, None);
+    assert!(rows.rail_entries().is_empty());
+    assert!(!crate::model::file_group_rail_visible(rows.rail_entries()));
 }

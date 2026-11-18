@@ -69,7 +69,7 @@ async fn a_selected_entry_in_an_expanded_directory_demands_only_its_metadata() {
     let demanded: Vec<_> = browser
         .directory_metadata_in_flight
         .iter()
-        .map(|key| (&key.context, key.requirement, key.index))
+        .map(|key| (key.context, key.requirement, key.index))
         .collect();
     assert_eq!(demanded.len(), 1, "{demanded:?}");
     let (context, requirement, index) = demanded[0];

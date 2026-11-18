@@ -239,6 +239,16 @@ impl DirectoryEntry {
         }
     }
 
+    /// 文件大小，还没补上时是 `None`（汇总要知道是不是全都知道了）；拿不到时算 0，和读不了的
+    /// 条目一样不计入。
+    pub fn size_if_resolved(&self) -> Option<u64> {
+        match self.record.filesystem_metadata() {
+            DirectoryMetadataState::Complete(metadata) => Some(metadata.len),
+            DirectoryMetadataState::Unavailable(_) => Some(0),
+            DirectoryMetadataState::Pending => None,
+        }
+    }
+
     /// 修改时间，用法同 [`Self::size`]；还没补或拿不到时是 `None`。
     pub fn modified(&self) -> Option<SystemTime> {
         match self.record.filesystem_metadata() {

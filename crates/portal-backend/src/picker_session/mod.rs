@@ -419,7 +419,8 @@ impl PickerSession {
             // 滚动类消息由 scrollbar 子模块处理并产出 Task，main 层在进入
             // update 前已拦截路由；此臂仅为匹配穷尽兜底。
             SessionMessage::ScrollbarLayoutVerified { .. }
-            | SessionMessage::ScrollbarViewportChanged { .. } => SessionEffect::None,
+            | SessionMessage::ScrollbarViewportChanged { .. }
+            | SessionMessage::ScrollReported { .. } => SessionEffect::None,
         }
     }
 

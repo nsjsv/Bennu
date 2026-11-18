@@ -54,6 +54,8 @@ pub struct DirectoryDiscovery {
     pub order: Arc<Vec<usize>>,
     pub metadata_resolver: DirectoryMetadataResolver,
     pub warnings: Vec<ScanWarning>,
+    /// 读到的隐藏条目数，不论这次列没列出来：状态栏不显示隐藏文件时也要告诉用户有几个。
+    pub hidden_entries: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -112,6 +114,7 @@ pub async fn discover_directory_with_progress(
     let mut warnings = Vec::new();
     let mut batch_entries = Vec::new();
     let mut batch_warnings = Vec::new();
+    let mut hidden_entries = 0;
 
     loop {
         let next_entry = tokio::select! {
@@ -130,6 +133,7 @@ pub async fn discover_directory_with_progress(
         };
         let name = dir_entry.file_name();
         let is_hidden = is_hidden_name(&name);
+        hidden_entries += usize::from(is_hidden);
         if !options.includes_entry(is_hidden) {
             continue;
         }
@@ -200,6 +204,7 @@ pub async fn discover_directory_with_progress(
         order,
         metadata_resolver,
         warnings,
+        hidden_entries,
     })
 }
 

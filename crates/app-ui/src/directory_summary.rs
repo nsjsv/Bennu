@@ -3,35 +3,11 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 
-use file_core::{is_hidden_name, DirectoryUsage, HiddenEntries, UsageMeasurement, UsageProgress};
+use file_core::{DirectoryUsage, HiddenEntries, UsageMeasurement, UsageProgress};
 use tokio_util::sync::CancellationToken;
 
-const DIRECTORY_CONTENTS_PROGRESS_INTERVAL: usize = 128;
 /// 测量时多久报一次进度：数字在跳，但不至于每帧都重画。
 const MEASUREMENT_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(150);
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct DirectoryContentsSummary {
-    pub(crate) file_count: usize,
-    pub(crate) directory_count: usize,
-    pub(crate) total_size_bytes: u64,
-    pub(crate) total_disk_size_bytes: u64,
-    // 直属文件大小记账：缓存只存文件系统原样事实，隐藏部分单独记录，
-    // 可见口径（扣除隐藏）由 UI 按 show_hidden_files 推导。
-    pub(crate) files_total_size_bytes: u64,
-    pub(crate) hidden_files_total_size_bytes: u64,
-    // 隐藏条目数事实（隐藏文件 + 隐藏文件夹），与隐藏大小同源产出，
-    // 供底栏幽灵开关显示；缓存同样不掺配置。
-    pub(crate) hidden_entry_count: usize,
-    /// 读不了、因而没算进来的子目录或条目数；非零时上面的数字偏小。
-    pub(crate) unreadable_entries: u64,
-}
-
-impl DirectoryContentsSummary {
-    pub(crate) fn total_item_count(&self) -> usize {
-        self.file_count.saturating_add(self.directory_count)
-    }
-}
 
 /// 文件夹递归总大小。读不了的子目录跳过不算时 `complete == false`，显示为"≥ 大小"。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,80 +27,9 @@ impl RecursiveTotalSize {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum DirectorySummaryError {
-    Cancelled,
-    Io(std::io::Error),
-    Overflow(&'static str),
-}
-
-pub(crate) fn read_directory_contents_summary(
-    path: &Path,
-    cancellation: CancellationToken,
-    mut progress: impl FnMut(DirectoryContentsSummary),
-) -> Result<DirectoryContentsSummary, DirectorySummaryError> {
-    let mut summary = DirectoryContentsSummary::default();
-    let mut processed_entries = 0usize;
-    let entries = std::fs::read_dir(path).map_err(DirectorySummaryError::Io)?;
-    for entry in entries {
-        if cancellation.is_cancelled() {
-            return Err(DirectorySummaryError::Cancelled);
-        }
-
-        let Ok((entry, file_type, metadata)) = entry.and_then(|entry| {
-            let file_type = entry.file_type()?;
-            let metadata = entry.metadata()?;
-            Ok((entry, file_type, metadata))
-        }) else {
-            summary.unreadable_entries = summary.unreadable_entries.saturating_add(1);
-            continue;
-        };
-        if file_type.is_dir() {
-            summary.directory_count = summary
-                .directory_count
-                .checked_add(1)
-                .ok_or(DirectorySummaryError::Overflow("directory count"))?;
-        } else {
-            summary.file_count = summary
-                .file_count
-                .checked_add(1)
-                .ok_or(DirectorySummaryError::Overflow("file count"))?;
-            summary.files_total_size_bytes = summary
-                .files_total_size_bytes
-                .checked_add(metadata.len())
-                .ok_or(DirectorySummaryError::Overflow("file size"))?;
-            if is_hidden_name(&entry.file_name()) {
-                summary.hidden_files_total_size_bytes = summary
-                    .hidden_files_total_size_bytes
-                    .checked_add(metadata.len())
-                    .ok_or(DirectorySummaryError::Overflow("hidden file size"))?;
-            }
-        }
-        // 幽灵开关的数量口径：隐藏文件夹与隐藏文件都算一个条目。
-        if is_hidden_name(&entry.file_name()) {
-            summary.hidden_entry_count = summary
-                .hidden_entry_count
-                .checked_add(1)
-                .ok_or(DirectorySummaryError::Overflow("hidden entry count"))?;
-        }
-        summary.total_size_bytes = summary
-            .total_size_bytes
-            .checked_add(metadata.len())
-            .ok_or(DirectorySummaryError::Overflow("logical size"))?;
-        summary.total_disk_size_bytes = summary
-            .total_disk_size_bytes
-            .checked_add(metadata_disk_size(&metadata))
-            .ok_or(DirectorySummaryError::Overflow("disk size"))?;
-        processed_entries = processed_entries
-            .checked_add(1)
-            .ok_or(DirectorySummaryError::Overflow("processed entry count"))?;
-        if processed_entries % DIRECTORY_CONTENTS_PROGRESS_INTERVAL == 0 {
-            progress(summary.clone());
-        }
-    }
-
-    progress(summary.clone());
-    Ok(summary)
+/// 文件夹里直属的条目数（隐藏的也算）：列表里文件夹那一行只显示「几项」，只读目录、不 stat。
+pub(crate) fn count_directory_children(path: &Path) -> std::io::Result<usize> {
+    Ok(std::fs::read_dir(path)?.filter(Result::is_ok).count())
 }
 
 #[derive(Debug)]
@@ -212,9 +117,7 @@ mod tests {
         std::fs::write(temp_dir.path().join("top.txt"), b"top").expect("write top file");
         std::fs::write(child.join("nested.txt"), b"nested").expect("write nested file");
 
-        let direct =
-            read_directory_contents_summary(temp_dir.path(), CancellationToken::new(), |_| {})
-                .expect("direct summary");
+        let direct = count_directory_children(temp_dir.path()).expect("direct count");
         let recursive = tokio_test_runtime()
             .block_on(measure_directories(
                 &[temp_dir.path().to_path_buf()],
@@ -223,54 +126,25 @@ mod tests {
             ))
             .expect("recursive usage");
 
-        assert_eq!(direct.file_count, 1);
-        assert_eq!(direct.directory_count, 1);
+        assert_eq!(direct, 2);
         assert_eq!(recursive.files, 2);
         assert_eq!(recursive.folders, 1);
     }
 
+    /// 隐藏的也算：「几项」与文件夹里实际有的一致；子文件夹里面的不算。
     #[test]
-    fn file_size_accounting_records_hidden_share_separately() {
-        let temp_dir = tempfile::tempdir().expect("create temp dir");
-        let child = temp_dir.path().join("child");
-        std::fs::create_dir(&child).expect("create child");
-        std::fs::write(temp_dir.path().join("top.txt"), b"top").expect("write top file");
-        std::fs::write(temp_dir.path().join(".hidden"), b"hid").expect("write hidden file");
-        std::fs::write(child.join("nested.txt"), b"nested").expect("write nested file");
-
-        let direct =
-            read_directory_contents_summary(temp_dir.path(), CancellationToken::new(), |_| {})
-                .expect("direct summary");
-
-        // 只记直属文件，不进子文件夹；目录自身的 inode 大小也不计入文件大小。
-        let top_len = std::fs::metadata(temp_dir.path().join("top.txt"))
-            .expect("top metadata")
-            .len();
-        let hidden_len = std::fs::metadata(temp_dir.path().join(".hidden"))
-            .expect("hidden metadata")
-            .len();
-        assert_eq!(direct.files_total_size_bytes, top_len + hidden_len);
-        assert_eq!(direct.hidden_files_total_size_bytes, hidden_len);
-    }
-
-    #[test]
-    fn hidden_entry_count_covers_hidden_files_and_directories() {
+    fn direct_count_includes_hidden_entries_but_not_nested_ones() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         std::fs::create_dir(temp_dir.path().join(".hidden-dir")).expect("create hidden dir");
         std::fs::write(temp_dir.path().join(".hidden-file"), b"hid").expect("write hidden file");
         std::fs::write(temp_dir.path().join("visible.txt"), b"top").expect("write visible file");
-        // 隐藏目录的内部条目不属于直属口径，不得计入。
         std::fs::write(
             temp_dir.path().join(".hidden-dir").join("nested.txt"),
             b"nested",
         )
         .expect("write nested file");
 
-        let direct =
-            read_directory_contents_summary(temp_dir.path(), CancellationToken::new(), |_| {})
-                .expect("direct summary");
-
-        assert_eq!(direct.hidden_entry_count, 2);
+        assert_eq!(count_directory_children(temp_dir.path()).expect("count"), 3);
     }
 
     #[cfg(unix)]

@@ -149,31 +149,17 @@ pub(crate) fn list_browser_view<'a>(
     } else {
         // 占位行从操作队列派生,与真实条目合入同一条渲染流后再做虚拟
         // 范围切割,保证滚动数学与行渲染共用同一份行序列。
-        let transfer_rows = crate::transfer_placeholder_view::build_list_transfer_rows(
-            browser,
-            pane,
-            geometry.row_height,
-        );
+        let layout =
+            crate::transfer_placeholder_view::list_row_layout(browser, pane, geometry.row_height);
         // 索引栏条目从同一份行流派生,组头顶点偏移与渲染高度累计同口径。
-        rail_entries = crate::transfer_placeholder_view::list_file_group_rail_entries(
-            &transfer_rows,
-            geometry.row_height,
-        );
-        let has_placeholders = transfer_rows.iter().any(|row| {
-            matches!(
-                row,
-                crate::transfer_placeholder_view::ListTransferRow::Placeholder { .. }
-            )
-        });
-        if pane.entries.is_empty() && !has_placeholders {
+        rail_entries = layout.rail_entries().to_vec();
+        if pane.entries.is_empty() && !layout.has_placeholder_rows() {
             rows = rows.push(list_message(empty_location_message(pane.location)));
         } else {
             let range = pane
                 .list_viewport
                 .map(|viewport| {
-                    crate::transfer_placeholder_view::list_transfer_rows_range_for_viewport(
-                        &transfer_rows,
-                        geometry.row_height,
+                    layout.range_for_viewport(
                         LIST_HEADER_HEIGHT,
                         viewport.offset_y,
                         viewport.height,
@@ -181,14 +167,10 @@ pub(crate) fn list_browser_view<'a>(
                     )
                 })
                 .unwrap_or_else(|| {
-                    crate::transfer_placeholder_view::initial_list_transfer_rows_range(
-                        &transfer_rows,
-                        geometry.row_height,
-                        list_initial_rows(
-                            browser.main_window_height,
-                            browser.user_config().list_view_density,
-                        ),
-                    )
+                    layout.initial_range(list_initial_rows(
+                        browser.main_window_height,
+                        browser.user_config().list_view_density,
+                    ))
                 });
             if let Some(viewport) = pane.list_viewport {
                 covered = covered_offsets(
@@ -205,34 +187,28 @@ pub(crate) fn list_browser_view<'a>(
             // 行按在整个列表里的序号对应控件状态：窗口挪动时留下的行不重排文字（见 `keyed_rows`）。
             let mut visible_rows = Vec::with_capacity(range.end.saturating_sub(range.start));
             for row_index in range.start..range.end {
-                let Some(row) = transfer_rows.get(row_index) else {
+                let Some(row) = layout.row(pane, row_index) else {
                     break;
                 };
-                match row {
+                let element = match row {
                     crate::transfer_placeholder_view::ListTransferRow::Entry {
                         visible,
                         transfer,
                         stripe_index,
                         snippet_height,
-                    } => {
-                        visible_rows.push((row_index as u64, list_entry_row(
-                            browser,
-                            pane,
-                            &geometry,
-                            &visible_columns,
-                            visible.entry,
-                            transfer.as_ref(),
-                            visible.depth,
-                            *stripe_index,
-                            visible.animation_progress,
-                            *snippet_height,
-                            crate::transfer_placeholder_view::selection_run_position_in_transfer_rows(
-                                &transfer_rows,
-                                row_index,
-                                pane.selected_paths,
-                            ),
-                        )));
-                    }
+                    } => list_entry_row(
+                        browser,
+                        pane,
+                        &geometry,
+                        &visible_columns,
+                        visible.entry,
+                        transfer,
+                        visible.depth,
+                        stripe_index,
+                        visible.animation_progress,
+                        snippet_height,
+                        layout.selection_run_position(pane, row_index, pane.selected_paths),
+                    ),
                     crate::transfer_placeholder_view::ListTransferRow::DirectoryStatusRow {
                         status,
                         depth,
@@ -247,43 +223,24 @@ pub(crate) fn list_browser_view<'a>(
                                 tr!("No items")
                             }
                         };
-                        visible_rows.push((
-                            row_index as u64,
-                            list_directory_status_row(
-                                message,
-                                *depth,
-                                *stripe_index,
-                                *height,
-                                &geometry,
-                            ),
-                        ));
+                        list_directory_status_row(message, depth, stripe_index, height, &geometry)
                     }
                     crate::transfer_placeholder_view::ListTransferRow::Placeholder {
                         placeholder,
                         stripe_index,
-                    } => {
-                        visible_rows.push((
-                            row_index as u64,
-                            crate::transfer_placeholder_view::transfer_placeholder_list_row(
-                                placeholder,
-                                &geometry,
-                                &visible_columns,
-                                *stripe_index,
-                            ),
-                        ));
-                    }
+                    } => crate::transfer_placeholder_view::transfer_placeholder_list_row(
+                        placeholder,
+                        &geometry,
+                        &visible_columns,
+                        stripe_index,
+                    ),
                     crate::transfer_placeholder_view::ListTransferRow::GroupHeader {
                         title,
                         count,
                         height,
-                        ..
-                    } => {
-                        visible_rows.push((
-                            row_index as u64,
-                            list_group_header_row(title, *count, *height, &geometry),
-                        ));
-                    }
-                }
+                    } => list_group_header_row(title, count, height, &geometry),
+                };
+                visible_rows.push((row_index as u64, element));
             }
             rows = rows.push(keyed_rows(visible_rows));
             rows = rows.push(vertical_spacer(range.after_height));
@@ -318,7 +275,9 @@ pub(crate) fn list_browser_view<'a>(
     let list_scroll = report_scroll(
         smooth.drive(enhanced_scrollbar(list_scroll, ScrollbarAxis::Vertical)),
         quiet,
-        move |position| Message::ListScrolled(pane.id, position.offset.y, position.bounds),
+        move |position, motion| {
+            Message::ListScrolled(pane.id, position.offset.y, position.bounds, motion)
+        },
     );
 
     let pane_surface: Element<'a, Message> = container(list_scroll)
@@ -670,7 +629,7 @@ fn list_placeholder_entry_row<'a>(
             .height(Length::Fixed(geometry.row_height))
             .center_y(Length::Fixed(geometry.row_height))
             .width(Length::Fill)
-            .style(list_row_style(placeholder.depth, placeholder.row_index)),
+            .style(list_row_style(placeholder.depth, placeholder.stripe_index)),
     )
     .height(Length::Fixed(
         geometry.row_height * placeholder.animation_progress.clamp(0.0, 1.0),
@@ -1079,23 +1038,25 @@ mod tests {
     #[test]
     fn list_initial_rows_cover_full_window_without_scroll() {
         let default_level = crate::config::ViewDensityLevel::DEFAULT;
-        let range = crate::visible_entries::initial_list_entry_range(
-            &(0..34)
-                .map(|index| {
-                    DirectoryEntry::new(
-                        std::path::PathBuf::from(format!("/workspace/item-{index:02}")),
-                        FileKind::File,
-                        EntryMetadata::default(),
-                        false,
-                        false,
-                        false,
-                    )
-                })
-                .collect::<Vec<_>>(),
-            &std::collections::HashMap::new(),
-            crate::visible_entries::ListEntryHeights::uniform(LIST_ROW_HEIGHT),
-            list_initial_rows(900.0, default_level),
-        );
+        let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+        browser.tab_mut().entries = (0..34)
+            .map(|index| {
+                DirectoryEntry::new(
+                    std::path::PathBuf::from(format!("/workspace/item-{index:02}")),
+                    FileKind::File,
+                    EntryMetadata::default(),
+                    false,
+                    false,
+                    false,
+                )
+            })
+            .collect();
+        let range = crate::transfer_placeholder_view::list_row_layout(
+            &browser,
+            browser.pane_view(browser.active_pane_id()).unwrap(),
+            LIST_ROW_HEIGHT,
+        )
+        .initial_range(list_initial_rows(900.0, default_level));
         assert_eq!(range.end, 34);
 
         let rows = list_initial_rows(900.0, default_level);

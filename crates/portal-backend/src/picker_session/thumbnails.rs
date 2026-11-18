@@ -5,6 +5,7 @@
 //! 回信——滚动类消息绕过 `SessionEffect` 路径，drain 机制对滚动路径与
 //! update 路径统一生效。本模块不 import iced 类型，可脱离窗口单测。
 
+use bennu_theme::scroll_report::ScrollMotion;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
@@ -63,10 +64,16 @@ pub(crate) struct SessionThumbnailState {
     /// ready 的插入顺序（LRU 淘汰依据；同源重复就绪先移除旧序防重复）。
     ready_order: VecDeque<PathBuf>,
     in_flight: HashSet<ThumbnailKey>,
+    /// 行里（列表、大图、各栏）可见的。
     queued: VecDeque<ThumbnailRequest>,
-    /// queued 的 key 镜像：视口每次滚动都会重算可见区间，靠它去重。
+    /// 预览要的：先做，不受滚动暂停影响。
+    preview_queued: VecDeque<ThumbnailRequest>,
+    /// 两个队列的 key 镜像：视口每次滚动都会重算可见区间，靠它去重。
     queued_keys: HashSet<ThumbnailKey>,
     failed_until: HashMap<ThumbnailKey, Instant>,
+    /// 正在滚动：行里的先不做，停下后按眼前的可见区间重新排。快速滚动时一闪而过的格子原来也排队，
+    /// 而且滚走了也不清，按先来后到全做一遍。
+    scrolling: bool,
 }
 
 impl SessionThumbnailState {
@@ -77,8 +84,20 @@ impl SessionThumbnailState {
             ready_order: VecDeque::new(),
             in_flight: HashSet::new(),
             queued: VecDeque::new(),
+            preview_queued: VecDeque::new(),
             queued_keys: HashSet::new(),
             failed_until: HashMap::new(),
+            scrolling: false,
+        }
+    }
+
+    /// 在动：排着的行内请求全清掉、先不做（预览的留着）；停下：照常做（调用方随后按可见区间重排）。
+    pub(super) fn note_scroll_motion(&mut self, motion: ScrollMotion) {
+        self.scrolling = motion == ScrollMotion::Moving;
+        if self.scrolling {
+            for request in self.queued.drain(..) {
+                self.queued_keys.remove(&request.key());
+            }
         }
     }
 
@@ -88,6 +107,7 @@ impl SessionThumbnailState {
     pub(crate) fn clear_pending(&mut self) {
         self.in_flight.clear();
         self.queued.clear();
+        self.preview_queued.clear();
         self.queued_keys.clear();
     }
 
@@ -187,7 +207,12 @@ impl SessionThumbnailState {
     fn drain_due_requests(&mut self) -> Vec<ThumbnailRequest> {
         let mut drained = Vec::new();
         while self.in_flight.len() < MAX_IN_FLIGHT {
-            let Some(request) = self.queued.pop_front() else {
+            let next = match self.preview_queued.pop_front() {
+                Some(request) => Some(request),
+                None if self.scrolling => None,
+                None => self.queued.pop_front(),
+            };
+            let Some(request) = next else {
                 break;
             };
             self.queued_keys.remove(&request.key());
@@ -268,7 +293,7 @@ impl SessionThumbnailState {
             return false;
         }
         self.queued_keys.insert(key);
-        self.queued.push_back(request);
+        self.preview_queued.push_back(request);
         true
     }
 }
@@ -498,6 +523,51 @@ mod tests {
         assert_eq!(session.thumbnails.in_flight.len(), 3);
         assert_eq!(session.drain_pending_thumbnail_requests().len(), 1);
         assert_eq!(session.thumbnails.in_flight.len(), 4);
+    }
+
+    /// 滚动中：排着的行内请求清掉、先不做，预览要的照做；停下后按眼前的可见区间重新排。
+    #[test]
+    fn rows_wait_while_scrolling_and_restart_from_what_is_visible() {
+        let files: Vec<String> = (0..40).map(|index| format!("img{index:02}.png")).collect();
+        let names: Vec<&str> = files.iter().map(String::as_str).collect();
+        let mut session = image_session(&names);
+        install_viewport(&mut session, viewport_at(0.0, LIST_ROW_STRIDE * 4.0));
+        session.schedule_visible_thumbnails();
+        assert!(!queued_sources(&session).is_empty());
+
+        session.handle_scroll_message(SessionMessage::ScrollReported {
+            region: SessionScrollRegion::List,
+            viewport: viewport_at(LIST_ROW_STRIDE * 30.0, LIST_ROW_STRIDE * 4.0),
+            motion: ScrollMotion::Moving,
+        });
+        assert!(queued_sources(&session).is_empty());
+        let preview = ThumbnailRequest::new(
+            "/pictures/img00.png",
+            thumbnails::ThumbnailSourceMetadata {
+                len: 1,
+                modified: None,
+            },
+            THUMBNAIL_MAX_EDGE,
+        );
+        assert!(session.enqueue_preview_thumbnail_request(preview.clone()));
+        let drained = session.drain_pending_thumbnail_requests();
+        assert_eq!(
+            drained
+                .iter()
+                .map(|request| &request.source)
+                .collect::<Vec<_>>(),
+            [&preview.source]
+        );
+
+        session.handle_scroll_message(SessionMessage::ScrollReported {
+            region: SessionScrollRegion::List,
+            viewport: viewport_at(LIST_ROW_STRIDE * 30.0, LIST_ROW_STRIDE * 4.0),
+            motion: ScrollMotion::Resting,
+        });
+        // 只排眼前这一屏附近的，开头那几张（滚动前排着、已清掉）不再做。
+        let sources = queued_sources(&session);
+        assert!(sources.iter().any(|source| source.ends_with("img30.png")));
+        assert!(!sources.iter().any(|source| source.ends_with("img00.png")));
     }
 
     #[test]

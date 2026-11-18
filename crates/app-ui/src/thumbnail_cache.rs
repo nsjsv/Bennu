@@ -1,7 +1,8 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use bennu_theme::scroll_report::ScrollMotion;
 use file_core::{DirectoryEntry, FileKind, TransferConflictMetadata};
 use iced::widget::image;
 use thumbnails::{CachedThumbnail, ThumbnailKey, ThumbnailRequest, ThumbnailSourceMetadata};
@@ -111,6 +112,9 @@ pub(crate) struct ThumbnailCache {
     queue_order: VecDeque<ThumbnailKey>,
     inflight: HashMap<ThumbnailKey, ThumbnailPurpose>,
     failures: HashMap<ThumbnailKey, Instant>,
+    /// 正在滚动的位置：排着的缩略图先不开始做，停下再做。快速滚动时一闪而过的格子原来也排队解码，
+    /// 2 万个图片的目录滚一会儿就占满几个核（2026-11-18 实测生成数是另一款文件管理器的 3 倍）。
+    moving: HashSet<ThumbnailScope>,
 }
 
 impl ThumbnailCache {
@@ -123,6 +127,7 @@ impl ThumbnailCache {
             queue_order: VecDeque::new(),
             inflight: HashMap::new(),
             failures: HashMap::new(),
+            moving: HashSet::new(),
         }
     }
 
@@ -194,6 +199,17 @@ impl ThumbnailCache {
         );
     }
 
+    pub(crate) fn note_scroll_motion(&mut self, scope: ThumbnailScope, motion: ScrollMotion) {
+        match motion {
+            ScrollMotion::Moving => {
+                self.moving.insert(scope);
+            }
+            ScrollMotion::Resting => {
+                self.moving.remove(&scope);
+            }
+        }
+    }
+
     pub(crate) fn prune_scope_except(&mut self, scope: &ThumbnailScope, keep: &[ThumbnailKey]) {
         self.queued.retain(|key, work| {
             work.scope.as_ref() != Some(scope) || keep.iter().any(|keep_key| keep_key == key)
@@ -231,7 +247,9 @@ impl ThumbnailCache {
         };
         if let Some(existing) = self.queued.get_mut(&key) {
             if existing.priority < priority || existing.load_policy < load_policy {
-                *existing = work;
+                // 悬停、选中的提级不带位置：留着原来的，滚动暂停、换位置清队列才管得到它。
+                let scope = work.scope.or(existing.scope.take());
+                *existing = ThumbnailWork { scope, ..work };
             } else if existing.scope.is_none() {
                 existing.scope = work.scope;
             }
@@ -385,7 +403,12 @@ impl ThumbnailCache {
             let Some(work) = self.queued.get(key) else {
                 continue;
             };
-            if !accepts_work(work) {
+            if !accepts_work(work)
+                || work
+                    .scope
+                    .as_ref()
+                    .is_some_and(|scope| self.moving.contains(scope))
+            {
                 continue;
             }
             if best_index.is_none() || work.priority > best_priority {
@@ -594,6 +617,67 @@ mod tests {
         assert!(sources.contains(&kept_request.source));
         assert!(sources.contains(&preview_request.source));
         assert!(!sources.contains(&PathBuf::from("stale.png")));
+    }
+
+    /// 滚动中的位置排着的缩略图不开始做（别的位置、预览照常），停下后从可见的做起；悬停提级的
+    /// 不带位置，也跟着原来的位置一起暂停。
+    #[test]
+    fn work_of_a_scrolling_location_waits_until_it_rests() {
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
+        let scrolling = ThumbnailScope::PaneLocation {
+            pane_id: 1,
+            location: LocationKey::Directory(PathBuf::from("/workspace")),
+        };
+        let other = ThumbnailScope::PaneLocation {
+            pane_id: 2,
+            location: LocationKey::Directory(PathBuf::from("/elsewhere")),
+        };
+        let flying_past = thumbnail_request("flying-past.png", 1);
+        let hovered = thumbnail_request("hovered.png", 2);
+        let elsewhere = thumbnail_request("elsewhere.png", 3);
+        let preview = thumbnail_request("preview.png", 4);
+        for request in [&flying_past, &hovered] {
+            cache.enqueue_request_for_scope(
+                request.clone(),
+                ThumbnailPurpose::List,
+                ThumbnailPriority::Visible,
+                scrolling.clone(),
+            );
+        }
+        cache.enqueue_request(
+            hovered.clone(),
+            ThumbnailPurpose::List,
+            ThumbnailPriority::Focused,
+        );
+        cache.enqueue_request_for_scope(
+            elsewhere.clone(),
+            ThumbnailPurpose::List,
+            ThumbnailPriority::Visible,
+            other,
+        );
+        cache.enqueue_request(
+            preview.clone(),
+            ThumbnailPurpose::Preview,
+            ThumbnailPriority::Preview,
+        );
+
+        cache.note_scroll_motion(scrolling.clone(), ScrollMotion::Moving);
+        let started = cache
+            .take_next_batch()
+            .into_iter()
+            .map(|work| work.request.source)
+            .collect::<Vec<_>>();
+        assert_eq!(started.len(), 2);
+        assert!(started.contains(&elsewhere.source));
+        assert!(started.contains(&preview.source));
+
+        cache.note_scroll_motion(scrolling, ScrollMotion::Resting);
+        let started = cache
+            .take_next_batch()
+            .into_iter()
+            .map(|work| work.request.source)
+            .collect::<Vec<_>>();
+        assert_eq!(started, [hovered.source, flying_past.source]);
     }
 
     #[test]

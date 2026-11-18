@@ -51,27 +51,19 @@ impl FileBrowser {
                     crate::list_view::ListGeometry::for_level(self.user_config().list_view_density);
                 // 与列表渲染同一条合并行流,组头顶点偏移和内容高都从它
                 // 累计,落点才与实际渲染一致。
-                let rows = crate::transfer_placeholder_view::build_list_transfer_rows(
+                let layout = crate::transfer_placeholder_view::list_row_layout(
                     self,
                     pane,
                     geometry.row_height,
                 );
-                let entries = crate::transfer_placeholder_view::list_file_group_rail_entries(
-                    &rows,
-                    geometry.row_height,
-                );
-                let Some(entry) = entries.get(group_index) else {
+                let Some(entry) = layout.rail_entries().get(group_index) else {
                     return Task::none();
                 };
                 let viewport_height = pane
                     .list_viewport
                     .map(|viewport| viewport.height.max(1.0))
                     .unwrap_or(self.main_window_height);
-                let content_height = crate::list_view::LIST_HEADER_HEIGHT
-                    + crate::transfer_placeholder_view::list_transfer_rows_content_height(
-                        &rows,
-                        geometry.row_height,
-                    );
+                let content_height = crate::list_view::LIST_HEADER_HEIGHT + layout.content_height();
                 // 表头占据内容流顶部,组头顶点换算滚动偏移要加回表头
                 // 留量,与 reveal/虚拟范围的口径一致。
                 let target = file_group_scroll_target_offset(

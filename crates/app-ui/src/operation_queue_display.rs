@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use file_core::TrashRestoreEntry;
+use file_core::{ConversionRequest, TrashRestoreEntry};
 
 use crate::formatting::format_file_size;
 use file_operations::{
@@ -85,13 +85,7 @@ impl OperationPathLines for QueuedFileOperation {
             Self::CreateArchive {
                 sources, target, ..
             } => path_lines_from_archive(sources, target),
-            Self::Convert { requests } => {
-                let sources = requests
-                    .iter()
-                    .map(|request| request.source.clone())
-                    .collect::<Vec<_>>();
-                path_lines_from_paths(&sources)
-            }
+            Self::Convert { requests } => path_lines_from_conversions(requests),
             Self::ExtractArchive { request } => {
                 path_lines_from_extracted_archive(&request.archive, &request.destination)
             }
@@ -255,6 +249,22 @@ fn path_lines_from_archive(sources: &[PathBuf], target: &Path) -> FileOperationP
     }
 }
 
+/// 目录写输出放到哪（同复制、移动写目标文件夹）：选了“保存到”就是那个文件夹。
+fn path_lines_from_conversions(requests: &[ConversionRequest]) -> FileOperationPathLines {
+    match requests {
+        [] => FileOperationPathLines::empty(),
+        [first, ..] => FileOperationPathLines::from_paths(
+            &first.source,
+            &first.source,
+            first
+                .output
+                .directory_for(&first.source)
+                .unwrap_or_else(|| Path::new(".")),
+            requests.len(),
+        ),
+    }
+}
+
 fn path_lines_from_extracted_archive(archive: &Path, destination: &Path) -> FileOperationPathLines {
     FileOperationPathLines::from_paths(destination, archive, parent_path(destination), 1)
 }
@@ -318,6 +328,42 @@ mod tests {
         assert_eq!(path_lines.original_path, "/home/user/report.txt");
         assert_eq!(path_lines.directory_path, "/tmp");
         assert_eq!(path_lines.total_items, 1);
+    }
+
+    #[test]
+    fn conversion_path_lines_show_where_the_output_goes() {
+        let request = |output| file_core::ConversionRequest {
+            source: PathBuf::from("/home/user/photos/trip.png"),
+            target: file_core::ConversionTarget::Image(file_core::ImageTargetFormat::Webp),
+            quality: file_core::QualitySpec::Preset(file_core::ConversionQualityPreset::Medium),
+            resize: file_core::ResizeSpec::Keep,
+            fps_override: None,
+            audio_channels: file_core::AudioChannelSpec::Keep,
+            edits: file_core::MediaEdits::default(),
+            photo_metadata: file_core::PhotoMetadata::Keep,
+            output,
+        };
+
+        let beside = QueuedFileOperation::Convert {
+            requests: vec![request(file_core::OutputLocation::BesideSource)],
+        }
+        .path_lines();
+        assert_eq!(beside.original_path, "/home/user/photos/trip.png");
+        assert_eq!(beside.directory_path, "/home/user/photos");
+
+        let chosen = QueuedFileOperation::Convert {
+            requests: vec![
+                request(file_core::OutputLocation::Directory(PathBuf::from(
+                    "/home/user/web",
+                ))),
+                request(file_core::OutputLocation::Directory(PathBuf::from(
+                    "/home/user/web",
+                ))),
+            ],
+        }
+        .path_lines();
+        assert_eq!(chosen.directory_path, "/home/user/web");
+        assert_eq!(chosen.total_items, 2);
     }
 
     #[test]

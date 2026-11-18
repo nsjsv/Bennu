@@ -118,6 +118,16 @@ pub enum OutputLocation {
     Directory(PathBuf),
 }
 
+impl OutputLocation {
+    /// 这个源文件的输出放进的文件夹;引擎占位和任务面板显示共用这一条规则。
+    pub fn directory_for<'a>(&'a self, source: &'a Path) -> Option<&'a Path> {
+        match self {
+            Self::BesideSource => source.parent(),
+            Self::Directory(directory) => Some(directory),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversionRequest {
     pub source: PathBuf,
@@ -429,21 +439,19 @@ async fn reserve_output_path(
     location: &OutputLocation,
     target: ConversionTarget,
 ) -> Result<PathBuf, FileError> {
-    let parent = match location {
-        OutputLocation::BesideSource => source.parent().ok_or_else(|| FileError::InvalidInput {
+    let parent = location
+        .directory_for(source)
+        .ok_or_else(|| FileError::InvalidInput {
             path: source.to_path_buf(),
             message: "source path has no parent directory".to_owned(),
-        })?,
-        OutputLocation::Directory(directory) => {
-            fs::create_dir_all(directory)
-                .await
-                .map_err(|error| FileError::Convert {
-                    path: directory.clone(),
-                    message: format!("could not create output directory: {error}"),
-                })?;
-            directory
-        }
-    };
+        })?;
+    // 原文件旁边的目录本来就在,这一步只是多一次 stat;选的文件夹不在时建好。
+    fs::create_dir_all(parent)
+        .await
+        .map_err(|error| FileError::Convert {
+            path: parent.to_path_buf(),
+            message: format!("could not create output directory: {error}"),
+        })?;
     let stem = source
         .file_stem()
         .and_then(|name| name.to_str())

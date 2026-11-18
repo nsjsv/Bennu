@@ -39,6 +39,7 @@ impl Cache {
                 cache: crate::image::raster::Cache::default(),
                 pending: HashMap::new(),
                 belt: wgpu::util::StagingBelt::new(2 * 1024 * 1024),
+                left_undrawn: false,
             },
             #[cfg(feature = "svg")]
             vector: crate::image::vector::Cache::default(),
@@ -211,14 +212,17 @@ impl Cache {
 
         self.receive();
 
-        let memory = load_image(
+        let Some(memory) = load_image(
             &mut self.raster.cache,
             &mut self.raster.pending,
             #[cfg(not(target_arch = "wasm32"))]
             &self.worker,
             handle,
             None,
-        )?;
+        ) else {
+            self.raster.left_undrawn = true;
+            return None;
+        };
 
         if let Memory::Device {
             entry, bind_group, ..
@@ -263,7 +267,15 @@ impl Cache {
             self.worker.upload(handle, image);
         }
 
+        self.raster.left_undrawn = true;
         None
+    }
+
+    /// Bennu 补丁：上次问过之后，有没有图因为还在后台解码或上传而没画。后台做完会请求重绘，
+    /// 那一帧的层与这一帧一样，若把这一帧当成画全了，那次重绘会被当成重复跳过，图就一直不出来。
+    #[cfg(feature = "image")]
+    pub fn take_left_undrawn(&mut self) -> bool {
+        std::mem::take(&mut self.raster.left_undrawn)
     }
 
     #[cfg(feature = "svg")]
@@ -374,6 +386,8 @@ struct Raster {
     cache: crate::image::raster::Cache,
     pending: HashMap<core::image::Id, Vec<Callback>>,
     belt: wgpu::util::StagingBelt,
+    // Bennu 补丁：这一帧有图还在后台解码或上传、没画出来（见 `take_left_undrawn`）。
+    left_undrawn: bool,
 }
 
 #[cfg(feature = "image")]

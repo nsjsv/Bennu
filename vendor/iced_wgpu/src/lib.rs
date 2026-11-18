@@ -88,6 +88,9 @@ pub struct Renderer {
     // 这一帧、上一帧的编号，全局唯一：表面记着自己显示的是哪一帧。
     frame: u64,
     previous_frame: u64,
+    // 这一帧、上一帧画全了没有：有图还在后台上传时没画出来，层相同也不算同一画面。
+    frame_complete: bool,
+    previous_frame_complete: bool,
 
     quad: quad::State,
     triangle: triangle::State,
@@ -117,6 +120,8 @@ impl Renderer {
             previous_layers: layer::Stack::new(),
             frame: next_frame(),
             previous_frame: next_frame(),
+            frame_complete: true,
+            previous_frame_complete: true,
 
             quad: quad::State::new(),
             triangle: triangle::State::new(
@@ -156,6 +161,11 @@ impl Renderer {
         );
 
         self.prepare(&mut encoder, viewport);
+        #[cfg(feature = "image")]
+        {
+            self.frame_complete =
+                !self.image_cache.borrow_mut().take_left_undrawn();
+        }
         self.render(&mut encoder, target, clear_color, viewport);
 
         self.quad.trim();
@@ -182,7 +192,7 @@ impl Renderer {
     /// Bennu 补丁：这一帧是不是把编号 `frame` 的那帧原样又画了一遍（只认得出紧挨着的上一帧）。
     pub(crate) fn repeats(&mut self, frame: u64) -> bool {
         // 上一帧的层渲染前合并过（`prepare`），这一帧也合并了才能逐层比；合并过的栈再合并不会变。
-        frame == self.previous_frame && {
+        frame == self.previous_frame && self.previous_frame_complete && {
             self.layers.merge();
             self.layers.as_slice() == self.previous_layers.as_slice()
         }
@@ -725,6 +735,9 @@ impl core::Renderer for Renderer {
     fn reset(&mut self, new_bounds: Rectangle) {
         mem::swap(&mut self.layers, &mut self.previous_layers);
         self.previous_frame = mem::replace(&mut self.frame, next_frame());
+        // 跳过不画的帧与它重复的那帧一样，是画全了的。
+        self.previous_frame_complete =
+            mem::replace(&mut self.frame_complete, true);
         self.layers.reset(new_bounds);
     }
 

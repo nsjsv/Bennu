@@ -27,6 +27,8 @@ notify.workspace = true
 # 与 image 用的同一版本：超出解码预算的大 PNG 逐行读、边读边缩。
 png = "0.18"
 regex = "1.12.3"
+# 读类型库 `<类型>.xml` 里的类型名。
+roxmltree = "0.20.0"
 # 与 image 用的同一版本：要缩小的 TIFF 按条带/图块边读边缩。
 tiff = "0.11"
 serde = { version = "1", features = ["derive"] }

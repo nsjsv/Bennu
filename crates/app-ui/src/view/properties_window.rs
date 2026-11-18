@@ -3,14 +3,16 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use bennu_preview::formatting::file_kind_label;
-use file_core::FileKind;
+use bennu_preview::info_overlay::InfoRow;
+use file_core::{FileKind, VolumeUsage};
 use iced::widget::{button, column, container, row, Button, Column};
 use iced::{Alignment, Element, Length};
 
 use crate::formatting::{format_file_size, format_system_time, item_count_label};
 use crate::model::{
-    FilePropertiesAggregateSnapshot, FilePropertiesCategory, FilePropertiesDirectoryContents,
-    FilePropertiesDirectoryContentsState, FilePropertiesLoadState, FilePropertiesMessage,
+    FilePropertiesAggregateSnapshot, FilePropertiesDirectoryContents,
+    FilePropertiesDirectoryContentsState, FilePropertiesKindDetails, FilePropertiesLoadState,
+    FilePropertiesLookup, FilePropertiesMessage, FilePropertiesOwner,
     FilePropertiesPermissionAccess, FilePropertiesPermissionClass, FilePropertiesPermissionUpdate,
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesSnapshot,
     FilePropertiesState, Message, ScrollbarRegion,
@@ -19,46 +21,59 @@ use bennu_preview::entry_icons::file_entry_icon_symbol;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
-use super::auxiliary_window_layout::{
-    auxiliary_detail_scroller, auxiliary_sidebar_button, auxiliary_sidebar_list,
-    AUXILIARY_SIDEBAR_WIDTH,
-};
+use super::auxiliary_window_layout::auxiliary_detail_scroller;
 use super::settings_group::{
-    action_row, control_row, label_row, muted_setting_text, notice_row, settings_card, value_row,
-    RowNote, SETTINGS_GROUP_SPACING,
+    action_row, control_row, label_row, meter_row, muted_setting_text, notice_row, settings_card,
+    settings_group, value_row, RowNote, SettingsRow, SETTINGS_GROUP_SPACING,
 };
 use super::{auxiliary_window_message, themed_icon, IconTone};
-use bennu_preview::window_shell::{single_window, split_window, HeaderBar, SplitPane, WindowShell};
+use bennu_preview::window_shell::{single_window, HeaderBar, WindowShell};
 use bennu_theme::controls::toggle_button_style;
 use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const PROPERTIES_ICON_SIZE: f32 = 44.0;
 
+/// 一页从上到下看完：加载中、读不了、单选、多选都是同一个外壳，打开时布局不跳。
 pub(crate) fn view_properties_window<'a>(
     properties: Option<&'a FilePropertiesState>,
     shell: WindowShell<'a, Message>,
 ) -> Element<'a, Message> {
-    let single = |body: Element<'a, Message>| {
-        single_window(HeaderBar::new().title(tr!("Properties")), body, &shell)
+    let body = match properties {
+        Some(properties) => properties_body(properties),
+        None => auxiliary_window_message(tr!("No properties are available.")),
     };
-    let Some(properties) = properties else {
-        return single(auxiliary_window_message(tr!(
-            "No properties are available."
-        )));
-    };
+    single_window(HeaderBar::new().title(tr!("Properties")), body, &shell)
+}
 
-    let target_label = properties_target_label(properties);
+fn properties_body(properties: &FilePropertiesState) -> Element<'_, Message> {
     match &properties.load_state {
-        FilePropertiesLoadState::Loading => single(properties_loading_view(target_label)),
-        FilePropertiesLoadState::LoadingAggregate(snapshot) => {
-            single(aggregate_properties_loading_view(snapshot))
+        FilePropertiesLoadState::Loading => properties_notice(settings_card(vec![label_row(
+            tr!("Loading properties..."),
+            Some(RowNote::Hint(properties_target_label(properties))),
+        )])),
+        FilePropertiesLoadState::LoadingAggregate(snapshot) => properties_page(
+            aggregate_information(snapshot).push(settings_card(vec![notice_row(RowNote::Hint(
+                tr!("Calculating..."),
+            ))])),
+        ),
+        FilePropertiesLoadState::Loaded(FilePropertiesPresentation::Single(snapshot)) => {
+            properties_page(single_information(properties, snapshot))
         }
-        FilePropertiesLoadState::Loaded(presentation) => {
-            properties_split_view(properties, presentation, &shell)
+        FilePropertiesLoadState::Loaded(FilePropertiesPresentation::Aggregate(snapshot)) => {
+            properties_page(aggregate_information(snapshot).push(permissions_section(
+                &properties.permission_update,
+                snapshot.permissions,
+                None,
+                false,
+            )))
         }
-        FilePropertiesLoadState::Failed(error) => {
-            single(properties_error_view(target_label, error))
-        }
+        FilePropertiesLoadState::Failed(error) => properties_notice(settings_card(vec![
+            label_row(
+                tr!("Could not load properties"),
+                Some(RowNote::Hint(properties_target_label(properties))),
+            ),
+            notice_row(RowNote::Error(error.clone())),
+        ])),
     }
 }
 
@@ -70,80 +85,18 @@ fn properties_target_label(properties: &FilePropertiesState) -> String {
 }
 
 /// 还没读完、读不了：和读完后同一个页边距，一张卡片里一行说明。
-fn properties_loading_view(target_label: String) -> Element<'static, Message> {
-    properties_notice(settings_card(vec![label_row(
-        tr!("Loading properties..."),
-        Some(RowNote::Hint(target_label)),
-    )]))
-}
-
-fn aggregate_properties_loading_view(
-    snapshot: &FilePropertiesAggregateSnapshot,
-) -> Element<'_, Message> {
-    properties_detail_scroller(aggregate_information(snapshot).push(settings_card(vec![
-        notice_row(RowNote::Hint(tr!("Calculating..."))),
-    ])))
-}
-
-fn properties_error_view<'a>(target_label: String, error: &'a str) -> Element<'a, Message> {
-    properties_notice(settings_card(vec![
-        label_row(
-            tr!("Could not load properties"),
-            Some(RowNote::Hint(target_label)),
-        ),
-        notice_row(RowNote::Error(error.to_owned())),
-    ]))
-}
-
 fn properties_notice(card: Element<'_, Message>) -> Element<'_, Message> {
     container(card).padding(18).width(Length::Fill).into()
 }
 
-fn properties_split_view<'a>(
-    properties: &'a FilePropertiesState,
-    presentation: &'a FilePropertiesPresentation,
-    shell: &WindowShell<'a, Message>,
-) -> Element<'a, Message> {
-    let selected = properties.selected_category;
-    let detail = match selected {
-        FilePropertiesCategory::Information => match presentation {
-            FilePropertiesPresentation::Single(snapshot) => properties_information_detail(snapshot),
-            FilePropertiesPresentation::Aggregate(snapshot) => {
-                aggregate_properties_information_detail(snapshot)
-            }
-        },
-        FilePropertiesCategory::Permissions => {
-            properties_permissions_detail(properties, presentation)
-        }
-    };
-    let sidebar = SplitPane {
-        header: HeaderBar::new().title(tr!("Properties")),
-        body: auxiliary_sidebar_list(
-            FilePropertiesCategory::ALL
-                .into_iter()
-                .map(|category| properties_category_button(category, selected).into())
-                .collect(),
-        ),
-    };
-    let content = SplitPane {
-        header: HeaderBar::new().title(selected.label()),
-        body: detail,
-    };
-    split_window(sidebar, content, AUXILIARY_SIDEBAR_WIDTH, shell)
-}
-
-fn properties_category_button(
-    category: FilePropertiesCategory,
-    selected: FilePropertiesCategory,
-) -> Button<'static, Message> {
-    auxiliary_sidebar_button(
-        category.label(),
-        category == selected,
-        Message::FileProperties(FilePropertiesMessage::CategorySelected(category)),
+fn properties_page(content: Column<'_, Message>) -> Element<'_, Message> {
+    auxiliary_detail_scroller(
+        content.spacing(SETTINGS_GROUP_SPACING).width(Length::Fill),
+        ScrollbarRegion::Properties,
     )
 }
 
-/// 大图标 + 名字 + 一行灰字（类型）；下面的卡片不再重复名字和类型。
+/// 大图标 + 名字 + 一行灰字。
 fn properties_heading(
     icon: IconSymbol,
     title: String,
@@ -163,46 +116,171 @@ fn properties_heading(
     .into()
 }
 
-fn properties_information_detail(snapshot: &FilePropertiesSnapshot) -> Element<'_, Message> {
-    let mut place = vec![
-        value_row(tr!("Location"), display_path(&snapshot.location)),
+/// 标题；基本信息；详细信息（图片、音视频）；磁盘；时间；权限。
+fn single_information<'a>(
+    properties: &'a FilePropertiesState,
+    snapshot: &'a FilePropertiesSnapshot,
+) -> Column<'a, Message> {
+    let kind = snapshot.details.kind();
+    let mut page = column![
+        properties_heading(
+            file_entry_icon_symbol(kind, snapshot.name.as_os_str()),
+            display_name(&snapshot.name),
+            heading_subtitle(snapshot),
+        ),
+        settings_card(basic_rows(snapshot)),
+    ];
+    if let FilePropertiesKindDetails::File(file) = &snapshot.details {
+        if let Some(details) = file.media_details.as_ref().and_then(media_details_group) {
+            page = page.push(details);
+        }
+    }
+    page.push(volume_group(&snapshot.volume))
+        .push(times_card(
+            snapshot.created,
+            snapshot.modified,
+            snapshot.accessed,
+        ))
+        .push(permissions_section(
+            &properties.permission_update,
+            snapshot.permissions,
+            Some(&snapshot.owner),
+            kind == FileKind::Directory,
+        ))
+}
+
+/// 普通文件「PNG 图像 · 2.1 MB」，其余是种类名。
+fn heading_subtitle(snapshot: &FilePropertiesSnapshot) -> String {
+    match &snapshot.details {
+        FilePropertiesKindDetails::File(file) => format!(
+            "{} · {}",
+            file.description
+                .clone()
+                .unwrap_or_else(|| file_kind_label(FileKind::File)),
+            format_file_size(snapshot.size_bytes)
+        ),
+        details => file_kind_label(details.kind()),
+    }
+}
+
+fn basic_rows(snapshot: &FilePropertiesSnapshot) -> Vec<SettingsRow<'static>> {
+    let mut rows = vec![
+        value_row(tr!("Type"), type_text(&snapshot.details)),
         value_row(tr!("Size"), display_size(snapshot.size_bytes)),
         value_row(tr!("Size on disk"), display_size(snapshot.disk_size_bytes)),
     ];
-    let contents = match &snapshot.directory_contents {
-        FilePropertiesDirectoryContentsState::NotDirectory => None,
-        FilePropertiesDirectoryContentsState::Loading(contents) => Some(
-            contents
-                .as_ref()
-                .map(display_contents)
-                .unwrap_or_else(|| tr!("Calculating...")),
-        ),
-        FilePropertiesDirectoryContentsState::Loaded(contents) => Some(display_contents(contents)),
-        FilePropertiesDirectoryContentsState::Failed(error) => Some(tr!("Unavailable (%1)", error)),
-    };
-    if let Some(contents) = contents {
-        place.push(value_row(tr!("Contents"), contents));
+    if let FilePropertiesKindDetails::Directory(contents) = &snapshot.details {
+        rows.push(value_row(tr!("Contents"), contents_text(contents)));
     }
-
-    properties_detail_scroller(column![
-        properties_heading(
-            file_entry_icon_symbol(snapshot.kind, snapshot.name.as_os_str()),
-            display_name(&snapshot.name),
-            file_kind_label(snapshot.kind),
-        ),
-        settings_card(place),
-        settings_card(vec![
-            value_row(tr!("Created"), display_optional_time(snapshot.created)),
-            value_row(tr!("Modified"), display_optional_time(snapshot.modified)),
-            value_row(tr!("Accessed"), display_optional_time(snapshot.accessed)),
-        ]),
-    ])
+    rows.push(value_row(tr!("Location"), display_path(&snapshot.location)));
+    match &snapshot.details {
+        FilePropertiesKindDetails::Symlink(target) => rows.push(value_row(
+            tr!("Points to"),
+            match target {
+                Ok(target) => display_path(target),
+                Err(error) => tr!("Unavailable (%1)", error),
+            },
+        )),
+        FilePropertiesKindDetails::File(file) => rows.push(value_row(
+            tr!("Open with"),
+            default_application_text(&file.default_application),
+        )),
+        FilePropertiesKindDetails::Directory(_) | FilePropertiesKindDetails::Other => {}
+    }
+    rows
 }
 
-fn aggregate_properties_information_detail(
-    snapshot: &FilePropertiesAggregateSnapshot,
-) -> Element<'_, Message> {
-    properties_detail_scroller(aggregate_information(snapshot))
+/// 普通文件「PNG 图像（image/png）」；类型库没有类型名的只写类型；其余是种类名。
+fn type_text(details: &FilePropertiesKindDetails) -> String {
+    match details {
+        FilePropertiesKindDetails::File(file) => match &file.description {
+            Some(description) => tr!("%1 (%2)", description, file.mime_type),
+            None => file.mime_type.clone(),
+        },
+        details => file_kind_label(details.kind()),
+    }
+}
+
+fn contents_text(contents: &FilePropertiesDirectoryContentsState) -> String {
+    match contents {
+        FilePropertiesDirectoryContentsState::Loading(contents) => contents
+            .as_ref()
+            .map(display_contents)
+            .unwrap_or_else(|| tr!("Calculating...")),
+        FilePropertiesDirectoryContentsState::Loaded(contents) => display_contents(contents),
+        FilePropertiesDirectoryContentsState::Failed(error) => tr!("Unavailable (%1)", error),
+    }
+}
+
+fn default_application_text(application: &FilePropertiesLookup<Option<String>>) -> String {
+    match application {
+        FilePropertiesLookup::Pending => tr!("Reading..."),
+        FilePropertiesLookup::Ready(Some(name)) => name.clone(),
+        FilePropertiesLookup::Ready(None) => tr!("No default application"),
+        FilePropertiesLookup::Failed(error) => tr!("Unavailable (%1)", error),
+    }
+}
+
+/// 读完是空的（名字像视频、内容不是的 `.ts`）就没有这一组。
+fn media_details_group(
+    details: &FilePropertiesLookup<Vec<InfoRow>>,
+) -> Option<Element<'static, Message>> {
+    let rows = match details {
+        FilePropertiesLookup::Pending => vec![notice_row(RowNote::Hint(tr!("Reading...")))],
+        FilePropertiesLookup::Ready(rows) if rows.is_empty() => return None,
+        FilePropertiesLookup::Ready(rows) => rows
+            .iter()
+            .map(|row| value_row(row.label.clone(), row.value.clone()))
+            .collect(),
+        FilePropertiesLookup::Failed(error) => vec![notice_row(RowNote::Error(error.clone()))],
+    };
+    Some(settings_group(tr!("Details"), None, rows))
+}
+
+/// 挂载点和文件系统；用量条是已用的比例，字写还能用多少。
+fn volume_group(volume: &Result<VolumeUsage, String>) -> Element<'static, Message> {
+    let rows = match volume {
+        Ok(volume) => vec![
+            value_row(
+                tr!("Mounted on"),
+                format!("{} · {}", display_path(&volume.mount_point), volume.fs_type),
+            ),
+            meter_row(
+                tr!("Free space"),
+                tr!(
+                    "%1 free of %2",
+                    format_file_size(volume.available_bytes),
+                    format_file_size(volume.total_bytes)
+                ),
+                used_fraction(volume),
+            ),
+        ],
+        Err(error) => vec![notice_row(RowNote::Error(tr!(
+            "Could not read disk usage: %1",
+            error
+        )))],
+    };
+    settings_group(tr!("Disk"), None, rows)
+}
+
+fn used_fraction(volume: &VolumeUsage) -> f32 {
+    if volume.total_bytes == 0 {
+        return 0.0;
+    }
+    let used = volume.total_bytes.saturating_sub(volume.available_bytes);
+    (used as f64 / volume.total_bytes as f64) as f32
+}
+
+fn times_card(
+    created: Option<SystemTime>,
+    modified: Option<SystemTime>,
+    accessed: Option<SystemTime>,
+) -> Element<'static, Message> {
+    settings_card(vec![
+        value_row(tr!("Created"), display_optional_time(created)),
+        value_row(tr!("Modified"), display_optional_time(modified)),
+        value_row(tr!("Accessed"), display_optional_time(accessed)),
+    ])
 }
 
 /// 多选：标题是“N 项”，卡片里是各类各几个、在哪、总大小，时间只在大家都一样时有。
@@ -275,25 +353,23 @@ fn aggregate_optional_time(time: Option<SystemTime>) -> String {
         .unwrap_or_else(|| tr!("Mixed or unavailable"))
 }
 
-/// 权限：一张卡片三行（所有者、组、其他人），每行右边“读 / 写 / 执行”三个开关按钮，点一下
-/// 立即保存；最后一行是现在的模式。文件夹多一行“应用到里面的所有项目”。
-fn properties_permissions_detail<'a>(
-    properties: &'a FilePropertiesState,
-    presentation: &'a FilePropertiesPresentation,
+/// 权限：所有者、用户组、其他人三行，每行右边“读 / 写 / 执行”三个开关按钮，点一下立即保存；
+/// 最后一行是现在的模式。单选时副标题是实际的用户名、组名。文件夹多一行“应用到里面的所有项目”。
+fn permissions_section<'a>(
+    update: &'a FilePropertiesPermissionUpdate,
+    permissions: Option<FilePropertiesPermissions>,
+    owner: Option<&FilePropertiesOwner>,
+    is_directory: bool,
 ) -> Element<'a, Message> {
-    let update = &properties.permission_update;
-    let mut content = column![muted_setting_text(tr!(
-        "Choose who can read, write, or execute this item. Changes save immediately."
-    ))];
-
-    match displayed_permissions(presentation.permissions(), update) {
+    let mut section = Column::new().spacing(SETTINGS_GROUP_SPACING);
+    match displayed_permissions(permissions, update) {
         Some(permissions) => {
             let mut rows: Vec<_> = FilePropertiesPermissionClass::ALL
                 .into_iter()
                 .map(|class| {
                     control_row(
                         permission_subject_label(class),
-                        Some(RowNote::Hint(permission_subject_description(class))),
+                        Some(RowNote::Hint(permission_subject_note(class, owner))),
                         permission_access_buttons(class, permissions, update),
                     )
                 })
@@ -302,13 +378,9 @@ fn properties_permissions_detail<'a>(
                 tr!("Current mode"),
                 display_permissions(permissions),
             ));
-            content = content.push(settings_card(rows));
-            if matches!(
-                presentation,
-                FilePropertiesPresentation::Single(snapshot)
-                    if snapshot.kind == FileKind::Directory
-            ) {
-                content = content.push(settings_card(vec![action_row(
+            section = section.push(settings_group(tr!("Permissions"), None, rows));
+            if is_directory {
+                section = section.push(settings_card(vec![action_row(
                     tr!("Apply to Enclosed Items"),
                     None,
                     (!update.is_in_progress()).then_some(Message::FileProperties(
@@ -318,27 +390,23 @@ fn properties_permissions_detail<'a>(
             }
         }
         None => {
-            content = content.push(settings_card(vec![label_row(
-                tr!("Permissions are read-only"),
-                Some(RowNote::Hint(tr!(
-                    "Permission editing is unavailable for this item."
-                ))),
-            )]));
+            section = section.push(settings_group(
+                tr!("Permissions"),
+                None,
+                vec![label_row(
+                    tr!("Permissions are read-only"),
+                    Some(RowNote::Hint(tr!(
+                        "Permission editing is unavailable for this item."
+                    ))),
+                )],
+            ));
         }
     }
 
     if let Some(status) = permissions_status(update) {
-        content = content.push(settings_card(vec![notice_row(status)]));
+        section = section.push(settings_card(vec![notice_row(status)]));
     }
-
-    properties_detail_scroller(content)
-}
-
-fn properties_detail_scroller<'a>(content: Column<'a, Message>) -> Element<'a, Message> {
-    auxiliary_detail_scroller(
-        content.spacing(SETTINGS_GROUP_SPACING).width(Length::Fill),
-        ScrollbarRegion::Properties,
-    )
+    section.into()
 }
 
 fn displayed_permissions(
@@ -418,16 +486,22 @@ fn permissions_status(update: &FilePropertiesPermissionUpdate) -> Option<RowNote
 fn permission_subject_label(class: FilePropertiesPermissionClass) -> String {
     match class {
         FilePropertiesPermissionClass::Owner => tr!("Owner"),
-        FilePropertiesPermissionClass::Group => tr!("Group"),
-        FilePropertiesPermissionClass::Others => tr!("Everyone"),
+        FilePropertiesPermissionClass::Group => tr!("User group"),
+        FilePropertiesPermissionClass::Others => tr!("Others"),
     }
 }
 
-fn permission_subject_description(class: FilePropertiesPermissionClass) -> String {
-    match class {
-        FilePropertiesPermissionClass::Owner => tr!("Primary user"),
-        FilePropertiesPermissionClass::Group => tr!("Assigned group"),
-        FilePropertiesPermissionClass::Others => tr!("Other users"),
+/// 单选写实际的用户名、组名；多选各项的所有者可能不同，写泛称。
+fn permission_subject_note(
+    class: FilePropertiesPermissionClass,
+    owner: Option<&FilePropertiesOwner>,
+) -> String {
+    match (class, owner) {
+        (FilePropertiesPermissionClass::Owner, Some(owner)) => owner.user.clone(),
+        (FilePropertiesPermissionClass::Group, Some(owner)) => owner.group.clone(),
+        (FilePropertiesPermissionClass::Owner, None) => tr!("Primary user"),
+        (FilePropertiesPermissionClass::Group, None) => tr!("Assigned group"),
+        (FilePropertiesPermissionClass::Others, _) => tr!("Other users"),
     }
 }
 
@@ -489,6 +563,15 @@ mod tests {
         }
     }
 
+    fn file_details(description: Option<&str>) -> FilePropertiesKindDetails {
+        FilePropertiesKindDetails::File(crate::model::FilePropertiesFileDetails {
+            mime_type: "image/png".to_owned(),
+            description: description.map(str::to_owned),
+            default_application: FilePropertiesLookup::Pending,
+            media_details: None,
+        })
+    }
+
     #[test]
     fn saving_permissions_is_gray_and_anything_that_failed_is_red() {
         let permissions = FilePropertiesPermissions::from_mode(0o644);
@@ -529,5 +612,78 @@ mod tests {
         assert!(!complete.contains("unreadable") && !complete.contains("无法读取"));
         assert!(incomplete.starts_with(&complete));
         assert!(incomplete.contains("unreadable") || incomplete.contains("无法读取"));
+    }
+
+    #[test]
+    fn files_show_the_type_name_and_type_others_show_their_kind() {
+        assert_eq!(
+            type_text(&file_details(Some("PNG image"))),
+            "PNG image (image/png)"
+        );
+        assert_eq!(type_text(&file_details(None)), "image/png");
+        assert_eq!(
+            type_text(&FilePropertiesKindDetails::Symlink(Ok("/a".into()))),
+            file_kind_label(FileKind::Symlink)
+        );
+    }
+
+    #[test]
+    fn single_items_name_their_owner_and_group_multiple_items_do_not() {
+        let owner = FilePropertiesOwner {
+            user: "alice".to_owned(),
+            group: "staff".to_owned(),
+        };
+        let note = |class, owner| permission_subject_note(class, owner);
+
+        assert_eq!(
+            note(FilePropertiesPermissionClass::Owner, Some(&owner)),
+            "alice"
+        );
+        assert_eq!(
+            note(FilePropertiesPermissionClass::Group, Some(&owner)),
+            "staff"
+        );
+        assert_eq!(
+            note(FilePropertiesPermissionClass::Others, Some(&owner)),
+            tr!("Other users")
+        );
+        assert_eq!(
+            note(FilePropertiesPermissionClass::Owner, None),
+            tr!("Primary user")
+        );
+    }
+
+    #[test]
+    fn the_default_application_row_says_what_is_known() {
+        assert_eq!(
+            default_application_text(&FilePropertiesLookup::Ready(Some("Viewer".to_owned()))),
+            "Viewer"
+        );
+        assert_eq!(
+            default_application_text(&FilePropertiesLookup::Ready(None)),
+            tr!("No default application")
+        );
+        assert_eq!(
+            default_application_text(&FilePropertiesLookup::Pending),
+            tr!("Reading...")
+        );
+    }
+
+    #[test]
+    fn an_empty_media_reading_hides_the_details_group() {
+        assert!(media_details_group(&FilePropertiesLookup::Ready(Vec::new())).is_none());
+        assert!(media_details_group(&FilePropertiesLookup::Pending).is_some());
+    }
+
+    #[test]
+    fn the_disk_bar_shows_the_used_share() {
+        let volume = |total_bytes, available_bytes| VolumeUsage {
+            mount_point: "/".into(),
+            fs_type: "ext4".to_owned(),
+            total_bytes,
+            available_bytes,
+        };
+        assert_eq!(used_fraction(&volume(100, 40)), 0.6);
+        assert_eq!(used_fraction(&volume(0, 0)), 0.0);
     }
 }

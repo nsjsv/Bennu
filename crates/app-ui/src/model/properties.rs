@@ -3,7 +3,8 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use file_core::FileKind;
+use bennu_preview::info_overlay::InfoRow;
+use file_core::{FileKind, VolumeUsage};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,12 +56,13 @@ pub(crate) enum FilePropertiesMessage {
         FilePropertiesRequest,
         Result<FilePropertiesDirectoryContents, String>,
     ),
+    DefaultApplicationLoaded(FilePropertiesRequest, Result<Option<String>, String>),
+    MediaDetailsLoaded(FilePropertiesRequest, Result<Vec<InfoRow>, String>),
     PermissionToggled(
         FilePropertiesPermissionClass,
         FilePropertiesPermissionAccess,
     ),
     ApplyPermissionsToEnclosedItems,
-    CategorySelected(FilePropertiesCategory),
     PermissionsUpdated(
         FilePropertiesRequest,
         Result<FilePropertiesPermissionWriteOutcome, String>,
@@ -76,10 +78,10 @@ pub(crate) enum FilePropertiesMessage {
 pub(crate) struct FilePropertiesState {
     pub(crate) targets: FilePropertiesTargetSet,
     pub(crate) load_state: FilePropertiesLoadState,
-    pub(crate) selected_category: FilePropertiesCategory,
     pub(crate) permission_update: FilePropertiesPermissionUpdate,
     pub(crate) load_generation: u64,
-    pub(crate) load_cancel: Option<CancellationToken>,
+    /// 这次加载的所有后台读取（内容统计、打开方式、详细信息）共用；换目标、关窗时取消。
+    pub(crate) load_cancel: CancellationToken,
 }
 
 impl FilePropertiesState {
@@ -87,35 +89,15 @@ impl FilePropertiesState {
         Self {
             targets: request.targets,
             load_state: FilePropertiesLoadState::Loading,
-            selected_category: FilePropertiesCategory::Information,
             permission_update: FilePropertiesPermissionUpdate::Idle,
             load_generation: request.generation,
-            load_cancel: Some(cancellation),
+            load_cancel: cancellation,
         }
     }
 
     pub(crate) fn cancel_load(&mut self) {
-        if let Some(cancel) = self.load_cancel.take() {
-            cancel.cancel();
-        }
+        self.load_cancel.cancel();
         self.load_generation = self.load_generation.wrapping_add(1);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FilePropertiesCategory {
-    Information,
-    Permissions,
-}
-
-impl FilePropertiesCategory {
-    pub(crate) const ALL: [Self; 2] = [Self::Information, Self::Permissions];
-
-    pub(crate) fn label(self) -> String {
-        match self {
-            Self::Information => tr!("File Information"),
-            Self::Permissions => tr!("Permissions"),
-        }
     }
 }
 
@@ -152,20 +134,74 @@ impl FilePropertiesPresentation {
 #[derive(Debug, Clone)]
 pub(crate) struct FilePropertiesSnapshot {
     pub(crate) name: OsString,
-    pub(crate) kind: FileKind,
     pub(crate) location: PathBuf,
     pub(crate) created: Option<SystemTime>,
     pub(crate) modified: Option<SystemTime>,
     pub(crate) accessed: Option<SystemTime>,
     pub(crate) size_bytes: u64,
     pub(crate) disk_size_bytes: u64,
-    pub(crate) directory_contents: FilePropertiesDirectoryContentsState,
+    pub(crate) details: FilePropertiesKindDetails,
+    pub(crate) owner: FilePropertiesOwner,
+    pub(crate) volume: Result<VolumeUsage, String>,
     pub(crate) permissions: Option<FilePropertiesPermissions>,
+}
+
+/// 只有某种条目才有的信息跟着种类走：文件夹才有内容统计，链接才有指向。
+#[derive(Debug, Clone)]
+pub(crate) enum FilePropertiesKindDetails {
+    File(FilePropertiesFileDetails),
+    Directory(FilePropertiesDirectoryContentsState),
+    Symlink(Result<PathBuf, String>),
+    Other,
+}
+
+impl FilePropertiesKindDetails {
+    pub(crate) fn kind(&self) -> FileKind {
+        match self {
+            Self::File(_) => FileKind::File,
+            Self::Directory(_) => FileKind::Directory,
+            Self::Symlink(_) => FileKind::Symlink,
+            Self::Other => FileKind::Other,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct FilePropertiesFileDetails {
+    pub(crate) mime_type: String,
+    /// 类型库里的类型名（「PNG 图像」）；库里没有这个类型是 None。
+    pub(crate) description: Option<String>,
+    /// `Ready(None)`：这种类型没设默认程序。
+    pub(crate) default_application: FilePropertiesLookup<Option<String>>,
+    /// 不是图片、音视频是 None。
+    pub(crate) media_details: Option<FilePropertiesLookup<Vec<InfoRow>>>,
+}
+
+/// 后到的一项：先占位，到了填上，读不了留下原因。
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FilePropertiesLookup<T> {
+    Pending,
+    Ready(T),
+    Failed(String),
+}
+
+impl<T> From<Result<T, String>> for FilePropertiesLookup<T> {
+    fn from(outcome: Result<T, String>) -> Self {
+        match outcome {
+            Ok(value) => Self::Ready(value),
+            Err(error) => Self::Failed(error),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FilePropertiesOwner {
+    pub(crate) user: String,
+    pub(crate) group: String,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) enum FilePropertiesDirectoryContentsState {
-    NotDirectory,
     Loading(Option<FilePropertiesDirectoryContents>),
     Loaded(FilePropertiesDirectoryContents),
     Failed(String),

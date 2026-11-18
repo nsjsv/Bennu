@@ -1794,6 +1794,7 @@ dependencies = [
  "pkg-config",
  "png 0.18.1",
  "regex",
+ "roxmltree",
  "rustix 1.1.4",
  "serde",
  "serde_json",

@@ -87,7 +87,9 @@ pub mod preview_surface;
 mod checkerboard;
 mod image_info_text;
 pub mod image_preview_panel;
-mod info_overlay;
+pub mod info_overlay;
+// 属性窗口的「详细信息」：按种类读一次，文案和信息层共用。
+pub mod media_details;
 mod pointer_area;
 // 音频预览面板（标题摘要/时间线控制/音量控制）。
 mod audio_lyrics_view;

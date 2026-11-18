@@ -1,23 +1,14 @@
-//! 图片信息层的各行：尺寸、格式、色深、透明、颜色配置、大小，有拍摄参数时再加拍摄时间、
-//! 相机、镜头、焦距、光圈、快门、ISO、位置。读不到的行不写。
+//! 图片的信息行。信息层（按 I）：图片本身的行，再加透明、大小；属性窗口只用图片本身的行。
+//! 读不到的行不写。
 
 use bennu_localization::{format_file_size, tr};
+use file_core::image_decode::ImageFacts;
 
 use crate::info_overlay::InfoRow;
 use crate::preview::{ImageInfo, ImagePreviewContent};
 
 pub(crate) fn image_info_rows(content: &ImagePreviewContent, info: &ImageInfo) -> Vec<InfoRow> {
-    let facts = &info.facts;
-    let mut rows = Vec::new();
-    let mut push = |label: String, value: String| rows.push(InfoRow { label, value });
-    let (width, height) = content.dimensions();
-    push(tr!("Dimensions"), dimensions_text(width, height));
-    if let Some(format) = &facts.format {
-        push(tr!("Format"), format.clone());
-    }
-    if let Some(bits) = facts.bits_per_channel {
-        push(tr!("Bit depth"), tr!("%1-bit", bits));
-    }
+    let mut rows = image_detail_rows(Some(content.dimensions()), &info.facts);
     if matches!(
         content,
         ImagePreviewContent::OriginalRaster {
@@ -25,12 +16,38 @@ pub(crate) fn image_info_rows(content: &ImagePreviewContent, info: &ImageInfo) -
             ..
         }
     ) {
-        push(tr!("Transparency"), tr!("Has transparent areas"));
+        rows.push(InfoRow {
+            label: tr!("Transparency"),
+            value: tr!("Has transparent areas"),
+        });
+    }
+    rows.push(InfoRow {
+        label: tr!("Size"),
+        value: format_file_size(info.byte_len),
+    });
+    rows
+}
+
+/// 尺寸、格式、色深、颜色配置，有拍摄参数时再加拍摄时间、相机、镜头、焦距、光圈、快门、
+/// ISO、位置。尺寸量不出来（SVG）就不写那一行。
+pub(crate) fn image_detail_rows(
+    dimensions: Option<(u32, u32)>,
+    facts: &ImageFacts,
+) -> Vec<InfoRow> {
+    let mut rows = Vec::new();
+    let mut push = |label: String, value: String| rows.push(InfoRow { label, value });
+    if let Some((width, height)) = dimensions {
+        push(tr!("Dimensions"), dimensions_text(width, height));
+    }
+    if let Some(format) = &facts.format {
+        push(tr!("Format"), format.clone());
+    }
+    if let Some(bits) = facts.bits_per_channel {
+        push(tr!("Bit depth"), tr!("%1-bit", bits));
     }
     if let Some(profile) = &facts.color_profile {
         push(tr!("Color profile"), profile.clone());
     }
-    push(tr!("Size"), format_file_size(info.byte_len));
     if let Some(taken_at) = &facts.taken_at {
         push(tr!("Taken"), taken_at.clone());
     }

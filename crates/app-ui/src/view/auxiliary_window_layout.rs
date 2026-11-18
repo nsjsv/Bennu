@@ -10,7 +10,7 @@ use crate::model::{Message, ScrollbarRegion};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
-/// 设置、属性窗口的侧栏宽度（主窗口侧栏可拖宽，另算）。
+/// 设置窗口的侧栏宽度（主窗口侧栏可拖宽，另算）。
 pub(super) const AUXILIARY_SIDEBAR_WIDTH: f32 = 196.0;
 
 /// 侧栏顶栏下面的分类列表。

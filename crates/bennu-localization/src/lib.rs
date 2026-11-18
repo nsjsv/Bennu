@@ -35,6 +35,15 @@ impl UiLanguage {
             _ => Self::English,
         }
     }
+
+    /// 系统数据（`.desktop` 的 `Name[..]`、类型库的 `xml:lang`）里这种语言的标签，先具体后笼统。
+    /// 旧版类型库写 `zh_CN`，新版写 `zh-Hans-CN`，都要认。英文是空表：不带标签的那条就是英文。
+    pub const fn locale_tags(self) -> &'static [&'static str] {
+        match self {
+            Self::English => &[],
+            Self::Chinese => &["zh_CN", "zh-Hans-CN", "zh-Hans", "zh"],
+        }
+    }
 }
 
 static CURRENT_LANGUAGE: AtomicU8 = AtomicU8::new(UiLanguage::English.as_u8());

@@ -527,7 +527,7 @@ impl DirectoryMetadataResolver {
             return name.clone();
         }
         counters.user_name_lookups.fetch_add(1, Ordering::Relaxed);
-        let name = lookup_user_name(user_id);
+        let name = user_name(user_id);
         names.insert(user_id, name.clone());
         name
     }
@@ -538,7 +538,7 @@ impl DirectoryMetadataResolver {
             return name.clone();
         }
         counters.group_name_lookups.fetch_add(1, Ordering::Relaxed);
-        let name = lookup_group_name(group_id);
+        let name = group_name(group_id);
         names.insert(group_id, name.clone());
         name
     }
@@ -564,8 +564,8 @@ pub(crate) fn complete_entry_from_metadata(
     };
     let filesystem_metadata = directory_filesystem_metadata(metadata, is_broken_symlink);
     let identity_names = DirectoryIdentityNames {
-        owner_name: filesystem_metadata.user_id.map(lookup_user_name),
-        group_name: filesystem_metadata.group_id.map(lookup_group_name),
+        owner_name: filesystem_metadata.user_id.map(user_name),
+        group_name: filesystem_metadata.group_id.map(group_name),
     };
     DirectoryEntry::from_record(Arc::new(EntryRecord::new(
         path,
@@ -625,23 +625,25 @@ fn group_id(_metadata: &std::fs::Metadata) -> Option<u32> {
     None
 }
 
+/// 用户名；查不到（没有这个用户）就是数字。列表的所有者列和属性窗口同一份。
 #[cfg(unix)]
-fn lookup_user_name(user_id: u32) -> String {
+pub fn user_name(user_id: u32) -> String {
     crate::scan::lookup_unix_user_name(user_id)
 }
 
 #[cfg(not(unix))]
-fn lookup_user_name(user_id: u32) -> String {
+pub fn user_name(user_id: u32) -> String {
     user_id.to_string()
 }
 
+/// 组名；查不到就是数字。
 #[cfg(unix)]
-fn lookup_group_name(group_id: u32) -> String {
+pub fn group_name(group_id: u32) -> String {
     crate::scan::lookup_unix_group_name(group_id)
 }
 
 #[cfg(not(unix))]
-fn lookup_group_name(group_id: u32) -> String {
+pub fn group_name(group_id: u32) -> String {
     group_id.to_string()
 }
 

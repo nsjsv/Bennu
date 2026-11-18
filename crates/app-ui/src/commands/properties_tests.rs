@@ -1,5 +1,5 @@
 use std::fs;
-use std::os::unix::fs::{symlink, PermissionsExt};
+use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt};
 use std::path::Path;
 
 use tempfile::tempdir;
@@ -263,11 +263,85 @@ fn a_single_folder_counts_everything_inside_not_only_its_first_level() {
 
     let contents = block_on(load_directory_properties_contents(
         request,
-        CancellationToken::new(),
+        &CancellationToken::new(),
         &mut output,
     ))
     .expect("directory contents");
 
     assert_eq!((contents.file_count, contents.directory_count), (1, 2));
     assert!(contents.total_size_bytes >= 4);
+}
+
+#[test]
+fn a_file_is_read_with_its_type_owner_and_disk_and_the_slow_parts_queued() {
+    let temp = tempdir().expect("create temp dir");
+    let path = temp.path().join("notes.txt");
+    fs::write(&path, b"hello").expect("write file");
+
+    let (snapshot, lookups) = read_file_properties(path.clone()).expect("file properties");
+
+    let FilePropertiesKindDetails::File(file) = &snapshot.details else {
+        panic!("a regular file is a file");
+    };
+    assert_eq!(file.mime_type, "text/plain");
+    assert_eq!(file.default_application, FilePropertiesLookup::Pending);
+    assert_eq!(file.media_details, None);
+    assert_eq!(
+        lookups.default_application_for.as_deref(),
+        Some("text/plain")
+    );
+    assert_eq!(lookups.media, None);
+    assert!(!lookups.directory_contents);
+    let metadata = fs::metadata(&path).expect("stat file");
+    assert_eq!(snapshot.owner.user, file_core::user_name(metadata.uid()));
+    assert_eq!(snapshot.owner.group, file_core::group_name(metadata.gid()));
+    let volume = snapshot.volume.expect("the temp dir is on a mounted disk");
+    assert!(temp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .starts_with(&volume.mount_point));
+}
+
+#[test]
+fn media_files_queue_their_details_and_folders_their_contents() {
+    let temp = tempdir().expect("create temp dir");
+    let picture = temp.path().join("photo.png");
+    fs::write(&picture, b"not really a png").expect("write picture");
+
+    let (snapshot, lookups) = read_file_properties(picture).expect("picture properties");
+    let FilePropertiesKindDetails::File(file) = &snapshot.details else {
+        panic!("a regular file is a file");
+    };
+    assert_eq!(file.media_details, Some(FilePropertiesLookup::Pending));
+    assert!(matches!(
+        lookups.media,
+        Some(file_core::MediaByName::Image(_))
+    ));
+
+    let (snapshot, lookups) =
+        read_file_properties(temp.path().to_path_buf()).expect("folder properties");
+    assert!(matches!(
+        snapshot.details,
+        FilePropertiesKindDetails::Directory(FilePropertiesDirectoryContentsState::Loading(None))
+    ));
+    assert!(lookups.directory_contents);
+    assert_eq!(lookups.default_application_for, None);
+}
+
+#[test]
+fn a_link_shows_where_it_points_without_following_it() {
+    let temp = tempdir().expect("create temp dir");
+    let link = temp.path().join("link");
+    symlink("/nonexistent/target", &link).expect("create symlink");
+
+    let (snapshot, lookups) = read_file_properties(link).expect("link properties");
+
+    assert!(matches!(
+        &snapshot.details,
+        FilePropertiesKindDetails::Symlink(Ok(target)) if target == Path::new("/nonexistent/target")
+    ));
+    assert_eq!(snapshot.permissions, None);
+    assert!(snapshot.volume.is_ok());
+    assert_eq!(lookups.default_application_for, None);
 }

@@ -17,8 +17,9 @@ const INFO_ROW_SPACING: f32 = 4.0;
 const INFO_BACKGROUND_ALPHA: f32 = 0.68;
 const INFO_LABEL_ALPHA: f32 = 0.62;
 
-/// 信息层的一行：名称和内容。
-pub(crate) struct InfoRow {
+/// 信息层、属性窗口「详细信息」的一行：名称和内容。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InfoRow {
     pub label: String,
     pub value: String,
 }

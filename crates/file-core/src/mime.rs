@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
+use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -218,6 +219,32 @@ impl MimeDatabase {
         (mime != OCTET_STREAM).then_some(mime)
     }
 
+    /// 文件的类型：名字能定就不读文件，否则看开头内容（读不了按名字猜）；都定不了算
+    /// application/octet-stream，同 GIO 对认不出的文件的叫法。
+    pub fn type_of_file(&self, path: &Path) -> String {
+        let name = path
+            .file_name()
+            .map_or(NameType::Unknown, |name| self.type_from_name(name));
+        let mime = match name {
+            NameType::Known(mime) => Some(mime),
+            name => match read_head(path, self.magic_extent()) {
+                Some(head) => self.type_from_content(&name, &head),
+                None => name.without_content(),
+            },
+        };
+        mime.unwrap_or_else(|| OCTET_STREAM.to_owned())
+    }
+
+    /// 类型名（「PNG 图像」），取自库目录里的 `<类型>.xml`，GIO 也读它。`languages` 是
+    /// `xml:lang` 标签，先具体后笼统；都没有用不带标签的那条（英文）。库里没有这个类型是 None。
+    pub fn description(&self, mime: &str, languages: &[&str]) -> Option<String> {
+        let file_name = format!("{}.xml", self.canonical(mime));
+        self.sources.iter().find_map(|source| {
+            let xml = std::fs::read_to_string(source.path.parent()?.join(&file_name)).ok()?;
+            type_comment(&xml, languages)
+        })
+    }
+
     /// 看内容时要读开头多少字节。
     pub fn magic_extent(&self) -> usize {
         self.caches
@@ -309,6 +336,39 @@ fn name_type_from_matches(mut matches: Vec<NameMatch<'_>>) -> NameType {
         1 => NameType::Known(candidates.remove(0)),
         _ => NameType::Candidates(candidates),
     }
+}
+
+/// `<comment xml:lang="..">` 里按 `languages` 顺序找第一条有的，最后是不带标签的。
+fn type_comment(xml: &str, languages: &[&str]) -> Option<String> {
+    let document = roxmltree::Document::parse(xml).ok()?;
+    let comments = document
+        .root_element()
+        .children()
+        .filter(|node| node.has_tag_name("comment"))
+        .filter_map(|node| {
+            Some((
+                node.attribute((roxmltree::NS_XML_URI, "lang")),
+                node.text()?,
+            ))
+        })
+        .collect::<Vec<_>>();
+    languages
+        .iter()
+        .map(|language| Some(*language))
+        .chain([None])
+        .find_map(|wanted| comments.iter().find(|(language, _)| *language == wanted))
+        .map(|(_, text)| text.trim().to_owned())
+}
+
+/// 文件开头最多 `extent` 字节；打不开、读不了是 None。
+pub(crate) fn read_head(path: &Path, extent: usize) -> Option<Vec<u8>> {
+    let mut head = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(extent as u64)
+        .read_to_end(&mut head)
+        .ok()?;
+    Some(head)
 }
 
 /// 开头没有除制表、换行、回车、换页以外的控制字符。

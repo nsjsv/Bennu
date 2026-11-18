@@ -87,8 +87,10 @@ pub enum OpenWithError {
     },
 }
 
+/// `languages` 是程序名的本地化标签（`Name[zh_CN]`），先具体后笼统。
 pub async fn open_with_applications(
     path: impl AsRef<Path>,
+    languages: &[&str],
 ) -> Result<OpenWithApplicationList, OpenWithError> {
     let path = path.as_ref().to_path_buf();
     let mime_type = query_file_mime_type(&path).await?;
@@ -99,8 +101,7 @@ pub async fn open_with_applications(
             continue;
         };
         applications.push(OpenWithApplication {
-            name: desktop_entry_name(&desktop_entry.text)
-                .unwrap_or_else(|| desktop_id.trim_end_matches(".desktop").to_owned()),
+            name: application_name(&desktop_entry.text, &desktop_id, languages),
             is_default: parsed.default_desktop_id.as_deref() == Some(desktop_id.as_str()),
             desktop_id,
         });
@@ -115,6 +116,29 @@ pub async fn open_with_applications(
         mime_type,
         applications,
     })
+}
+
+/// `mime_type` 的默认程序叫什么；没设默认程序是 None。`path` 只用来写进错误里。
+pub async fn default_application_name(
+    path: &Path,
+    mime_type: &str,
+    languages: &[&str],
+) -> Result<Option<String>, OpenWithError> {
+    let parsed = query_gio_mime_applications(path, mime_type).await?;
+    let Some(desktop_id) = parsed.default_desktop_id else {
+        return Ok(None);
+    };
+    let text = read_desktop_entry(&desktop_id)
+        .await
+        .map(|desktop_entry| desktop_entry.text)
+        .unwrap_or_default();
+    Ok(Some(application_name(&text, &desktop_id, languages)))
+}
+
+/// 读不到名字的用 desktop id 去掉后缀。
+fn application_name(desktop_entry: &str, desktop_id: &str, languages: &[&str]) -> String {
+    desktop_entry_name(desktop_entry, languages)
+        .unwrap_or_else(|| desktop_id.trim_end_matches(".desktop").to_owned())
 }
 
 pub async fn open_path_with_application(

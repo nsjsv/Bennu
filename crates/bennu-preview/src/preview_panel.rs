@@ -238,7 +238,18 @@ fn tool_required_panel<'a, Message>(tool: ExternalTool) -> Element<'a, Message>
 where
     Message: 'a + Clone + From<PreviewMessage>,
 {
-    let explanation = match (tool, tool.install_command()) {
+    let explanation = tool_required_explanation(tool);
+    let copy_button = tool.install_command().map(|_| {
+        normal_button(readable_text(tr!("Copy Command")))
+            .on_press(Message::from(PreviewMessage::CopyToolInstallCommand(tool)))
+            .into()
+    });
+    preview_error_panel(explanation, copy_button)
+}
+
+/// 缺工具时的说明（有安装命令就带上）；预览和属性窗口的「详细信息」共用。
+pub(crate) fn tool_required_explanation(tool: ExternalTool) -> String {
+    match (tool, tool.install_command()) {
         (ExternalTool::Ffmpeg, Some(command)) => {
             tr!(
                 "Audio, video and some image previews need ffmpeg. Install it with:\n%1",
@@ -257,13 +268,7 @@ where
         (ExternalTool::SevenZip, None) => tr!(
             "Zip, 7z and rar archives need 7-Zip. Install it with your system's package manager."
         ),
-    };
-    let copy_button = tool.install_command().map(|_| {
-        normal_button(readable_text(tr!("Copy Command")))
-            .on_press(Message::from(PreviewMessage::CopyToolInstallCommand(tool)))
-            .into()
-    });
-    preview_error_panel(explanation, copy_button)
+    }
 }
 
 /// 预览失败（二进制、不支持的类型、读取失败）：居中，上面一个警告图标，文字用次要色、

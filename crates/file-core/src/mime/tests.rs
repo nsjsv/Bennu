@@ -544,3 +544,106 @@ fn the_installed_database_agrees_with_the_desktop() {
         .inheriting_types(TEXT_PLAIN)
         .contains(&"text/x-python".to_owned()));
 }
+
+#[test]
+fn a_file_is_typed_by_name_first_then_by_content() {
+    let database = database();
+    let directory = tempfile::tempdir().unwrap();
+    let file = |name: &str, content: &[u8]| {
+        let path = directory.path().join(name);
+        std::fs::write(&path, content).unwrap();
+        path
+    };
+
+    // 名字能定的不读文件：不存在也一样。
+    assert_eq!(
+        database.type_of_file(&directory.path().join("absent.txt")),
+        TEXT_PLAIN
+    );
+    let stream = [&[0x47][..], &[0; 187], &[0x47]].concat();
+    assert_eq!(
+        database.type_of_file(&file("clip.ts", &stream)),
+        "video/mp2t"
+    );
+    assert_eq!(
+        database.type_of_file(&file("mystery", b"%PDF-1.7\n")),
+        "application/pdf"
+    );
+    assert_eq!(
+        database.type_of_file(&file("blob", b"\x00\x01\x02")),
+        "application/octet-stream"
+    );
+    assert_eq!(
+        database.type_of_file(&directory.path().join("gone")),
+        "application/octet-stream"
+    );
+}
+
+#[test]
+fn type_names_follow_the_language_and_fall_back_to_english() {
+    let user = tempfile::tempdir().unwrap();
+    let system = tempfile::tempdir().unwrap();
+    let write_type = |root: &std::path::Path, mime: &str, xml: &str| {
+        let path = root.join("mime").join(format!("{mime}.xml"));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, xml).unwrap();
+    };
+    write_type(
+        system.path(),
+        "image/png",
+        r#"<?xml version="1.0"?>
+<mime-type xmlns="http://www.freedesktop.org/standards/shared-mime-info" type="image/png">
+  <comment>PNG image</comment>
+  <comment xml:lang="zh-Hant-TW">PNG 影像</comment>
+  <comment xml:lang="zh-Hans-CN">PNG 图像</comment>
+</mime-type>"#,
+    );
+    write_type(
+        system.path(),
+        "text/plain",
+        r#"<mime-type xmlns="http://www.freedesktop.org/standards/shared-mime-info" type="text/plain">
+  <comment>Plain text document</comment>
+  <comment xml:lang="zh_CN">纯文本文档</comment>
+</mime-type>"#,
+    );
+    write_type(
+        system.path(),
+        "inode/directory",
+        r#"<mime-type xmlns="http://www.freedesktop.org/standards/shared-mime-info" type="inode/directory">
+  <comment>Folder</comment>
+  <comment xml:lang="zh-Hant-TW">資料夾</comment>
+</mime-type>"#,
+    );
+    // 用户目录里的定义排在前面（同 mime.cache 的顺序）。
+    write_type(
+        user.path(),
+        "text/plain",
+        r#"<mime-type xmlns="http://www.freedesktop.org/standards/shared-mime-info" type="text/plain">
+  <comment>My text</comment>
+</mime-type>"#,
+    );
+    let database = MimeDatabase::load(vec![
+        user.path().join("mime/mime.cache"),
+        system.path().join("mime/mime.cache"),
+    ]);
+    let chinese = ["zh_CN", "zh-Hans-CN", "zh-Hans", "zh"];
+
+    assert_eq!(
+        database.description("image/png", &chinese).as_deref(),
+        Some("PNG 图像")
+    );
+    assert_eq!(
+        database.description("image/png", &[]).as_deref(),
+        Some("PNG image")
+    );
+    // 没有简体中文的不拿繁体顶，退回英文。
+    assert_eq!(
+        database.description("inode/directory", &chinese).as_deref(),
+        Some("Folder")
+    );
+    assert_eq!(
+        database.description("text/plain", &chinese).as_deref(),
+        Some("My text")
+    );
+    assert_eq!(database.description("image/unknown", &chinese), None);
+}

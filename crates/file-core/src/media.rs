@@ -1,7 +1,6 @@
-use std::io::Read;
 use std::path::Path;
 
-use crate::mime::{MimeDatabase, NameType, TEXT_PLAIN};
+use crate::mime::{read_head, MimeDatabase, NameType, TEXT_PLAIN};
 
 /// 类型库把这几种播放列表挂在 audio/ 下，但它们是指向别处的清单，不是音频数据，
 /// 也没声明继承 text/plain（m3u 声明了，按文本处理）。
@@ -198,16 +197,6 @@ fn is_video_type(types: &MimeDatabase, mime: &str) -> bool {
     let mime = types.canonical(mime);
     (mime.starts_with("video/") && !types.is_subclass(&mime, TEXT_PLAIN))
         || VIDEO_CONTAINER_TYPES.contains(&mime.as_str())
-}
-
-fn read_head(path: &Path, extent: usize) -> Option<Vec<u8>> {
-    let mut head = Vec::new();
-    std::fs::File::open(path)
-        .ok()?
-        .take(extent as u64)
-        .read_to_end(&mut head)
-        .ok()?;
-    Some(head)
 }
 
 fn image_kind_of_name(types: &MimeDatabase, name: &NameType) -> Option<ImageKind> {

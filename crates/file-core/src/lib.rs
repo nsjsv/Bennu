@@ -34,6 +34,7 @@ mod tar_job;
 pub mod text_encoding;
 pub mod transfer_conflict;
 pub mod trash_bin;
+pub mod volume;
 pub mod watch;
 
 pub use archive::{
@@ -62,10 +63,10 @@ pub use checksum::{
     ChecksumProgress, FileChecksums, ALL_CHECKSUM_ALGORITHMS,
 };
 pub use directory_metadata::{
-    resolve_directory_metadata, DirectoryFilesystemMetadata, DirectoryIdentityNames,
-    DirectoryMetadataRequest, DirectoryMetadataRequirement, DirectoryMetadataResolution,
-    DirectoryMetadataResolver, DirectoryMetadataState, DirectoryMetadataUnavailable,
-    DiscoveredDirectoryEntry,
+    group_name, resolve_directory_metadata, user_name, DirectoryFilesystemMetadata,
+    DirectoryIdentityNames, DirectoryMetadataRequest, DirectoryMetadataRequirement,
+    DirectoryMetadataResolution, DirectoryMetadataResolver, DirectoryMetadataState,
+    DirectoryMetadataUnavailable, DiscoveredDirectoryEntry,
 };
 pub use directory_usage::{
     DirectoryUsage, HiddenEntries, UsageMeasurement, UsageProgress, UsageSnapshot,
@@ -131,4 +132,5 @@ pub use trash_bin::{
     scan_trash, scan_trash_with_cancellation, trash_path, TrashEntry, TrashRestoreEntry, TrashScan,
     TrashVerificationBatch,
 };
+pub use volume::{volume_usage, VolumeUsage};
 pub use watch::{watch_directory, DirectoryEntryChanges, DirectoryWatcher, ResolvedEntryChange};

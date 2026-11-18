@@ -52,8 +52,8 @@ pub use open::{
     TerminalEmulator, UrlOpenError, TERMINAL_EMULATOR_OPTIONS,
 };
 pub use open_with::{
-    open_path_with_application, open_with_applications, OpenWithApplication,
-    OpenWithApplicationList, OpenWithError, OpenWithLaunchMode,
+    default_application_name, open_path_with_application, open_with_applications,
+    OpenWithApplication, OpenWithApplicationList, OpenWithError, OpenWithLaunchMode,
 };
 pub use storage_changes::storage_changes;
 pub use storage_devices::{

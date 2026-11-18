@@ -1,10 +1,43 @@
-//! 音频预览里给人看的歌曲文字：标题、歌手 · 专辑、技术参数一行。
+//! 音频预览里给人看的歌曲文字：标题、歌手 · 专辑、技术参数一行；属性窗口的各行。
 
 use std::path::Path;
 
-use bennu_localization::tr;
+use bennu_localization::{format_duration, tr};
 
-use crate::audio_preview::{AudioStreamFacts, AudioTags};
+use crate::audio_preview::{AudioProbe, AudioStreamFacts, AudioTags};
+use crate::info_overlay::InfoRow;
+
+/// 时长（按码率估的写「约」）、标题、艺术家、专辑、技术参数一行；读不到的行不写。
+pub(crate) fn audio_detail_rows(probe: &AudioProbe) -> Vec<InfoRow> {
+    let mut rows = Vec::new();
+    let mut push = |label: String, value: String| rows.push(InfoRow { label, value });
+    if let Some(duration) = probe.duration {
+        let duration = format_duration(duration);
+        push(
+            tr!("Duration"),
+            if probe.duration_is_estimate {
+                tr!("About %1", duration)
+            } else {
+                duration
+            },
+        );
+    }
+    let tags = &probe.tags;
+    for (label, value) in [
+        (tr!("Title"), &tags.title),
+        (tr!("Artist"), &tags.artist),
+        (tr!("Album"), &tags.album),
+    ] {
+        if let Some(value) = value {
+            push(label, value.clone());
+        }
+    }
+    let facts = stream_facts(&probe.stream);
+    if !facts.is_empty() {
+        push(tr!("Audio"), fact_line(facts));
+    }
+    rows
+}
 
 /// 没有歌名标签时用文件名（去掉后缀），和播放器的习惯一样。
 pub(crate) fn track_title(path: &Path, tags: &AudioTags) -> String {
@@ -72,6 +105,38 @@ fn sample_rate_text(rate: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn detail_rows_write_only_what_is_known() {
+        let probe = AudioProbe {
+            duration: Some(std::time::Duration::from_secs(225)),
+            duration_is_estimate: true,
+            tags: AudioTags {
+                title: Some("Intro".to_owned()),
+                artist: None,
+                album: Some("B".to_owned()),
+            },
+            stream: AudioStreamFacts {
+                codec: Some("MP3".to_owned()),
+                ..AudioStreamFacts::default()
+            },
+            embedded_cover_stream: None,
+            embedded_lyrics: None,
+        };
+        let rows = audio_detail_rows(&probe)
+            .into_iter()
+            .map(|row| (row.label, row.value))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            vec![
+                ("Duration".to_owned(), "About 3:45".to_owned()),
+                ("Title".to_owned(), "Intro".to_owned()),
+                ("Album".to_owned(), "B".to_owned()),
+                ("Audio".to_owned(), "MP3".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn title_falls_back_to_the_file_name() {

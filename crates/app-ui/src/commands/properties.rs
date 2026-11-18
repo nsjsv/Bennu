@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
-use file_core::FileKind;
+use file_core::mime::MimeDatabase;
+use file_core::{FileKind, MediaByName};
 use iced::futures::channel::mpsc::Sender as IcedSender;
 use iced::futures::SinkExt;
 use iced::Task;
@@ -12,7 +13,8 @@ use tokio_util::sync::CancellationToken;
 use crate::directory_summary::{measure_directories, metadata_disk_size, MeasureFailure};
 use crate::model::{
     FilePropertiesAggregateSnapshot, FilePropertiesDirectoryContents,
-    FilePropertiesDirectoryContentsState, FilePropertiesIdentity, FilePropertiesMessage,
+    FilePropertiesDirectoryContentsState, FilePropertiesFileDetails, FilePropertiesIdentity,
+    FilePropertiesKindDetails, FilePropertiesLookup, FilePropertiesMessage, FilePropertiesOwner,
     FilePropertiesPermissionBaseline, FilePropertiesPermissionWriteOutcome,
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesRequest,
     FilePropertiesSnapshot, Message, PermissionBatchOutcome, PermissionBatchPathFailure,
@@ -47,39 +49,88 @@ fn single_file_properties_command(
     Task::stream(iced::stream::channel(
         FILE_PROPERTIES_CHANNEL_SIZE,
         async move |mut output| {
-            let properties_outcome = load_file_properties(path).await;
-            let directory_contents_required = properties_outcome.as_ref().is_ok_and(|snapshot| {
-                matches!(
-                    snapshot.directory_contents,
-                    FilePropertiesDirectoryContentsState::Loading(_)
-                )
-            });
-
+            let (outcome, lookups) = match load_file_properties(path.clone()).await {
+                Ok((snapshot, lookups)) => (Ok(snapshot), Some(lookups)),
+                Err(error) => (Err(error), None),
+            };
             if output
                 .send(Message::FileProperties(FilePropertiesMessage::Loaded(
                     request.clone(),
-                    properties_outcome.map(FilePropertiesPresentation::Single),
+                    outcome.map(FilePropertiesPresentation::Single),
                 )))
                 .await
                 .is_err()
             {
                 return;
             }
-
-            if !directory_contents_required || cancellation.is_cancelled() {
+            let Some(lookups) = lookups else {
                 return;
+            };
+            tokio::select! {
+                () = cancellation.cancelled() => {}
+                () = read_slow_properties(&request, &path, lookups, &cancellation, &output) => {}
             }
+        },
+    ))
+}
 
-            let contents_outcome =
+/// 快照发出去以后在后台读的慢项；各读各的，谁先到谁先填。
+struct SlowPropertyLookups {
+    directory_contents: bool,
+    default_application_for: Option<String>,
+    media: Option<MediaByName>,
+}
+
+async fn read_slow_properties(
+    request: &FilePropertiesRequest,
+    path: &Path,
+    lookups: SlowPropertyLookups,
+    cancellation: &CancellationToken,
+    output: &IcedSender<Message>,
+) {
+    let contents = async {
+        if lookups.directory_contents {
+            let mut output = output.clone();
+            let outcome =
                 load_directory_properties_contents(request.clone(), cancellation, &mut output)
                     .await;
             let _ = output
                 .send(Message::FileProperties(
-                    FilePropertiesMessage::DirectoryContentsLoaded(request, contents_outcome),
+                    FilePropertiesMessage::DirectoryContentsLoaded(request.clone(), outcome),
                 ))
                 .await;
-        },
-    ))
+        }
+    };
+    let application = async {
+        if let Some(mime_type) = &lookups.default_application_for {
+            let outcome = desktop_linux::default_application_name(
+                path,
+                mime_type,
+                bennu_localization::current_language().locale_tags(),
+            )
+            .await
+            .map_err(|error| error.to_string());
+            let _ = output
+                .clone()
+                .send(Message::FileProperties(
+                    FilePropertiesMessage::DefaultApplicationLoaded(request.clone(), outcome),
+                ))
+                .await;
+        }
+    };
+    let media = async {
+        if let Some(media) = lookups.media {
+            let outcome =
+                bennu_preview::media_details::media_detail_rows(path.to_path_buf(), media).await;
+            let _ = output
+                .clone()
+                .send(Message::FileProperties(
+                    FilePropertiesMessage::MediaDetailsLoaded(request.clone(), outcome),
+                ))
+                .await;
+        }
+    };
+    tokio::join!(contents, application, media);
 }
 
 fn aggregate_file_properties_command(
@@ -145,7 +196,9 @@ pub(crate) fn apply_file_properties_permissions_to_enclosed_items_command(
     )
 }
 
-async fn load_file_properties(path: PathBuf) -> Result<FilePropertiesSnapshot, String> {
+async fn load_file_properties(
+    path: PathBuf,
+) -> Result<(FilePropertiesSnapshot, SlowPropertyLookups), String> {
     tokio::task::spawn_blocking(move || read_file_properties(path))
         .await
         .map_err(|error| error.to_string())?
@@ -181,18 +234,11 @@ async fn apply_file_properties_permissions_to_enclosed_items(
     .map_err(|error| error.to_string())?
 }
 
-fn read_file_properties(path: PathBuf) -> Result<FilePropertiesSnapshot, String> {
+/// 快的一次读完：stat、所有者名、类型和类型名、链接指向、所在磁盘；慢的记下来后台读。
+fn read_file_properties(
+    path: PathBuf,
+) -> Result<(FilePropertiesSnapshot, SlowPropertyLookups), String> {
     let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
-    let file_type = metadata.file_type();
-    let kind = if file_type.is_dir() {
-        FileKind::Directory
-    } else if file_type.is_file() {
-        FileKind::File
-    } else if file_type.is_symlink() {
-        FileKind::Symlink
-    } else {
-        FileKind::Other
-    };
     let name = path
         .file_name()
         .map(|name| name.to_os_string())
@@ -201,27 +247,62 @@ fn read_file_properties(path: PathBuf) -> Result<FilePropertiesSnapshot, String>
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("/"));
-
-    let directory_contents = if file_type.is_dir() {
-        FilePropertiesDirectoryContentsState::Loading(None)
-    } else {
-        FilePropertiesDirectoryContentsState::NotDirectory
+    let mut lookups = SlowPropertyLookups {
+        directory_contents: false,
+        default_application_for: None,
+        media: None,
     };
-    let size_bytes = metadata.len();
-    let disk_size_bytes = metadata_disk_size(&metadata);
+    let details = match file_kind_for_metadata(&metadata) {
+        FileKind::File => {
+            let types = MimeDatabase::system();
+            let mime_type = types.type_of_file(&path);
+            let media = file_core::media_by_name(&path);
+            lookups.default_application_for = Some(mime_type.clone());
+            lookups.media = (media != MediaByName::Other).then_some(media);
+            FilePropertiesKindDetails::File(FilePropertiesFileDetails {
+                description: types.description(
+                    &mime_type,
+                    bennu_localization::current_language().locale_tags(),
+                ),
+                mime_type,
+                default_application: FilePropertiesLookup::Pending,
+                media_details: lookups.media.map(|_| FilePropertiesLookup::Pending),
+            })
+        }
+        FileKind::Directory => {
+            lookups.directory_contents = true;
+            FilePropertiesKindDetails::Directory(FilePropertiesDirectoryContentsState::Loading(
+                None,
+            ))
+        }
+        FileKind::Symlink => FilePropertiesKindDetails::Symlink(
+            std::fs::read_link(&path).map_err(|error| error.to_string()),
+        ),
+        FileKind::Other => FilePropertiesKindDetails::Other,
+    };
+    // 文件夹可能自己就是挂载点；其余条目（链接本身也是）在所在文件夹的磁盘上。
+    let volume = file_core::volume_usage(if metadata.is_dir() { &path } else { &location })
+        .map_err(|error| error.to_string());
 
-    Ok(FilePropertiesSnapshot {
-        name,
-        kind,
-        location,
-        created: metadata.created().ok(),
-        modified: metadata.modified().ok(),
-        accessed: metadata.accessed().ok(),
-        size_bytes,
-        disk_size_bytes,
-        directory_contents,
-        permissions: metadata_properties_permissions(&metadata, file_type.is_symlink()),
-    })
+    Ok((
+        FilePropertiesSnapshot {
+            name,
+            location,
+            created: metadata.created().ok(),
+            modified: metadata.modified().ok(),
+            accessed: metadata.accessed().ok(),
+            size_bytes: metadata.len(),
+            disk_size_bytes: metadata_disk_size(&metadata),
+            details,
+            owner: FilePropertiesOwner {
+                user: file_core::user_name(metadata.uid()),
+                group: file_core::group_name(metadata.gid()),
+            },
+            volume,
+            permissions: metadata_properties_permissions(&metadata, metadata.is_symlink()),
+        },
+        lookups,
+    ))
 }
 
 async fn read_aggregate_file_properties(
@@ -430,7 +511,7 @@ fn metadata_properties_identity(_metadata: &std::fs::Metadata) -> Option<FilePro
 
 async fn load_directory_properties_contents(
     request: FilePropertiesRequest,
-    cancellation: CancellationToken,
+    cancellation: &CancellationToken,
     output: &mut IcedSender<Message>,
 ) -> Result<FilePropertiesDirectoryContents, String> {
     let path = request
@@ -439,7 +520,7 @@ async fn load_directory_properties_contents(
         .expect("directory contents require one target")
         .to_path_buf();
     let mut progress_output = output.clone();
-    measure_directories(&[path], &cancellation, |usage| {
+    measure_directories(&[path], cancellation, |usage| {
         let _ = progress_output.try_send(Message::FileProperties(
             FilePropertiesMessage::DirectoryContentsUpdated(request.clone(), usage.into()),
         ));

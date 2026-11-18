@@ -1,15 +1,25 @@
-//! 视频的音轨、字幕在菜单和信息层里怎么写：语言名、标题、编码、声道；信息层的各行。
+//! 视频的音轨、字幕在菜单和信息层里怎么写：语言名、标题、编码、声道；信息层和属性窗口的各行。
 
 use bennu_localization::{format_duration, format_file_size, tr};
 
 use crate::info_overlay::InfoRow;
 use crate::preview::VideoPreviewDetails;
-use crate::video_preview::{AudioTrack, SubtitleChoice, VideoStreamFacts, VideoTransfer};
+use crate::video_preview::{
+    AudioTrack, SubtitleChoice, VideoProbe, VideoStreamFacts, VideoTransfer,
+};
 
-/// 信息层：分辨率、帧率、时长、视频编码、码率、动态范围、各音轨、各字幕、容器、大小。
-/// 都来自打开时那一次 ffprobe，读不到的行不写。
+/// 信息层：视频本身的行，最后是大小。都来自打开时那一次 ffprobe。
 pub(crate) fn video_info_rows(details: &VideoPreviewDetails) -> Vec<InfoRow> {
-    let probe = &details.probe;
+    let mut rows = video_detail_rows(&details.probe, &details.subtitles);
+    rows.push(InfoRow {
+        label: tr!("Size"),
+        value: format_file_size(details.len),
+    });
+    rows
+}
+
+/// 分辨率、帧率、时长、视频编码、码率、动态范围、各音轨、各字幕、容器；读不到的行不写。
+pub(crate) fn video_detail_rows(probe: &VideoProbe, subtitles: &[SubtitleChoice]) -> Vec<InfoRow> {
     let mut rows = Vec::new();
     let mut push = |label: String, value: String| rows.push(InfoRow { label, value });
     if let Some(video) = &probe.video {
@@ -45,13 +55,12 @@ pub(crate) fn video_info_rows(details: &VideoPreviewDetails) -> Vec<InfoRow> {
     for track in &probe.audio_tracks {
         push(tr!("Audio"), audio_track_label(track));
     }
-    for choice in &details.subtitles {
+    for choice in subtitles {
         push(tr!("Subtitles"), subtitle_info(choice));
     }
     if let Some(container) = &probe.container {
         push(tr!("Container"), container.clone());
     }
-    push(tr!("Size"), format_file_size(details.len));
     rows
 }
 

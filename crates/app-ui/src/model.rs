@@ -127,13 +127,15 @@ pub(crate) use batch_rename::{
 };
 mod properties;
 pub(crate) use properties::{
-    FilePropertiesAggregateSnapshot, FilePropertiesCategory, FilePropertiesDirectoryContents,
-    FilePropertiesDirectoryContentsState, FilePropertiesIdentity, FilePropertiesLoadState,
-    FilePropertiesMessage, FilePropertiesPermissionAccess, FilePropertiesPermissionBaseline,
-    FilePropertiesPermissionClass, FilePropertiesPermissionUpdate,
-    FilePropertiesPermissionWriteOutcome, FilePropertiesPermissions, FilePropertiesPresentation,
-    FilePropertiesRequest, FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet,
-    PermissionBatchOutcome, PermissionBatchPathFailure,
+    FilePropertiesAggregateSnapshot, FilePropertiesDirectoryContents,
+    FilePropertiesDirectoryContentsState, FilePropertiesFileDetails, FilePropertiesIdentity,
+    FilePropertiesKindDetails, FilePropertiesLoadState, FilePropertiesLookup,
+    FilePropertiesMessage, FilePropertiesOwner, FilePropertiesPermissionAccess,
+    FilePropertiesPermissionBaseline, FilePropertiesPermissionClass,
+    FilePropertiesPermissionUpdate, FilePropertiesPermissionWriteOutcome,
+    FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesRequest,
+    FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet, PermissionBatchOutcome,
+    PermissionBatchPathFailure,
 };
 // 纯搬移：SQLite 预览模型类型已下沉 bennu-preview，此处 re-export 维持
 // crate::model::SqlitePreviewMessage 等既有调用路径不变。

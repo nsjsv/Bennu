@@ -30,8 +30,12 @@ pub(crate) async fn desktop_entry_path(desktop_id: &str) -> Option<PathBuf> {
         .map(|desktop_entry| desktop_entry.path)
 }
 
-pub(crate) fn desktop_entry_name(desktop_entry: &str) -> Option<String> {
-    read_desktop_entry_key(desktop_entry, "Name")
+/// 程序名：按 `languages` 顺序先找 `Name[<标签>]`（Desktop Entry 规范的本地化键），都没有用 `Name`。
+pub(crate) fn desktop_entry_name(desktop_entry: &str, languages: &[&str]) -> Option<String> {
+    languages
+        .iter()
+        .find_map(|language| read_desktop_entry_key(desktop_entry, &format!("Name[{language}]")))
+        .or_else(|| read_desktop_entry_key(desktop_entry, "Name"))
 }
 
 pub(crate) fn desktop_entry_requires_terminal(desktop_entry: &str) -> bool {
@@ -133,6 +137,32 @@ Name=Editor
 Exec=editor %F
 "#;
 
-        assert_eq!(desktop_entry_name(desktop_entry).as_deref(), Some("Editor"));
+        assert_eq!(
+            desktop_entry_name(desktop_entry, &[]).as_deref(),
+            Some("Editor")
+        );
+    }
+
+    #[test]
+    fn desktop_entry_name_prefers_the_requested_language() {
+        let desktop_entry = r#"
+[Desktop Entry]
+Name=Image Viewer
+Name[zh_TW]=圖片檢視器
+Name[zh_CN]=图像查看器
+"#;
+
+        assert_eq!(
+            desktop_entry_name(desktop_entry, &["zh_CN", "zh"]).as_deref(),
+            Some("图像查看器")
+        );
+        assert_eq!(
+            desktop_entry_name(desktop_entry, &["fr_FR", "fr"]).as_deref(),
+            Some("Image Viewer")
+        );
+        assert_eq!(
+            desktop_entry_name(desktop_entry, &[]).as_deref(),
+            Some("Image Viewer")
+        );
     }
 }

@@ -9,8 +9,8 @@ use iced::{Alignment, Element, Length, Padding, Theme};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::{
-    destructive_button_style, icon_button, on_escape, segmented_choice_row, switch, text_field,
-    SegmentedChoice,
+    destructive_button_style, icon_button, on_escape, progress_bar, segmented_choice_row, switch,
+    text_field, SegmentedChoice,
 };
 use bennu_theme::icons::{rotated_chevron_right_view, themed_icon, IconSymbol, IconTone};
 use bennu_theme::metrics::{ROW_MIN_HEIGHT, ROW_PADDING_X, ROW_PADDING_Y};
@@ -167,21 +167,36 @@ pub(in crate::view) fn label_row(title: String, note: Option<RowNote>) -> Settin
 /// 左边标题，右边灰色的值。值长（属性窗口里的路径）时在右边那块里折行、需要时从字中间断，
 /// 标题不让位也不被挤成一列。
 pub(in crate::view) fn value_row(title: String, value: String) -> SettingsRow<'static> {
+    framed(value_line(title, value))
+}
+
+/// 用量行（磁盘空间）：和 [`value_row`] 一样左标题右灰字，下面一条 0～1 的用量条。
+pub(in crate::view) fn meter_row(
+    title: String,
+    value: String,
+    fraction: f32,
+) -> SettingsRow<'static> {
     framed(
-        row![
-            readable_text(title).wrapping(Wrapping::None),
-            readable_text(value)
-                .size(CAPTION_SIZE)
-                .width(Length::Fill)
-                .align_x(Horizontal::Right)
-                .wrapping(Wrapping::WordOrGlyph)
-                .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(muted_text_color(theme)),
-                }),
-        ]
-        .spacing(ROW_CONTENT_SPACING)
-        .align_y(Alignment::Center),
+        column![value_line(title, value), progress_bar(0.0..=1.0, fraction),]
+            .spacing(8)
+            .padding(Padding::default().top(4.0).bottom(4.0)),
     )
+}
+
+fn value_line(title: String, value: String) -> Row<'static, Message> {
+    row![
+        readable_text(title).wrapping(Wrapping::None),
+        readable_text(value)
+            .size(CAPTION_SIZE)
+            .width(Length::Fill)
+            .align_x(Horizontal::Right)
+            .wrapping(Wrapping::WordOrGlyph)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(muted_text_color(theme)),
+            }),
+    ]
+    .spacing(ROW_CONTENT_SPACING)
+    .align_y(Alignment::Center)
 }
 
 /// 可折叠的行：头部整行可点；折叠时头部右边是摘要，展开时下面是内容。

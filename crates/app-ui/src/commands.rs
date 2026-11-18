@@ -269,7 +269,7 @@ pub(crate) fn open_with_applications_command(path: PathBuf) -> Task<Message> {
     let requested_path = path.clone();
     Task::perform(
         async move {
-            open_with_applications(path)
+            open_with_applications(path, bennu_localization::current_language().locale_tags())
                 .await
                 .map_err(|error| error.to_string())
         },

@@ -23,8 +23,9 @@ mod symbolic_links;
 pub use convert::{
     available_conversion_encoders, convert_file_with_controls, locate_media_tool, media_duration,
     AudioChannelSpec, AudioTargetFormat, ConversionEncoderAvailability, ConversionQualityPreset,
-    ConversionRequest, ConversionTarget, ConvertedFile, ImageTargetFormat, OutputLocation,
-    QualitySpec, ResizeSpec, VideoTargetFormat,
+    ConversionRequest, ConversionTarget, ConvertedFile, ImageTargetFormat, MediaEdits,
+    OutputLocation, QualitySpec, ResizeSpec, TrimRange, VideoRotation, VideoSound,
+    VideoTargetFormat,
 };
 pub use recoverable_transfer::{
     advance_recoverable_transfer, durable_direct_move_commit, persist_source_manifests,

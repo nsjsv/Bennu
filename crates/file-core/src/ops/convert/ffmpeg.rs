@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -8,9 +7,13 @@ use tokio::process::Command;
 
 use super::super::FileOperationControls;
 use super::command_plan::{
-    audio_encoder_name, avif_preset_crf, gif_stream_args, lossy_image_preset_quality,
-    quality_mode_audio_args, resolve_targeted_rate, scale_filter_args, video_stream_args,
-    ImageEncodingParameter, ResolvedRate,
+    audio_encoder_name, avif_preset_crf, frame_filter_args, gif_stream_args, input_args,
+    lossy_image_preset_quality, quality_mode_audio_args, resolve_targeted_rate, trim_length_args,
+    video_stream_args, ImageEncodingParameter, ResolvedRate,
+};
+use super::media_tools::{
+    has_audio_stream, locate_media_tool, media_duration, probe_encoder_names,
+    ConversionEncoderAvailability, FFMPEG_TOOL_CANDIDATES,
 };
 use super::{
     output_satisfies_target, AudioChannelSpec, AudioTargetFormat, ConversionRequest,
@@ -18,173 +21,10 @@ use super::{
 };
 use crate::FileError;
 
-/// 与 7z 的候选名循环同模式:预留给发行版改名场景。
-const FFMPEG_TOOL_CANDIDATES: [&str; 1] = ["ffmpeg"];
-const FFPROBE_TOOL_CANDIDATES: [&str; 1] = ["ffprobe"];
-
 /// stderr 最多保留的尾部字节数:错误诊断只需要 ffmpeg 输出的结尾部分。
 const CHILD_STDERR_TAIL_LIMIT: usize = 4 * 1024;
 /// 图片体积模式二分轮次上限;每轮一次真实编码。
 const IMAGE_TARGET_SEARCH_ROUNDS: u8 = 5;
-
-/// UI 与执行层共用的 ffmpeg 可执行文件发现:spawn `-version` 成功即视为存在。
-pub async fn locate_media_tool(candidates: &[&str]) -> Option<String> {
-    for candidate in candidates {
-        let spawn_check = Command::new(candidate)
-            .arg("-version")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-        if let Ok(mut child) = spawn_check {
-            let _ = child.wait().await;
-            return Some((*candidate).to_owned());
-        }
-    }
-    None
-}
-
-/// 编码器可用性:UI 据此禁用系统 ffmpeg 不支持的目标格式选项。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConversionEncoderAvailability {
-    encoder_names: HashSet<String>,
-}
-
-impl ConversionEncoderAvailability {
-    /// 空集表示 ffmpeg 不可用或探测失败。
-    pub fn is_empty(&self) -> bool {
-        self.encoder_names.is_empty()
-    }
-
-    /// UI 初始状态:尚未探测到任何编码器。
-    pub fn unavailable() -> Self {
-        Self {
-            encoder_names: HashSet::new(),
-        }
-    }
-
-    /// 名字与 `ffmpeg -encoders` 列出的一致(`libx264`、`aac`……)。
-    pub fn from_encoder_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
-        Self {
-            encoder_names: names.into_iter().map(str::to_owned).collect(),
-        }
-    }
-
-    pub fn supports_video(&self, format: VideoTargetFormat) -> bool {
-        match format {
-            VideoTargetFormat::Mp4H264 | VideoTargetFormat::MovH264 => {
-                self.encoder_names.contains("libx264")
-            }
-            VideoTargetFormat::Mp4H265 | VideoTargetFormat::MkvH265 => {
-                self.encoder_names.contains("libx265")
-            }
-            VideoTargetFormat::MkvAv1 | VideoTargetFormat::WebmAv1 => {
-                self.any(&["libsvtav1", "libaom-av1"])
-            }
-            VideoTargetFormat::WebmVp9 => self.encoder_names.contains("libvpx-vp9"),
-            // mpeg4 与 gif 是 ffmpeg 内置编码器,存在 ffmpeg 即可用。
-            VideoTargetFormat::AviMpeg4 | VideoTargetFormat::Gif => !self.is_empty(),
-        }
-    }
-
-    pub fn supports_audio(&self, format: AudioTargetFormat) -> bool {
-        match format {
-            AudioTargetFormat::Mp3 => self.encoder_names.contains("libmp3lame"),
-            // aac、flac、pcm_s16le 是内置编码器。
-            AudioTargetFormat::M4a => self.encoder_names.contains("aac"),
-            AudioTargetFormat::Opus => self.encoder_names.contains("libopus"),
-            AudioTargetFormat::Flac => self.encoder_names.contains("flac"),
-            AudioTargetFormat::Ogg => self.encoder_names.contains("libvorbis"),
-            AudioTargetFormat::Wav => self.encoder_names.contains("pcm_s16le"),
-        }
-    }
-
-    pub fn supports_lossy_image(&self, format: ImageTargetFormat) -> bool {
-        match format {
-            ImageTargetFormat::Webp => {
-                self.encoder_names.contains("libwebp_anim")
-                    || self.encoder_names.contains("libwebp")
-            }
-            ImageTargetFormat::Avif => self.any(&["libsvtav1", "libaom-av1"]),
-            ImageTargetFormat::Jxl => self.encoder_names.contains("libjxl"),
-            ImageTargetFormat::Gif => !self.is_empty(),
-            // 这几种由 image crate 处理,不依赖 ffmpeg。
-            ImageTargetFormat::Jpeg
-            | ImageTargetFormat::Png
-            | ImageTargetFormat::Tiff
-            | ImageTargetFormat::Bmp
-            | ImageTargetFormat::Ico => true,
-        }
-    }
-
-    fn contains(&self, name: &str) -> bool {
-        self.encoder_names.contains(name)
-    }
-
-    fn any(&self, names: &[&str]) -> bool {
-        names.iter().any(|name| self.contains(name))
-    }
-}
-
-/// 解析 `ffmpeg -encoders` 输出;ffmpeg 缺失时返回空集,由 UI 统一禁用选项。
-pub async fn available_conversion_encoders() -> ConversionEncoderAvailability {
-    let Some(ffmpeg_command) = locate_media_tool(&FFMPEG_TOOL_CANDIDATES).await else {
-        return ConversionEncoderAvailability::unavailable();
-    };
-    probe_encoder_names(&ffmpeg_command)
-        .await
-        .unwrap_or_else(ConversionEncoderAvailability::unavailable)
-}
-
-async fn probe_encoder_names(ffmpeg_command: &str) -> Option<ConversionEncoderAvailability> {
-    let output = Command::new(ffmpeg_command)
-        .arg("-hide_banner")
-        .arg("-encoders")
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    // 行形如 " A....L libmp3lame  description";第二个空白分隔字段是编码器名。
-    let listing = String::from_utf8_lossy(&output.stdout);
-    Some(ConversionEncoderAvailability::from_encoder_names(
-        listing
-            .lines()
-            .filter_map(|line| line.split_whitespace().nth(1)),
-    ))
-}
-
-/// ffprobe 读取媒体总时长;视频/音频体积模式依赖它做码率估算。
-pub async fn media_duration(path: &Path) -> Option<Duration> {
-    let ffprobe_command = locate_media_tool(&FFPROBE_TOOL_CANDIDATES).await?;
-    let output = Command::new(ffprobe_command)
-        .arg("-v")
-        .arg("error")
-        .arg("-show_entries")
-        .arg("format=duration")
-        .arg("-of")
-        .arg("default=noprint_wrappers=1:nokey=1")
-        .arg(path)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let seconds = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<f64>()
-        .ok()?;
-    if seconds.is_finite() && seconds > 0.0 {
-        Some(Duration::from_secs_f64(seconds))
-    } else {
-        None
-    }
-}
 
 /// ffmpeg 引擎统一入口:图片(WebP/AVIF)与视频、音频转换。
 pub(super) async fn convert_losing_source(
@@ -257,11 +97,10 @@ async fn convert_gif_image(
             message: "gif output requires a quality preset".to_owned(),
         });
     };
-    let mut args = vec!["-y".to_owned(), "-nostdin".to_owned()];
-    args.push("-i".to_owned());
-    args.push(request.source.to_string_lossy().into_owned());
+    let mut args = input_args(request);
     args.extend(gif_stream_args(
         preset,
+        request.edits.rotation,
         request.resize,
         request.fps_override,
     ));
@@ -510,9 +349,8 @@ async fn run_image_encode(
     encoders: &ConversionEncoderAvailability,
     controls: &FileOperationControls,
 ) -> Result<u64, FileError> {
-    let mut args = vec!["-y".to_owned(), "-nostdin".to_owned(), "-i".to_owned()];
-    args.push(request.source.to_string_lossy().into_owned());
-    args.extend(scale_filter_args(request.resize));
+    let mut args = input_args(request);
+    args.extend(frame_filter_args(request.edits.rotation, request.resize));
     match format {
         ImageTargetFormat::Webp => {
             let encoder = if encoders.contains("libwebp_anim") {
@@ -604,23 +442,9 @@ async fn convert_video_format(
             message: format!("ffmpeg lacks the encoder required for {format:?} output"),
         });
     }
-    let duration = if matches!(request.quality, QualitySpec::TargetBytes(_)) {
-        Some(
-            media_duration(&request.source)
-                .await
-                .ok_or_else(|| FileError::Convert {
-                    path: request.source.clone(),
-                    message: "could not read media duration for target size mode".to_owned(),
-                })?,
-        )
-    } else {
-        None
-    };
-    let rate = resolve_targeted_rate(request, duration)?;
+    let rate = resolve_targeted_rate(request, targeted_duration(request).await?)?;
 
-    let mut args = vec!["-y".to_owned(), "-nostdin".to_owned()];
-    args.push("-i".to_owned());
-    args.push(request.source.to_string_lossy().into_owned());
+    let mut args = input_args(request);
     if format == VideoTargetFormat::Gif {
         let QualitySpec::Preset(preset) = request.quality else {
             return Err(FileError::InvalidInput {
@@ -630,17 +454,24 @@ async fn convert_video_format(
         };
         args.extend(gif_stream_args(
             preset,
+            request.edits.rotation,
             request.resize,
             request.fps_override,
         ));
     } else {
-        args.extend(video_stream_args(format, &request.quality, rate));
-        args.extend(scale_filter_args(request.resize));
+        args.extend(video_stream_args(
+            format,
+            &request.quality,
+            rate,
+            request.edits.sound,
+        ));
+        args.extend(frame_filter_args(request.edits.rotation, request.resize));
         if let Some(fps) = request.fps_override {
             args.push("-r".to_owned());
             args.push(fps.to_string());
         }
     }
+    args.extend(trim_length_args(request.edits.trim));
     args.push(output.to_string_lossy().into_owned());
 
     run_ffmpeg(ffmpeg_command, &args, &request.source, controls).await?;
@@ -661,23 +492,9 @@ async fn convert_audio_format(
             message: format!("ffmpeg lacks the encoder required for {format:?} output"),
         });
     }
-    let duration = if matches!(request.quality, QualitySpec::TargetBytes(_)) {
-        Some(
-            media_duration(&request.source)
-                .await
-                .ok_or_else(|| FileError::Convert {
-                    path: request.source.clone(),
-                    message: "could not read media duration for target size mode".to_owned(),
-                })?,
-        )
-    } else {
-        None
-    };
-    let rate = resolve_targeted_rate(request, duration)?;
+    let rate = resolve_targeted_rate(request, targeted_duration(request).await?)?;
 
-    let mut args = vec!["-y".to_owned(), "-nostdin".to_owned()];
-    args.push("-i".to_owned());
-    args.push(request.source.to_string_lossy().into_owned());
+    let mut args = input_args(request);
     args.push("-vn".to_owned());
     match (format, rate) {
         (
@@ -725,10 +542,49 @@ async fn convert_audio_format(
         args.push("-ac".to_owned());
         args.push("1".to_owned());
     }
+    args.extend(trim_length_args(request.edits.trim));
     args.push(output.to_string_lossy().into_owned());
 
-    run_ffmpeg(ffmpeg_command, &args, &request.source, controls).await?;
+    if let Err(error) = run_ffmpeg(ffmpeg_command, &args, &request.source, controls).await {
+        return Err(explain_audio_failure(request, error).await);
+    }
     output_file_byte_count(output).await
+}
+
+/// 视频里没有声音时 ffmpeg 只会说“输出里没有流”;失败后才查一次音轨,
+/// 成功的转换不多跑 ffprobe。查不了(没有 ffprobe)就保留 ffmpeg 原话。
+async fn explain_audio_failure(request: &ConversionRequest, error: FileError) -> FileError {
+    if !matches!(error, FileError::Convert { .. }) {
+        return error;
+    }
+    match has_audio_stream(&request.source).await {
+        Some(false) => FileError::NoAudioTrack {
+            path: request.source.clone(),
+        },
+        _ => error,
+    }
+}
+
+/// 体积模式按截取后的那段时长估码率;其它模式不用时长。
+async fn targeted_duration(request: &ConversionRequest) -> Result<Option<Duration>, FileError> {
+    if !matches!(request.quality, QualitySpec::TargetBytes(_)) {
+        return Ok(None);
+    }
+    let total = media_duration(&request.source)
+        .await
+        .ok_or_else(|| FileError::Convert {
+            path: request.source.clone(),
+            message: "could not read media duration for target size mode".to_owned(),
+        })?;
+    request
+        .edits
+        .trim
+        .clipped_duration(total)
+        .map(Some)
+        .ok_or_else(|| FileError::Convert {
+            path: request.source.clone(),
+            message: "the trim range is outside the media".to_owned(),
+        })
 }
 
 async fn run_ffmpeg(
@@ -820,50 +676,4 @@ async fn output_file_byte_count(output: &Path) -> Result<u64, FileError> {
             message: format!("converted output is missing: {error}"),
         })?;
     Ok(metadata.len())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn encoder_availability_reports_format_support() {
-        let availability = ConversionEncoderAvailability::from_encoder_names([
-            "libx264",
-            "libmp3lame",
-            "flac",
-            "libwebp",
-            "libsvtav1",
-            "libjxl",
-        ]);
-
-        assert!(availability.supports_video(VideoTargetFormat::Mp4H264));
-        assert!(!availability.supports_video(VideoTargetFormat::MkvH265));
-        // 内置编码器目标(mpeg4/gif)只要有 ffmpeg 就可用。
-        assert!(availability.supports_video(VideoTargetFormat::AviMpeg4));
-        assert!(availability.supports_video(VideoTargetFormat::Gif));
-        assert!(availability.supports_audio(AudioTargetFormat::Mp3));
-        assert!(availability.supports_audio(AudioTargetFormat::Flac));
-        assert!(!availability.supports_audio(AudioTargetFormat::Opus));
-        assert!(!availability.supports_audio(AudioTargetFormat::Wav));
-        assert!(availability.supports_lossy_image(ImageTargetFormat::Webp));
-        assert!(availability.supports_lossy_image(ImageTargetFormat::Avif));
-        assert!(availability.supports_lossy_image(ImageTargetFormat::Jxl));
-        assert!(availability.supports_lossy_image(ImageTargetFormat::Jpeg));
-        assert!(availability.supports_lossy_image(ImageTargetFormat::Gif));
-        // 没有 libjxl 时 JXL 目标应不可用。
-        let without_jxl = ConversionEncoderAvailability::from_encoder_names(["libx264"]);
-        assert!(!without_jxl.supports_lossy_image(ImageTargetFormat::Jxl));
-    }
-
-    #[test]
-    fn missing_ffmpeg_leaves_only_image_crate_targets() {
-        let missing = ConversionEncoderAvailability::unavailable();
-        assert!(missing.is_empty());
-        assert!(!missing.supports_video(VideoTargetFormat::AviMpeg4));
-        assert!(!missing.supports_video(VideoTargetFormat::Gif));
-        assert!(!missing.supports_lossy_image(ImageTargetFormat::Gif));
-        assert!(missing.supports_lossy_image(ImageTargetFormat::Jpeg));
-        assert!(missing.supports_lossy_image(ImageTargetFormat::Png));
-    }
 }

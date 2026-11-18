@@ -19,6 +19,7 @@ use super::dialog::{self, Dialog};
 use super::{themed_icon, IconTone};
 
 mod media_sections;
+mod video_section;
 
 const CONVERT_PANEL_WIDTH: f32 = 600.0;
 const ICON_SIZE: f32 = 14.0;
@@ -30,7 +31,7 @@ pub(super) fn convert_panel(state: &ConvertState) -> Element<'_, Message> {
         body = body.push(media_sections::image_section(section, encoders));
     }
     if let Some(section) = &state.video {
-        body = body.push(media_sections::video_section(section, encoders));
+        body = body.push(video_section::video_section(section, encoders));
     }
     if let Some(section) = &state.audio {
         body = body.push(media_sections::audio_section(section, encoders));
@@ -126,6 +127,9 @@ fn input_error_text(error: ConvertInputError) -> Option<String> {
         ConvertInputError::MissingEncoder => None,
         ConvertInputError::TargetSize => Some(tr!("Enter a target size like 500 KiB or 2 MiB.")),
         ConvertInputError::LongEdge => Some(tr!("Enter the long edge in pixels.")),
+        ConvertInputError::Trim => Some(tr!(
+            "Write times like 1:30 or 0:01:30.5, with the end after the start."
+        )),
         ConvertInputError::OutputDirectory => Some(tr!("Enter an absolute path.")),
     }
 }

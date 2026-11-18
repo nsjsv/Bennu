@@ -1,5 +1,5 @@
-//! 三类媒体的卡片：格式、质量、「更多」。质量行和「更多」三类共用，
-//! 各类只给自己的格式表和「更多」里的项。
+//! 图片、音频卡片，和三类共用的行：格式、质量、「更多」、缩放、声道。
+//! 视频卡片在 `video_section.rs`。
 
 use iced::widget::row;
 use iced::{Alignment, Element, Length};
@@ -10,8 +10,8 @@ use crate::app::convert::ConvertMessage;
 use crate::model::{
     AudioConvertOptions, AudioEdit, ConvertEdit, ImageConvertOptions, ImageEdit, MediaOptions,
     MediaSection, Message, QualityChoice, QualityControl, ResizeChoice, ResizeSelection,
-    SectionEdit, VideoConvertOptions, VideoEdit, AUDIO_TARGET_FORMATS, FPS_CHOICES,
-    IMAGE_TARGET_FORMATS, QUALITY_PRESETS, RESIZE_PERCENT_CHOICES, VIDEO_TARGET_FORMATS,
+    SectionEdit, AUDIO_TARGET_FORMATS, IMAGE_TARGET_FORMATS, QUALITY_PRESETS,
+    RESIZE_PERCENT_CHOICES,
 };
 use bennu_theme::controls::{dropdown, segmented_choice_row, text_field, SegmentedChoice};
 
@@ -21,7 +21,7 @@ use super::super::settings_group::{
 };
 
 const FORMAT_PICK_WIDTH: f32 = 240.0;
-const ROW_CONTROL_WIDTH: f32 = 170.0;
+pub(super) const ROW_CONTROL_WIDTH: f32 = 170.0;
 
 pub(super) fn image_section<'a>(
     section: &'a MediaSection<ImageConvertOptions>,
@@ -45,36 +45,6 @@ pub(super) fn image_section<'a>(
     section_card(tr!("Images"), section, rows)
 }
 
-pub(super) fn video_section<'a>(
-    section: &'a MediaSection<VideoConvertOptions>,
-    encoders: Option<&ConversionEncoderAvailability>,
-) -> Element<'a, Message> {
-    let options = &section.options;
-    let formats = available_formats(&VIDEO_TARGET_FORMATS, encoders, |encoders, format| {
-        encoders.supports_video(format)
-    });
-    let mut rows = vec![format_row(formats, options.target_format, |format| {
-        video_edit(SectionEdit::Options(VideoEdit::Format(format)))
-    })];
-    rows.extend(quality_rows(options, video_edit));
-    let summary = resize_summary(&options.resize)
-        .into_iter()
-        .chain(options.fps_override.map(|fps| format!("{fps}fps")))
-        .collect();
-    let mut more = resize_rows(
-        &options.resize,
-        |choice| video_edit(SectionEdit::Options(VideoEdit::Resize(choice))),
-        |text| video_edit(SectionEdit::Options(VideoEdit::LongEdge(text))),
-    );
-    more.push(control_row(
-        tr!("Frame rate"),
-        None,
-        segmented_choice_row(fps_choices(options.fps_override)),
-    ));
-    rows.extend(more_rows(section, summary, video_edit, more));
-    section_card(tr!("Videos"), section, rows)
-}
-
 pub(super) fn audio_section<'a>(
     section: &'a MediaSection<AudioConvertOptions>,
     encoders: Option<&ConversionEncoderAvailability>,
@@ -87,29 +57,10 @@ pub(super) fn audio_section<'a>(
         audio_edit(SectionEdit::Options(AudioEdit::Format(format)))
     })];
     rows.extend(quality_rows(options, audio_edit));
-    let summary = (options.channels == AudioChannelSpec::Mono)
-        .then(|| tr!("Mono"))
-        .into_iter()
-        .collect();
-    let channel_choices = [
-        (AudioChannelSpec::Keep, tr!("Keep")),
-        (AudioChannelSpec::Mono, tr!("Mono")),
-    ]
-    .into_iter()
-    .map(|(channels, label)| SegmentedChoice {
-        label,
-        selected: options.channels == channels,
-        message: Some(audio_edit(SectionEdit::Options(AudioEdit::Channels(
-            channels,
-        )))),
-        tooltip: None,
-    })
-    .collect();
-    let more = vec![control_row(
-        tr!("Channels"),
-        None,
-        segmented_choice_row(channel_choices),
-    )];
+    let summary = channels_summary(options.channels).into_iter().collect();
+    let more = vec![channels_row(options.channels, |channels| {
+        audio_edit(SectionEdit::Options(AudioEdit::Channels(channels)))
+    })];
     rows.extend(more_rows(section, summary, audio_edit, more));
     section_card(tr!("Audio"), section, rows)
 }
@@ -118,16 +69,12 @@ fn image_edit(edit: SectionEdit<ImageEdit>) -> Message {
     Message::Convert(ConvertMessage::Edit(ConvertEdit::Image(edit)))
 }
 
-fn video_edit(edit: SectionEdit<VideoEdit>) -> Message {
-    Message::Convert(ConvertMessage::Edit(ConvertEdit::Video(edit)))
-}
-
 fn audio_edit(edit: SectionEdit<AudioEdit>) -> Message {
     Message::Convert(ConvertMessage::Edit(ConvertEdit::Audio(edit)))
 }
 
 /// 小标题：`图片 · 3 个 · PNG、JPEG · 12 MiB`。
-fn section_card<'a, O>(
+pub(super) fn section_card<'a, O>(
     kind: String,
     section: &MediaSection<O>,
     rows: Vec<SettingsRow<'a>>,
@@ -145,7 +92,7 @@ fn section_card<'a, O>(
 }
 
 /// 探测完之前列出全部格式：探测很快，回来后编不了的格式会自动退掉。
-fn available_formats<F: Copy>(
+pub(super) fn available_formats<F: Copy>(
     formats: &[F],
     encoders: Option<&ConversionEncoderAvailability>,
     supports: impl Fn(&ConversionEncoderAvailability, F) -> bool,
@@ -158,7 +105,7 @@ fn available_formats<F: Copy>(
 }
 
 /// 格式多到分段按钮放不下，用下拉。
-fn format_row<F>(
+pub(super) fn format_row<F>(
     formats: Vec<F>,
     selected: F,
     message: impl Fn(F) -> Message + 'static,
@@ -174,7 +121,7 @@ where
 }
 
 /// 无损格式没有这一行；GIF 只有档位；其余是档位加「按大小」，选了按大小再多一行输入框。
-fn quality_rows<O: MediaOptions>(
+pub(super) fn quality_rows<O: MediaOptions>(
     options: &O,
     wrap: fn(SectionEdit<O::Edit>) -> Message,
 ) -> Vec<SettingsRow<'_>> {
@@ -230,7 +177,7 @@ fn preset_label(preset: ConversionQualityPreset) -> String {
 }
 
 /// 「更多」：收起时右边灰字列出改过的项，全是默认就空着。
-fn more_rows<'a, O: MediaOptions>(
+pub(super) fn more_rows<'a, O: MediaOptions>(
     section: &MediaSection<O>,
     summary: Vec<String>,
     wrap: fn(SectionEdit<O::Edit>) -> Message,
@@ -244,7 +191,7 @@ fn more_rows<'a, O: MediaOptions>(
     )
 }
 
-fn resize_summary(resize: &ResizeSelection) -> Option<String> {
+pub(super) fn resize_summary(resize: &ResizeSelection) -> Option<String> {
     match resize.choice {
         ResizeChoice::Percent(percent) if percent >= 100 => None,
         ResizeChoice::Percent(percent) => Some(format!("{percent}%")),
@@ -253,7 +200,7 @@ fn resize_summary(resize: &ResizeSelection) -> Option<String> {
 }
 
 /// 缩放：百分比或「长边」；选长边再多一行填像素。
-fn resize_rows<'a>(
+pub(super) fn resize_rows<'a>(
     resize: &'a ResizeSelection,
     choose: impl Fn(ResizeChoice) -> Message,
     long_edge_changed: impl Fn(String) -> Message + 'a,
@@ -291,18 +238,25 @@ fn resize_rows<'a>(
     rows
 }
 
-fn fps_choices(selected: Option<u32>) -> Vec<SegmentedChoice<Message>> {
-    std::iter::once((None, tr!("Keep")))
-        .chain(
-            FPS_CHOICES
-                .into_iter()
-                .map(|fps| (Some(fps), format!("{fps}fps"))),
-        )
-        .map(|(fps, label)| SegmentedChoice {
-            label,
-            selected: selected == fps,
-            message: Some(video_edit(SectionEdit::Options(VideoEdit::Fps(fps)))),
-            tooltip: None,
-        })
-        .collect()
+pub(super) fn channels_summary(channels: AudioChannelSpec) -> Option<String> {
+    (channels == AudioChannelSpec::Mono).then(|| tr!("Mono"))
+}
+
+pub(super) fn channels_row(
+    selected: AudioChannelSpec,
+    message: impl Fn(AudioChannelSpec) -> Message,
+) -> SettingsRow<'static> {
+    let choices = [
+        (AudioChannelSpec::Keep, tr!("Keep")),
+        (AudioChannelSpec::Mono, tr!("Mono")),
+    ]
+    .into_iter()
+    .map(|(channels, label)| SegmentedChoice {
+        label,
+        selected: selected == channels,
+        message: Some(message(channels)),
+        tooltip: None,
+    })
+    .collect();
+    control_row(tr!("Channels"), None, segmented_choice_row(choices))
 }

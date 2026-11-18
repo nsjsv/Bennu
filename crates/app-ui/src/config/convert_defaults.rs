@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::unrecognized_settings::UnrecognizedSettings;
 use crate::model::{
     AudioConvertOptions, ConvertDefaults, ImageConvertOptions, QualitySelection, ResizeChoice,
-    ResizeSelection, VideoConvertOptions,
+    ResizeSelection, VideoClip, VideoConvertOptions, VideoTarget,
 };
 
 const IMAGE_FORMAT_KEYS: [(ImageTargetFormat, &str); 9] = [
@@ -53,6 +53,8 @@ const CHANNEL_KEYS: [(AudioChannelSpec, &str); 2] = [
     (AudioChannelSpec::Mono, "mono"),
 ];
 const UNRECOGNIZED_KEY: &str = "convert_defaults";
+/// 视频卡片“只要声音”的目标存 `audio_<音频格式键>`，和视频格式键不会撞。
+const SOUND_ONLY_PREFIX: &str = "audio_";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredConvertDefaults {
@@ -74,6 +76,9 @@ pub(crate) struct StoredVideoConvert {
     pub quality: StoredQuality,
     pub resize: StoredResize,
     pub fps: Option<u32>,
+    /// 只要声音时的声道;None = 早先没存过,按保持。
+    #[serde(default)]
+    pub channels: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,10 +122,11 @@ impl StoredConvertDefaults {
                 resize: StoredResize::from_selection(&image.resize),
             },
             video: StoredVideoConvert {
-                format: key_of(&VIDEO_FORMAT_KEYS, video.target_format).to_owned(),
+                format: video_target_key(video.target),
                 quality: StoredQuality::from_selection(&video.quality),
                 resize: StoredResize::from_selection(&video.resize),
                 fps: video.fps_override,
+                channels: Some(key_of(&CHANNEL_KEYS, video.channels).to_owned()),
             },
             audio: StoredAudioConvert {
                 format: key_of(&AUDIO_FORMAT_KEYS, audio.target_format).to_owned(),
@@ -145,14 +151,18 @@ impl StoredConvertDefaults {
                 resize: self.image.resize.to_selection(),
             },
             video: VideoConvertOptions {
-                target_format: keys.read(
-                    &VIDEO_FORMAT_KEYS,
-                    &self.video.format,
-                    fallback.video.target_format,
+                target: keys.recognize(
+                    video_target_from_key(&self.video.format),
+                    fallback.video.target,
                 ),
                 quality: self.video.quality.to_selection(&mut keys),
                 resize: self.video.resize.to_selection(),
                 fps_override: self.video.fps.filter(|fps| *fps > 0),
+                channels: match &self.video.channels {
+                    Some(channels) => keys.read(&CHANNEL_KEYS, channels, fallback.video.channels),
+                    None => fallback.video.channels,
+                },
+                clip: VideoClip::default(),
             },
             audio: AudioConvertOptions {
                 target_format: keys.read(
@@ -221,13 +231,36 @@ struct KeyReader<'a> {
 
 impl KeyReader<'_> {
     fn read<T: Copy>(&mut self, table: &[(T, &str)], key: &str, fallback: T) -> T {
-        let value = table
-            .iter()
-            .find(|(_, candidate)| *candidate == key)
-            .map(|(value, _)| *value);
+        self.recognize(value_of(table, key), fallback)
+    }
+
+    fn recognize<T>(&mut self, value: Option<T>, fallback: T) -> T {
         self.unrecognized
             .value_or_default(UNRECOGNIZED_KEY, value, fallback)
     }
+}
+
+fn video_target_key(target: VideoTarget) -> String {
+    match target {
+        VideoTarget::Video(format) => key_of(&VIDEO_FORMAT_KEYS, format).to_owned(),
+        VideoTarget::Audio(format) => {
+            format!("{SOUND_ONLY_PREFIX}{}", key_of(&AUDIO_FORMAT_KEYS, format))
+        }
+    }
+}
+
+fn video_target_from_key(key: &str) -> Option<VideoTarget> {
+    match key.strip_prefix(SOUND_ONLY_PREFIX) {
+        Some(audio_key) => value_of(&AUDIO_FORMAT_KEYS, audio_key).map(VideoTarget::Audio),
+        None => value_of(&VIDEO_FORMAT_KEYS, key).map(VideoTarget::Video),
+    }
+}
+
+fn value_of<T: Copy>(table: &[(T, &str)], key: &str) -> Option<T> {
+    table
+        .iter()
+        .find(|(_, candidate)| *candidate == key)
+        .map(|(value, _)| *value)
 }
 
 fn key_of<T: Copy + PartialEq>(table: &[(T, &'static str)], value: T) -> &'static str {
@@ -275,7 +308,8 @@ mod tests {
         defaults.image.target_format = ImageTargetFormat::Avif;
         defaults.image.resize.choice = ResizeChoice::LongEdge;
         defaults.image.resize.long_edge_text = "1280".to_owned();
-        defaults.video.target_format = VideoTargetFormat::WebmVp9;
+        defaults.video.target = VideoTarget::Audio(AudioTargetFormat::Flac);
+        defaults.video.channels = AudioChannelSpec::Mono;
         defaults.video.quality.by_target_size = true;
         defaults.video.quality.target_size_text = "8 MiB".to_owned();
         defaults.video.fps_override = Some(30);
@@ -289,6 +323,31 @@ mod tests {
         let mut unrecognized = UnrecognizedSettings::default();
         assert_eq!(stored.to_defaults(&mut unrecognized), defaults);
         assert!(unrecognized.into_keys().is_empty());
+
+        defaults.video.target = VideoTarget::Video(VideoTargetFormat::WebmVp9);
+        let stored = StoredConvertDefaults::from_defaults(&defaults);
+        assert_eq!(stored.video.format, "webm_vp9");
+        let mut unrecognized = UnrecognizedSettings::default();
+        assert_eq!(stored.to_defaults(&mut unrecognized), defaults);
+    }
+
+    #[test]
+    fn one_off_clip_edits_are_not_stored() {
+        let mut defaults = ConvertDefaults::default();
+        defaults.video.clip.trim_start_text = "0:10".to_owned();
+        let stored = StoredConvertDefaults::from_defaults(&defaults);
+        let mut unrecognized = UnrecognizedSettings::default();
+        assert_eq!(
+            stored.to_defaults(&mut unrecognized).video.clip,
+            VideoClip::default()
+        );
+    }
+
+    #[test]
+    fn video_defaults_stored_before_sound_only_targets_still_load() {
+        let json = r#"{"format":"mp4_h264","quality":{"preset":"medium","by_target_size":false,"target_size":"1 MiB"},"resize":{"choice":{"percent":100},"long_edge":"1920"},"fps":null}"#;
+        let stored: StoredVideoConvert = serde_json::from_str(json).expect("older shape");
+        assert_eq!(stored.channels, None);
     }
 
     #[test]

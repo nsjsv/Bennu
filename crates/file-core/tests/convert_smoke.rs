@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use file_core::{
     convert_file_with_controls, ConversionRequest, ConversionTarget, FileOperationControls,
-    ImageTargetFormat, QualitySpec, ResizeSpec, VideoTargetFormat,
+    ImageTargetFormat, MediaEdits, QualitySpec, ResizeSpec, TrimRange, VideoRotation, VideoSound,
+    VideoTargetFormat,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -80,6 +81,132 @@ fn video_dimensions(path: &Path) -> (u32, u32) {
     )
 }
 
+fn write_test_video_with_sound(directory: &Path, name: &str) -> PathBuf {
+    let path = directory.join(name);
+    let status = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc=duration=2:size=320x240:rate=15",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=2",
+            "-shortest",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+        ])
+        .arg(&path)
+        .status()
+        .expect("spawn ffmpeg");
+    assert!(status.success(), "generate test video with sound");
+    path
+}
+
+fn audio_stream_count(path: &Path) -> usize {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=index",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .expect("spawn ffprobe");
+    String::from_utf8_lossy(&output.stdout).lines().count()
+}
+
+fn clip_request(source: PathBuf, target: ConversionTarget, edits: MediaEdits) -> ConversionRequest {
+    ConversionRequest {
+        source,
+        target,
+        quality: QualitySpec::Preset(file_core::ConversionQualityPreset::Low),
+        resize: ResizeSpec::Keep,
+        fps_override: None,
+        audio_channels: file_core::AudioChannelSpec::Keep,
+        edits,
+        output: file_core::OutputLocation::BesideSource,
+    }
+}
+
+#[tokio::test]
+async fn video_edits_trim_rotate_and_drop_sound() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let source = write_test_video_with_sound(directory.path(), "clip.mkv");
+    let edits = MediaEdits {
+        trim: TrimRange {
+            start: Some(Duration::from_millis(500)),
+            end: Some(Duration::from_millis(1500)),
+        },
+        rotation: VideoRotation::Clockwise,
+        sound: VideoSound::Remove,
+    };
+    let converted = convert_file_with_controls(
+        clip_request(
+            source,
+            ConversionTarget::Video(VideoTargetFormat::Mp4H264),
+            edits,
+        ),
+        &controls(),
+    )
+    .await
+    .expect("edited video converts");
+
+    assert_eq!(video_dimensions(&converted.output), (240, 320));
+    assert_eq!(audio_stream_count(&converted.output), 0);
+    let duration = file_core::media_duration(&converted.output)
+        .await
+        .expect("duration");
+    assert!(
+        (0.8..1.3).contains(&duration.as_secs_f64()),
+        "trimmed to about one second, got {duration:?}"
+    );
+}
+
+#[tokio::test]
+async fn sound_is_extracted_from_videos_and_missing_sound_is_named() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let with_sound = write_test_video_with_sound(directory.path(), "talk.mkv");
+    let mp3 = ConversionTarget::Audio(file_core::AudioTargetFormat::Mp3);
+    let converted = convert_file_with_controls(
+        clip_request(with_sound, mp3, MediaEdits::default()),
+        &controls(),
+    )
+    .await
+    .expect("sound extracts");
+    assert_eq!(converted.output, directory.path().join("talk.mp3"));
+    assert_eq!(audio_stream_count(&converted.output), 1);
+
+    let silent = write_test_video(directory.path(), "silent.mp4");
+    let error = convert_file_with_controls(
+        clip_request(silent.clone(), mp3, MediaEdits::default()),
+        &controls(),
+    )
+    .await
+    .expect_err("a silent video has nothing to extract");
+    assert!(
+        matches!(&error, file_core::FileError::NoAudioTrack { path } if *path == silent),
+        "{error:?}"
+    );
+}
+
 #[tokio::test]
 async fn ffmpeg_long_edge_caps_images_and_videos_without_upscaling() {
     if !ffmpeg_available() {
@@ -97,6 +224,7 @@ async fn ffmpeg_long_edge_caps_images_and_videos_without_upscaling() {
         resize: ResizeSpec::LongEdge(100),
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(image_request, &controls())
@@ -114,6 +242,7 @@ async fn ffmpeg_long_edge_caps_images_and_videos_without_upscaling() {
             resize: ResizeSpec::LongEdge(long_edge),
             fps_override: None,
             audio_channels: file_core::AudioChannelSpec::Keep,
+            edits: file_core::MediaEdits::default(),
             output: file_core::OutputLocation::BesideSource,
         };
         let converted = convert_file_with_controls(request, &controls())
@@ -138,6 +267,7 @@ async fn png_to_webp_target_size_converges() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -166,6 +296,7 @@ async fn mp4_quality_and_resize_conversion() {
         resize: ResizeSpec::LongEdge(160),
         fps_override: Some(10),
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -190,6 +321,7 @@ async fn mp4_target_size_estimates_bitrate() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -233,6 +365,7 @@ async fn png_to_gif_palette_conversion() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -257,6 +390,7 @@ async fn mp4_to_gif_uses_palette_chain() {
         resize: ResizeSpec::LongEdge(320),
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -280,6 +414,7 @@ async fn mp4_to_avi_mpeg4_conversion() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -318,6 +453,7 @@ async fn wav_to_m4a_conversion() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        edits: file_core::MediaEdits::default(),
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())

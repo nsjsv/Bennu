@@ -6,15 +6,16 @@ use std::path::{Path, PathBuf};
 
 use file_core::{
     AudioChannelSpec, AudioTargetFormat, ConversionEncoderAvailability, ConversionQualityPreset,
-    ConversionRequest, ConversionTarget, ImageTargetFormat, OutputLocation, QualitySpec,
-    ResizeSpec, VideoTargetFormat,
+    ConversionRequest, ConversionTarget, ImageTargetFormat, MediaEdits, OutputLocation,
+    QualitySpec, ResizeSpec, VideoTargetFormat,
 };
 
 mod media_options;
 pub(crate) use media_options::{
     AudioConvertOptions, AudioEdit, ImageConvertOptions, ImageEdit, MediaOptions,
-    VideoConvertOptions, VideoEdit,
 };
+mod video_options;
+pub(crate) use video_options::{VideoClip, VideoConvertOptions, VideoEdit, VideoTarget};
 
 pub(crate) const IMAGE_TARGET_FORMATS: [ImageTargetFormat; 9] = [
     ImageTargetFormat::Jpeg,
@@ -240,6 +241,8 @@ pub(crate) enum ConvertInputError {
     MissingEncoder,
     TargetSize,
     LongEdge,
+    /// 截取时间写错，或结束不晚于开始。
+    Trim,
     OutputDirectory,
 }
 
@@ -251,6 +254,7 @@ pub(crate) struct ConversionSettings {
     resize: ResizeSpec,
     fps_override: Option<u32>,
     audio_channels: AudioChannelSpec,
+    edits: MediaEdits,
 }
 
 impl ConversionSettings {
@@ -262,6 +266,7 @@ impl ConversionSettings {
             resize: self.resize,
             fps_override: self.fps_override,
             audio_channels: self.audio_channels,
+            edits: self.edits,
             output: output.clone(),
         }
     }
@@ -577,10 +582,21 @@ fn section_matches<O: MediaOptions>(
         .is_none_or(|section| section.matches_scene(scene, encoders))
 }
 
-fn remembered_options<O: Clone>(section: &Option<MediaSection<O>>, previous: &O) -> O {
+fn remembered_options<O: MediaOptions>(section: &Option<MediaSection<O>>, previous: &O) -> O {
     section
         .as_ref()
-        .map_or_else(|| previous.clone(), |section| section.options.clone())
+        .map_or_else(|| previous.clone(), |section| section.options.remembered())
+}
+
+fn first_available<F: Copy>(current: F, formats: &[F], available: impl Fn(F) -> bool) -> F {
+    if available(current) {
+        return current;
+    }
+    formats
+        .iter()
+        .copied()
+        .find(|format| available(*format))
+        .unwrap_or(current)
 }
 
 /// 体积文本与其余大小输入同一读法（`parse_file_size`）；0 没有意义，一并拒绝。

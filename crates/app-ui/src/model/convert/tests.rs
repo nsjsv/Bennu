@@ -1,4 +1,5 @@
 use super::*;
+use file_core::{VideoRotation, VideoSound};
 
 /// 常见发行版 ffmpeg 的编码器集合。
 fn full_encoders() -> ConversionEncoderAvailability {
@@ -258,7 +259,7 @@ fn scenes_fill_every_section_and_light_up_until_edited() {
     assert_eq!(image.target_format, ImageTargetFormat::Webp);
     assert_eq!(image.resize.spec(), Ok(ResizeSpec::LongEdge(1920)));
     let video = &state.video.as_ref().expect("video").options;
-    assert_eq!(video.target_format, VideoTargetFormat::Mp4H264);
+    assert_eq!(video.target, VideoTarget::Video(VideoTargetFormat::Mp4H264));
     assert_eq!(video.resize.spec(), Ok(ResizeSpec::LongEdge(1920)));
     assert_eq!(
         state.audio.as_ref().expect("audio").options.target_format,
@@ -293,7 +294,7 @@ fn scenes_fall_back_when_encoders_are_missing() {
         QualityChoice::Preset(ConversionQualityPreset::Low)
     );
     let video = &state.video.as_ref().expect("video").options;
-    assert_eq!(video.target_format, VideoTargetFormat::Mp4H264);
+    assert_eq!(video.target, VideoTarget::Video(VideoTargetFormat::Mp4H264));
     assert_eq!(
         video.quality.choice(),
         QualityChoice::Preset(ConversionQualityPreset::Low)
@@ -337,4 +338,118 @@ fn remembered_defaults_replace_only_the_sections_present() {
     assert_eq!(remembered.image.target_format, ImageTargetFormat::Avif);
     assert_eq!(remembered.video, previous.video);
     assert_eq!(remembered.audio, previous.audio);
+}
+
+fn single_video_state(encoders: ConversionEncoderAvailability) -> ConvertState {
+    let mut state = ConvertState::new(
+        vec![source("/p/talk.mkv", ConvertibleMediaKind::Video, 1000)],
+        &ConvertDefaults::default(),
+    )
+    .expect("convertible");
+    state.accept_encoder_probe(encoders);
+    state
+}
+
+fn video(edit: VideoEdit) -> ConvertEdit {
+    ConvertEdit::Video(SectionEdit::Options(edit))
+}
+
+#[test]
+fn video_edits_reach_video_targets() {
+    let mut state = single_video_state(full_encoders());
+    state.apply(video(VideoEdit::Rotation(VideoRotation::Clockwise)));
+    state.apply(video(VideoEdit::Sound(VideoSound::Remove)));
+    state.apply(video(VideoEdit::TrimStart("0:10".to_owned())));
+    state.apply(video(VideoEdit::TrimEnd("1:00".to_owned())));
+
+    let requests = state.requests().expect("valid");
+    assert_eq!(
+        requests[0].edits,
+        MediaEdits {
+            trim: file_core::TrimRange {
+                start: Some(std::time::Duration::from_secs(10)),
+                end: Some(std::time::Duration::from_secs(60)),
+            },
+            rotation: VideoRotation::Clockwise,
+            sound: VideoSound::Remove,
+        }
+    );
+
+    state.apply(video(VideoEdit::TrimEnd("0:05".to_owned())));
+    assert_eq!(state.input_error(), Some(ConvertInputError::Trim));
+}
+
+#[test]
+fn sound_only_targets_keep_the_trim_and_channels_but_drop_picture_edits() {
+    let mut state = single_video_state(full_encoders());
+    state.apply(video(VideoEdit::Rotation(VideoRotation::HalfTurn)));
+    state.apply(video(VideoEdit::Sound(VideoSound::Remove)));
+    state.apply(video(VideoEdit::Resize(ResizeChoice::Percent(50))));
+    state.apply(video(VideoEdit::Fps(Some(30))));
+    state.apply(video(VideoEdit::TrimStart("5".to_owned())));
+    state.apply(video(VideoEdit::Channels(AudioChannelSpec::Mono)));
+    state.apply(video(VideoEdit::Target(VideoTarget::Audio(
+        AudioTargetFormat::Mp3,
+    ))));
+
+    let request = &state.requests().expect("valid")[0];
+    assert_eq!(
+        request.target,
+        ConversionTarget::Audio(AudioTargetFormat::Mp3)
+    );
+    assert_eq!(request.resize, ResizeSpec::Keep);
+    assert_eq!(request.fps_override, None);
+    assert_eq!(request.audio_channels, AudioChannelSpec::Mono);
+    assert_eq!(
+        request.edits,
+        MediaEdits {
+            trim: file_core::TrimRange {
+                start: Some(std::time::Duration::from_secs(5)),
+                end: None,
+            },
+            ..MediaEdits::default()
+        }
+    );
+
+    // 只要声音时质量跟着音频格式走：FLAC 没有质量可调。
+    state.apply(video(VideoEdit::Target(VideoTarget::Audio(
+        AudioTargetFormat::Flac,
+    ))));
+    assert_eq!(
+        state.requests().expect("valid")[0].quality,
+        QualitySpec::Lossless
+    );
+}
+
+#[test]
+fn remembered_video_settings_forget_the_one_off_clip() {
+    let mut state = single_video_state(full_encoders());
+    state.apply(video(VideoEdit::Target(VideoTarget::Audio(
+        AudioTargetFormat::Opus,
+    ))));
+    state.apply(video(VideoEdit::Rotation(VideoRotation::Clockwise)));
+    state.apply(video(VideoEdit::TrimEnd("1:00".to_owned())));
+
+    let remembered = state.remembered(&ConvertDefaults::default());
+    assert_eq!(
+        remembered.video.target,
+        VideoTarget::Audio(AudioTargetFormat::Opus)
+    );
+    assert_eq!(remembered.video.clip, VideoClip::default());
+}
+
+#[test]
+fn a_remembered_sound_only_target_falls_back_to_another_sound_format() {
+    let mut defaults = ConvertDefaults::default();
+    defaults.video.target = VideoTarget::Audio(AudioTargetFormat::Opus);
+    let mut state = ConvertState::new(
+        vec![source("/p/talk.mkv", ConvertibleMediaKind::Video, 1)],
+        &defaults,
+    )
+    .expect("convertible");
+    state.accept_encoder_probe(bare_encoders());
+    assert_eq!(
+        state.video.as_ref().expect("video").options.target,
+        VideoTarget::Audio(AudioTargetFormat::Mp3)
+    );
 }

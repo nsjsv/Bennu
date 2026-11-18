@@ -8,14 +8,18 @@ use super::FileOperationControls;
 use crate::FileError;
 
 mod command_plan;
+mod edits;
 mod ffmpeg;
 mod image_engine;
+mod media_tools;
 
-pub use ffmpeg::{
+pub use edits::{MediaEdits, TrimRange, VideoRotation, VideoSound};
+
+pub use media_tools::{
     available_conversion_encoders, locate_media_tool, media_duration, ConversionEncoderAvailability,
 };
 
-/// 转换目标格式;按源媒体类型分组,跨类型转换(如视频转音频)不受支持。
+/// 转换目标格式。视频源可以转成音频(抽出声音);其余跨类型不受支持。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConversionTarget {
     Image(ImageTargetFormat),
@@ -114,6 +118,7 @@ pub struct ConversionRequest {
     /// 覆盖输出帧率(fps);仅视频目标使用。
     pub fps_override: Option<u32>,
     pub audio_channels: AudioChannelSpec,
+    pub edits: MediaEdits,
     pub output: OutputLocation,
 }
 
@@ -184,6 +189,7 @@ fn validate_conversion_request(request: &ConversionRequest) -> Result<(), FileEr
             message: "svg sources are not supported for conversion".to_owned(),
         });
     }
+    edits::validate_edits(&request.source, request.target, request.edits)?;
     match request.target {
         ConversionTarget::Image(format) => {
             validate_image_quality(&request.source, format, request.quality)?;
@@ -502,6 +508,7 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            edits: MediaEdits::default(),
             output: OutputLocation::BesideSource,
         }
     }
@@ -726,6 +733,7 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            edits: MediaEdits::default(),
             output: OutputLocation::BesideSource,
         };
         let controls = FileOperationControls::running(tokio_util::sync::CancellationToken::new());

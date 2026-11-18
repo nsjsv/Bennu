@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use bennu_localization::UiLanguage;
 use file_core::{convert_file_with_controls, ConversionRequest, FileError, FileOperationControls};
 
 use crate::{
@@ -26,7 +27,10 @@ pub(super) async fn run_queued_convert(
                 FileError::Cancelled | FileError::ApplicationStopping => {
                     return Err(error.to_string());
                 }
-                other => failures.push(format_conversion_failure(&other)),
+                other => failures.push(format_conversion_failure(
+                    &other,
+                    bennu_localization::current_language(),
+                )),
             }
         }
         send_convert_progress(output, task_id, index + 1, total_items).await;
@@ -39,8 +43,12 @@ pub(super) async fn run_queued_convert(
     Ok(FileOperationOutcome::Convert { failures })
 }
 
-fn format_conversion_failure(error: &FileError) -> String {
+/// 能说清的原因按产生时的界面语言写；ffmpeg 等外部原话照抄。
+fn format_conversion_failure(error: &FileError, language: UiLanguage) -> String {
     match error {
+        FileError::NoAudioTrack { path } => {
+            tr_in!(language, "%1: the video has no sound", source_display(path))
+        }
         FileError::Convert { path, message } | FileError::InvalidInput { path, message } => {
             format!("{}: {}", source_display(path), message)
         }
@@ -68,4 +76,24 @@ async fn send_convert_progress(
             entries: Vec::new(),
         })
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_sound_is_explained_in_the_interface_language() {
+        let error = FileError::NoAudioTrack {
+            path: "/videos/silent.mp4".into(),
+        };
+        assert_eq!(
+            format_conversion_failure(&error, UiLanguage::English),
+            "silent.mp4: the video has no sound"
+        );
+        assert_eq!(
+            format_conversion_failure(&error, UiLanguage::Chinese),
+            "silent.mp4：视频里没有声音"
+        );
+    }
 }

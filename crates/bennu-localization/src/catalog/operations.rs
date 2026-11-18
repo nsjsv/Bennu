@@ -49,6 +49,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("... (+%1)", "……（另 %1 个）"),
     ("Items were moved back, but these new folders could not be removed: %1", "条目已移回原处，但以下新建文件夹没能删除：%1"),
     ("Some files could not be converted: %1", "部分文件转换失败：%1"),
+    ("%1: the video has no sound", "%1：视频里没有声音"),
     ("Some file attributes could not be preserved: %1", "部分文件属性未能保留：%1"),
     ("permissions", "权限"),
     ("extended attributes", "扩展属性"),

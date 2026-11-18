@@ -229,7 +229,7 @@ fn join_error(path: &Path, error: tokio::task::JoinError) -> FileError {
 mod tests {
     use super::super::ConversionRequest;
     use super::super::{
-        AudioChannelSpec, ConversionQualityPreset, OutputLocation,
+        AudioChannelSpec, ConversionQualityPreset, MediaEdits, OutputLocation,
         TARGET_BYTES_TOLERANCE_DENOMINATOR,
     };
     use super::*;
@@ -257,6 +257,7 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            edits: MediaEdits::default(),
             output: OutputLocation::BesideSource,
         }
     }

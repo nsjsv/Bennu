@@ -500,6 +500,9 @@ pub enum FileError {
     Archive { path: PathBuf, message: String },
     #[error("could not convert {path:?}: {message}")]
     Convert { path: PathBuf, message: String },
+    /// 要抽声音的视频里没有音轨;转换失败原因按界面语言写给用户。
+    #[error("{path:?} has no audio track")]
+    NoAudioTrack { path: PathBuf },
     #[error("could not read {path:?} for checksum computation: {source}")]
     Checksum {
         path: PathBuf,

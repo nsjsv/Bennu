@@ -1,8 +1,9 @@
 use std::time::Duration;
 
+use super::edits::ffmpeg_seconds;
 use super::{
     AudioTargetFormat, ConversionQualityPreset, ConversionRequest, ConversionTarget, QualitySpec,
-    ResizeSpec, VideoTargetFormat,
+    ResizeSpec, TrimRange, VideoRotation, VideoSound, VideoTargetFormat,
 };
 use crate::FileError;
 
@@ -210,7 +211,11 @@ pub(super) fn resolve_targeted_rate(
         // GIF 调色板编码没有码率语义,校验层已拒绝目标体积组合。
         ConversionTarget::Video(VideoTargetFormat::Gif) => Ok(None),
         ConversionTarget::Video(_) => {
-            let audio_bps = TRACK_AUDIO_BITRATE_BPS_TARGET_MODE;
+            // 去掉声音时预算全给画面。
+            let audio_bps = match request.edits.sound {
+                VideoSound::Keep => TRACK_AUDIO_BITRATE_BPS_TARGET_MODE,
+                VideoSound::Remove => 0,
+            };
             let video_bps = bitrate_budget_bps(target_bytes, duration).saturating_sub(audio_bps);
             Ok(Some(ResolvedRate::Video {
                 video_bps: video_bps.max(MIN_VIDEO_BITRATE_BPS),
@@ -257,8 +262,13 @@ pub(super) fn video_stream_args(
     format: VideoTargetFormat,
     quality: &QualitySpec,
     rate: Option<ResolvedRate>,
+    sound: VideoSound,
 ) -> Vec<String> {
     let plan = video_plan(format);
+    let audio_track = match sound {
+        VideoSound::Keep => plan.audio_track,
+        VideoSound::Remove => VideoAudioTrack::None,
+    };
     let mut args = vec!["-c:v".to_owned(), plan.video_encoder.to_owned()];
     args.extend(plan.encoder_extra.iter().map(|flag| (*flag).to_owned()));
 
@@ -268,13 +278,13 @@ pub(super) fn video_stream_args(
             audio_bps,
         }) => {
             args.extend(bitrate_args(video_bps));
-            args.extend(audio_track_args(plan.audio_track, Some(audio_bps)));
+            args.extend(audio_track_args(audio_track, Some(audio_bps)));
         }
         _ => {
             args.extend(plan.crf_mode_extra.iter().map(|flag| (*flag).to_owned()));
             args.push(plan.quality_flag.to_owned());
             args.push(video_preset_value(quality, plan.preset_values).to_string());
-            args.extend(audio_track_args(plan.audio_track, None));
+            args.extend(audio_track_args(audio_track, None));
         }
     }
     args.extend(plan.container_flags.iter().map(|flag| (*flag).to_owned()));
@@ -285,6 +295,7 @@ pub(super) fn video_stream_args(
 /// 质量档位映射帧率与调色板色数;用户帧率覆盖优先生效。
 pub(super) fn gif_stream_args(
     preset: ConversionQualityPreset,
+    rotation: VideoRotation,
     resize: ResizeSpec,
     fps_override: Option<u32>,
 ) -> Vec<String> {
@@ -295,6 +306,9 @@ pub(super) fn gif_stream_args(
     };
     let fps = fps_override.unwrap_or(preset_fps);
     let mut chain = format!("fps={fps}");
+    if let Some(rotate) = rotation_filter(rotation) {
+        chain.push_str(&format!(",{rotate}"));
+    }
     if let Some(scale) = scale_expression(resize) {
         chain.push_str(&format!(",{scale}:flags=lanczos"));
     }
@@ -403,9 +417,47 @@ pub(super) fn scale_expression(resize: ResizeSpec) -> Option<String> {
     }
 }
 
-pub(super) fn scale_filter_args(resize: ResizeSpec) -> Vec<String> {
-    match scale_expression(resize) {
-        Some(scale) => vec!["-vf".to_owned(), scale],
+fn rotation_filter(rotation: VideoRotation) -> Option<&'static str> {
+    match rotation {
+        VideoRotation::None => None,
+        VideoRotation::Clockwise => Some("transpose=1"),
+        VideoRotation::HalfTurn => Some("hflip,vflip"),
+        VideoRotation::CounterClockwise => Some("transpose=2"),
+    }
+}
+
+/// 画面滤镜:旋转在缩放前,长边按旋转后的画面算。
+pub(super) fn frame_filter_args(rotation: VideoRotation, resize: ResizeSpec) -> Vec<String> {
+    let filters = rotation_filter(rotation)
+        .map(str::to_owned)
+        .into_iter()
+        .chain(scale_expression(resize))
+        .collect::<Vec<_>>();
+    if filters.is_empty() {
+        return Vec::new();
+    }
+    vec!["-vf".to_owned(), filters.join(",")]
+}
+
+/// 输入端:截取起点放在 -i 前,转码时输入端定位又快又准。
+pub(super) fn input_args(request: &ConversionRequest) -> Vec<String> {
+    let mut args = vec!["-y".to_owned(), "-nostdin".to_owned()];
+    if let Some(start) = request.edits.trim.start {
+        args.push("-ss".to_owned());
+        args.push(ffmpeg_seconds(start));
+    }
+    args.push("-i".to_owned());
+    args.push(request.source.to_string_lossy().into_owned());
+    args
+}
+
+/// 截取终点换成输出端时长 -t;不用输入端 -to,老 ffmpeg 不认。
+pub(super) fn trim_length_args(trim: TrimRange) -> Vec<String> {
+    match trim.end {
+        Some(end) => vec![
+            "-t".to_owned(),
+            ffmpeg_seconds(end.saturating_sub(trim.start.unwrap_or_default())),
+        ],
         None => Vec::new(),
     }
 }
@@ -416,7 +468,7 @@ mod tests {
 
     use super::super::AudioChannelSpec;
     use super::*;
-    use crate::ops::convert::{ConversionRequest, ConversionTarget, OutputLocation};
+    use crate::ops::convert::{ConversionRequest, ConversionTarget, MediaEdits, OutputLocation};
 
     fn request(target: ConversionTarget, quality: QualitySpec) -> ConversionRequest {
         ConversionRequest {
@@ -426,6 +478,7 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            edits: MediaEdits::default(),
             output: OutputLocation::BesideSource,
         }
     }
@@ -507,7 +560,7 @@ mod tests {
     #[test]
     fn scale_filter_caps_the_long_edge_without_upscaling() {
         assert_eq!(
-            scale_filter_args(ResizeSpec::LongEdge(1920)),
+            frame_filter_args(VideoRotation::None, ResizeSpec::LongEdge(1920)),
             vec![
                 "-vf".to_owned(),
                 "scale='min(1920,iw)':'min(1920,ih)'\
@@ -516,10 +569,87 @@ mod tests {
             ]
         );
         assert_eq!(
-            scale_filter_args(ResizeSpec::Percent(50)),
+            frame_filter_args(VideoRotation::None, ResizeSpec::Percent(50)),
             vec!["-vf".to_owned(), "scale=trunc(iw*50/100/2)*2:-2".to_owned()]
         );
-        assert!(scale_filter_args(ResizeSpec::Keep).is_empty());
+        assert!(frame_filter_args(VideoRotation::None, ResizeSpec::Keep).is_empty());
+    }
+
+    #[test]
+    fn rotation_runs_before_scaling() {
+        assert_eq!(
+            frame_filter_args(VideoRotation::Clockwise, ResizeSpec::Percent(50)),
+            vec![
+                "-vf".to_owned(),
+                "transpose=1,scale=trunc(iw*50/100/2)*2:-2".to_owned()
+            ]
+        );
+        assert_eq!(
+            frame_filter_args(VideoRotation::HalfTurn, ResizeSpec::Keep),
+            vec!["-vf".to_owned(), "hflip,vflip".to_owned()]
+        );
+        let gif = gif_stream_args(
+            ConversionQualityPreset::Low,
+            VideoRotation::CounterClockwise,
+            ResizeSpec::Keep,
+            None,
+        );
+        assert!(gif[1].starts_with("fps=10,transpose=2,split"));
+    }
+
+    #[test]
+    fn trim_seeks_on_input_and_limits_the_output_length() {
+        let mut request = request(
+            ConversionTarget::Video(VideoTargetFormat::Mp4H264),
+            QualitySpec::Preset(ConversionQualityPreset::Medium),
+        );
+        request.edits.trim = TrimRange {
+            start: Some(Duration::from_secs(10)),
+            end: Some(Duration::from_millis(25_500)),
+        };
+        assert_eq!(
+            input_args(&request),
+            [
+                "-y",
+                "-nostdin",
+                "-ss",
+                "10.000",
+                "-i",
+                "/tmp/convert-tests/clip.mov"
+            ]
+        );
+        assert_eq!(trim_length_args(request.edits.trim), ["-t", "15.500"]);
+        let only_end = TrimRange {
+            start: None,
+            end: Some(Duration::from_secs(5)),
+        };
+        assert_eq!(trim_length_args(only_end), ["-t", "5.000"]);
+        assert!(trim_length_args(TrimRange::default()).is_empty());
+    }
+
+    #[test]
+    fn removing_sound_drops_the_track_and_its_budget() {
+        let args = video_stream_args(
+            VideoTargetFormat::Mp4H264,
+            &QualitySpec::Preset(ConversionQualityPreset::Medium),
+            None,
+            VideoSound::Remove,
+        );
+        assert!(args.iter().any(|arg| arg == "-an"));
+        assert!(!args.iter().any(|arg| arg == "-c:a"));
+
+        let mut request = request(
+            ConversionTarget::Video(VideoTargetFormat::Mp4H264),
+            QualitySpec::TargetBytes(1024 * 1024),
+        );
+        request.edits.sound = VideoSound::Remove;
+        let rate = resolve_targeted_rate(&request, Some(Duration::from_secs(60)))
+            .expect("resolves")
+            .expect("video rate");
+        let ResolvedRate::Video { audio_bps, .. } = rate else {
+            panic!("expected a video rate");
+        };
+        assert_eq!(audio_bps, 0);
     }
 
     #[test]
@@ -528,6 +658,7 @@ mod tests {
             VideoTargetFormat::Mp4H264,
             &QualitySpec::Preset(ConversionQualityPreset::Medium),
             None,
+            VideoSound::Keep,
         );
         assert!(crf_args.windows(2).any(|pair| pair == ["-crf", "23"]));
         assert!(crf_args.windows(2).any(|pair| pair == ["-c:a", "aac"]));
@@ -539,6 +670,7 @@ mod tests {
                 video_bps: 400_000,
                 audio_bps: 96_000,
             }),
+            VideoSound::Keep,
         );
         assert!(rate_args.windows(2).any(|pair| pair == ["-b:v", "400k"]));
         assert!(rate_args
@@ -550,6 +682,7 @@ mod tests {
             VideoTargetFormat::WebmVp9,
             &QualitySpec::Preset(ConversionQualityPreset::Low),
             None,
+            VideoSound::Keep,
         );
         assert!(vp9_args.windows(2).any(|pair| pair == ["-b:v", "0"]));
         assert!(vp9_args.windows(2).any(|pair| pair == ["-crf", "35"]));
@@ -559,6 +692,7 @@ mod tests {
             VideoTargetFormat::AviMpeg4,
             &QualitySpec::Preset(ConversionQualityPreset::High),
             None,
+            VideoSound::Keep,
         );
         assert!(avi_args.windows(2).any(|pair| pair == ["-q:v", "2"]));
         assert!(avi_args
@@ -570,6 +704,7 @@ mod tests {
     fn gif_stream_args_build_palette_chain() {
         let args = gif_stream_args(
             ConversionQualityPreset::Medium,
+            VideoRotation::None,
             ResizeSpec::LongEdge(480),
             None,
         );
@@ -588,7 +723,12 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "-an"));
 
         // 帧率覆盖优先于档位默认。
-        let overridden = gif_stream_args(ConversionQualityPreset::High, ResizeSpec::Keep, Some(12));
+        let overridden = gif_stream_args(
+            ConversionQualityPreset::High,
+            VideoRotation::None,
+            ResizeSpec::Keep,
+            Some(12),
+        );
         let filter = overridden
             .iter()
             .position(|arg| arg == "-filter_complex")

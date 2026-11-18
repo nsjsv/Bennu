@@ -111,9 +111,9 @@ pub(crate) use convert::{
     AudioConvertOptions, AudioEdit, ConvertDefaults, ConvertEdit, ConvertInputError, ConvertScene,
     ConvertSource, ConvertState, ConvertibleMediaKind, ImageConvertOptions, ImageEdit,
     MediaOptions, MediaSection, QualityChoice, QualityControl, QualitySelection, ResizeChoice,
-    ResizeSelection, SectionEdit, VideoConvertOptions, VideoEdit, AUDIO_TARGET_FORMATS,
-    CONVERT_SCENES, FPS_CHOICES, IMAGE_TARGET_FORMATS, QUALITY_PRESETS, RESIZE_PERCENT_CHOICES,
-    VIDEO_TARGET_FORMATS,
+    ResizeSelection, SectionEdit, VideoClip, VideoConvertOptions, VideoEdit, VideoTarget,
+    AUDIO_TARGET_FORMATS, CONVERT_SCENES, FPS_CHOICES, IMAGE_TARGET_FORMATS, QUALITY_PRESETS,
+    RESIZE_PERCENT_CHOICES, VIDEO_TARGET_FORMATS,
 };
 mod batch_rename;
 pub(crate) use batch_rename::{

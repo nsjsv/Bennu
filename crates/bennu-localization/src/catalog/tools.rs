@@ -35,6 +35,21 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "没有安装 ffmpeg，视频、音频和部分图片格式不能转换。",
     ),
     ("Enter the long edge in pixels.", "请输入长边的像素数。"),
+    // 视频：只要声音、旋转、声音、截取。
+    ("%1 (sound only)", "%1（只要声音）"),
+    ("Rotate", "旋转"),
+    ("Rotate clockwise", "顺时针旋转"),
+    ("Rotate counterclockwise", "逆时针旋转"),
+    ("Turn upside down", "上下颠倒"),
+    ("Sound", "声音"),
+    ("No sound", "去掉声音"),
+    ("Trim", "截取"),
+    ("Beginning", "开头"),
+    ("End", "结尾"),
+    (
+        "Write times like 1:30 or 0:01:30.5, with the end after the start.",
+        "时间写成 1:30 或 0:01:30.5，结束要晚于开始。",
+    ),
     (
         "Enter a target size like 500 KiB or 2 MiB.",
         "请输入目标体积,例如 500 KiB 或 2 MiB。",

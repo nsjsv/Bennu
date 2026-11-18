@@ -391,7 +391,8 @@ impl fmt::Display for VideoTargetFormat {
             Self::WebmAv1 => "WebM (AV1)",
             Self::MovH264 => "MOV (H.264)",
             Self::AviMpeg4 => "AVI (MPEG-4)",
-            Self::Gif => "GIF (animation)",
+            // 放在视频卡片里本身就说明是动图；不带要翻译的词。
+            Self::Gif => "GIF",
         };
         formatter.write_str(label)
     }

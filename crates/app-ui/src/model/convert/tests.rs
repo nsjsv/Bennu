@@ -86,6 +86,12 @@ fn quality_spec_keeps_the_preset_for_gif_while_by_size_is_chosen() {
     quality.select(QualityChoice::Preset(ConversionQualityPreset::High));
     quality.select(QualityChoice::TargetSize);
     assert_eq!(quality.choice(), QualityChoice::TargetSize);
+    // 默认没填数字：要用户自己填。
+    assert_eq!(
+        quality.spec(QualityControl::PresetOrSize),
+        Err(ConvertInputError::TargetSize)
+    );
+    quality.target_size_text = "1".to_owned();
     assert_eq!(
         quality.spec(QualityControl::PresetOrSize),
         Ok(QualitySpec::TargetBytes(1024 * 1024))
@@ -109,20 +115,39 @@ fn quality_spec_keeps_the_preset_for_gif_while_by_size_is_chosen() {
 }
 
 #[test]
-fn parses_target_size_with_units() {
-    assert_eq!(parse_target_size_text("500KB"), Ok(500 * 1024));
-    assert_eq!(parse_target_size_text("2 MB"), Ok(2 * 1024 * 1024));
-    assert_eq!(parse_target_size_text("100"), Ok(100));
+fn target_size_is_a_number_times_the_chosen_unit() {
+    assert_eq!(target_size_bytes("500", SizeUnit::KiB), Ok(500 * 1024));
+    assert_eq!(target_size_bytes(" 2 ", SizeUnit::MiB), Ok(2 * 1024 * 1024));
     assert_eq!(
-        parse_target_size_text(DEFAULT_TARGET_SIZE_TEXT),
-        Ok(1024 * 1024)
+        target_size_bytes("1.5", SizeUnit::GiB),
+        Ok(3 * 512 * 1024 * 1024)
     );
-    for invalid in ["", "0KB", "abc"] {
+    // 单位由旁边的按钮给，数字框里写单位、写 0、写负数都不算。
+    for invalid in ["", "0", "-1", "abc", "2 MiB", "inf"] {
         assert_eq!(
-            parse_target_size_text(invalid),
-            Err(ConvertInputError::TargetSize)
+            target_size_bytes(invalid, SizeUnit::MiB),
+            Err(ConvertInputError::TargetSize),
+            "{invalid}"
         );
     }
+}
+
+#[test]
+fn switching_the_unit_keeps_the_number() {
+    let mut state = mixed_state(full_encoders());
+    state.apply(ConvertEdit::Video(SectionEdit::Quality(
+        QualityChoice::TargetSize,
+    )));
+    state.apply(ConvertEdit::Video(SectionEdit::TargetSize(
+        "300".to_owned(),
+    )));
+    state.apply(ConvertEdit::Video(SectionEdit::TargetSizeUnit(
+        SizeUnit::KiB,
+    )));
+    assert_eq!(
+        state.requests().expect("valid")[1].quality,
+        QualitySpec::TargetBytes(300 * 1024)
+    );
 }
 
 #[test]
@@ -194,6 +219,7 @@ fn requests_carry_each_section_settings_and_the_output_location() {
     state.apply(ConvertEdit::Video(SectionEdit::Quality(
         QualityChoice::TargetSize,
     )));
+    state.apply(ConvertEdit::Video(SectionEdit::TargetSize("1".to_owned())));
     state.apply(ConvertEdit::Audio(SectionEdit::Options(
         AudioEdit::Channels(AudioChannelSpec::Mono),
     )));

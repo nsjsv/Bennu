@@ -1,7 +1,7 @@
 //! 图片、音频卡片，和三类共用的行：格式、质量、「更多」、缩放、声道。
 //! 视频卡片在 `video_section.rs`。
 
-use iced::widget::row;
+use iced::widget::{container, row};
 use iced::{Alignment, Element, Length};
 
 use file_core::{
@@ -11,9 +11,9 @@ use file_core::{
 use crate::app::convert::ConvertMessage;
 use crate::model::{
     AudioConvertOptions, AudioEdit, ConvertEdit, ImageConvertOptions, ImageEdit, MediaOptions,
-    MediaSection, Message, QualityChoice, QualityControl, ResizeChoice, ResizeSelection,
-    SectionEdit, AUDIO_TARGET_FORMATS, IMAGE_TARGET_FORMATS, QUALITY_PRESETS,
-    RESIZE_PERCENT_CHOICES,
+    MediaSection, Message, QualityChoice, QualityControl, QualitySelection, ResizeChoice,
+    ResizeSelection, SectionEdit, SizeUnit, AUDIO_TARGET_FORMATS, IMAGE_TARGET_FORMATS,
+    QUALITY_PRESETS, RESIZE_PERCENT_CHOICES, SIZE_UNITS,
 };
 use bennu_theme::controls::{dropdown, segmented_choice_row, text_field, SegmentedChoice};
 
@@ -24,6 +24,8 @@ use super::super::settings_group::{
 
 const FORMAT_PICK_WIDTH: f32 = 240.0;
 pub(super) const ROW_CONTROL_WIDTH: f32 = 170.0;
+const TARGET_SIZE_FIELD_WIDTH: f32 = 120.0;
+const SIZE_UNIT_PICK_WIDTH: f32 = 90.0;
 
 pub(super) fn image_section<'a>(
     section: &'a MediaSection<ImageConvertOptions>,
@@ -164,16 +166,43 @@ pub(super) fn quality_rows<O: MediaOptions>(
             });
             let mut rows = vec![quality_row(choices)];
             if choice == QualityChoice::TargetSize {
-                rows.push(control_row(
-                    tr!("Target size per file"),
-                    None,
-                    text_field("500 KiB / 2 MiB", &quality.target_size_text)
-                        .on_input(move |text| wrap(SectionEdit::TargetSize(text)))
-                        .width(Length::Fixed(ROW_CONTROL_WIDTH)),
-                ));
+                rows.push(target_size_row(quality, wrap));
             }
             rows
         }
+    }
+}
+
+/// 只填数字，单位在后面的下拉里选。
+fn target_size_row<'a, E: 'a>(
+    quality: &'a QualitySelection,
+    wrap: fn(SectionEdit<E>) -> Message,
+) -> SettingsRow<'a> {
+    control_row(
+        tr!("Target size per file"),
+        None,
+        row![
+            text_field("", &quality.target_size_text)
+                .on_input(move |text| wrap(SectionEdit::TargetSize(text)))
+                .width(Length::Fixed(TARGET_SIZE_FIELD_WIDTH)),
+            dropdown(SIZE_UNITS, Some(quality.target_size_unit), move |unit| {
+                wrap(SectionEdit::TargetSizeUnit(unit))
+            })
+            .width(Length::Fixed(SIZE_UNIT_PICK_WIDTH)),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    )
+}
+
+/// 与界面上其余大小写法一致（KiB/MiB/GiB），中英文都不翻。
+impl std::fmt::Display for SizeUnit {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::KiB => "KiB",
+            Self::MiB => "MiB",
+            Self::GiB => "GiB",
+        })
     }
 }
 
@@ -192,9 +221,10 @@ pub(super) fn more_rows<'a, O: MediaOptions>(
     wrap: fn(SectionEdit<O::Edit>) -> Message,
     rows: Vec<SettingsRow<'a>>,
 ) -> Vec<SettingsRow<'a>> {
+    // 灰字默认占满剩余宽度，会和左边的标题平分一行；收成按内容宽，贴在右边。
     expander_rows(
         tr!("More"),
-        muted_setting_text(summary.join(" · ")),
+        container(muted_setting_text(summary.join(" · "))).width(Length::Shrink),
         wrap(SectionEdit::MoreToggled),
         section.more_expanded.then_some(rows),
     )

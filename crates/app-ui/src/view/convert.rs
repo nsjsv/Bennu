@@ -125,7 +125,7 @@ fn ffmpeg_notice() -> Element<'static, Message> {
 fn input_error_text(error: ConvertInputError) -> Option<String> {
     match error {
         ConvertInputError::MissingEncoder => None,
-        ConvertInputError::TargetSize => Some(tr!("Enter a target size like 500 KiB or 2 MiB.")),
+        ConvertInputError::TargetSize => Some(tr!("Enter a number for the target size.")),
         ConvertInputError::LongEdge => Some(tr!("Enter the long edge in pixels.")),
         ConvertInputError::Trim => Some(tr!(
             "Write times like 1:30 or 0:01:30.5, with the end after the start."

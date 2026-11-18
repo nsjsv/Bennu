@@ -58,8 +58,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     ("No photo info", "去掉照片信息"),
     (
-        "Enter a target size like 500 KiB or 2 MiB.",
-        "请输入目标体积,例如 500 KiB 或 2 MiB。",
+        "Enter a number for the target size.",
+        "目标体积请填一个数字。",
     ),
     // 归档
     ("Archive", "归档"),

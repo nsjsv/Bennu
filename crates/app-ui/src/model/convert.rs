@@ -54,13 +54,13 @@ pub(crate) const QUALITY_PRESETS: [ConversionQualityPreset; 3] = [
 ];
 pub(crate) const RESIZE_PERCENT_CHOICES: [u8; 3] = [100, 75, 50];
 pub(crate) const FPS_CHOICES: [u32; 3] = [60, 30, 24];
+pub(crate) const SIZE_UNITS: [SizeUnit; 3] = [SizeUnit::KiB, SizeUnit::MiB, SizeUnit::GiB];
 pub(crate) const CONVERT_SCENES: [ConvertScene; 3] = [
     ConvertScene::MostCompatible,
     ConvertScene::ForWeb,
     ConvertScene::Smallest,
 ];
 
-const DEFAULT_TARGET_SIZE_TEXT: &str = "1 MiB";
 const DEFAULT_LONG_EDGE_TEXT: &str = "1920";
 /// 「分享网页」把长边压到这么多：网页和聊天软件常见的显示上限。
 const WEB_LONG_EDGE: u32 = 1920;
@@ -98,12 +98,32 @@ pub(crate) enum QualityControl {
     PresetOrSize,
 }
 
+/// 目标大小的单位，跟在数字输入框后面点选，用户不用自己打单位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SizeUnit {
+    KiB,
+    MiB,
+    GiB,
+}
+
+impl SizeUnit {
+    fn bytes(self) -> f64 {
+        match self {
+            Self::KiB => 1024.0,
+            Self::MiB => 1024.0 * 1024.0,
+            Self::GiB => 1024.0 * 1024.0 * 1024.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QualitySelection {
     /// 选「按大小」时也留着：切到只认档位的 GIF 直接用它。
     pub(crate) preset: ConversionQualityPreset,
     pub(crate) by_target_size: bool,
+    /// 只有数字（可带小数），单位在 `target_size_unit`。
     pub(crate) target_size_text: String,
+    pub(crate) target_size_unit: SizeUnit,
 }
 
 impl Default for QualitySelection {
@@ -111,7 +131,9 @@ impl Default for QualitySelection {
         Self {
             preset: ConversionQualityPreset::Medium,
             by_target_size: false,
-            target_size_text: DEFAULT_TARGET_SIZE_TEXT.to_owned(),
+            // 默认空着：大小因文件而异，预填一个数只会被当成建议值。
+            target_size_text: String::new(),
+            target_size_unit: SizeUnit::MiB,
         }
     }
 }
@@ -139,7 +161,8 @@ impl QualitySelection {
         match control {
             QualityControl::Lossless => Ok(QualitySpec::Lossless),
             QualityControl::PresetOrSize if self.by_target_size => {
-                parse_target_size_text(&self.target_size_text).map(QualitySpec::TargetBytes)
+                target_size_bytes(&self.target_size_text, self.target_size_unit)
+                    .map(QualitySpec::TargetBytes)
             }
             QualityControl::PresetOnly | QualityControl::PresetOrSize => {
                 Ok(QualitySpec::Preset(self.preset))
@@ -348,6 +371,7 @@ pub(crate) enum SectionEdit<E> {
     MoreToggled,
     Quality(QualityChoice),
     TargetSize(String),
+    TargetSizeUnit(SizeUnit),
     Options(E),
 }
 
@@ -365,6 +389,7 @@ impl<O: MediaOptions> MediaSection<O> {
             SectionEdit::MoreToggled => self.more_expanded = !self.more_expanded,
             SectionEdit::Quality(choice) => self.options.quality_mut().select(choice),
             SectionEdit::TargetSize(text) => self.options.quality_mut().target_size_text = text,
+            SectionEdit::TargetSizeUnit(unit) => self.options.quality_mut().target_size_unit = unit,
             SectionEdit::Options(edit) => self.options.apply(edit),
         }
     }
@@ -602,10 +627,13 @@ fn first_available<F: Copy>(current: F, formats: &[F], available: impl Fn(F) -> 
         .unwrap_or(current)
 }
 
-/// 体积文本与其余大小输入同一读法（`parse_file_size`）；0 没有意义，一并拒绝。
-fn parse_target_size_text(text: &str) -> Result<u64, ConvertInputError> {
-    bennu_localization::parse_file_size(text)
+/// 数字乘单位；0 和不到 1 字节都没有意义，一并拒绝。
+fn target_size_bytes(text: &str, unit: SizeUnit) -> Result<u64, ConvertInputError> {
+    text.trim()
+        .parse::<f64>()
         .ok()
+        .filter(|number| number.is_finite() && *number > 0.0)
+        .map(|number| (number * unit.bytes()).round() as u64)
         .filter(|bytes| *bytes > 0)
         .ok_or(ConvertInputError::TargetSize)
 }

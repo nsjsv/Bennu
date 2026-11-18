@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::unrecognized_settings::UnrecognizedSettings;
 use crate::model::{
     AudioConvertOptions, ConvertDefaults, ImageConvertOptions, QualitySelection, ResizeChoice,
-    ResizeSelection, VideoClip, VideoConvertOptions, VideoTarget,
+    ResizeSelection, SizeUnit, VideoClip, VideoConvertOptions, VideoTarget,
 };
 
 const IMAGE_FORMAT_KEYS: [(ImageTargetFormat, &str); 9] = [
@@ -51,6 +51,11 @@ const PRESET_KEYS: [(ConversionQualityPreset, &str); 3] = [
 const PHOTO_METADATA_KEYS: [(PhotoMetadata, &str); 2] = [
     (PhotoMetadata::Keep, "keep"),
     (PhotoMetadata::Strip, "strip"),
+];
+const SIZE_UNIT_KEYS: [(SizeUnit, &str); 3] = [
+    (SizeUnit::KiB, "kib"),
+    (SizeUnit::MiB, "mib"),
+    (SizeUnit::GiB, "gib"),
 ];
 const CHANNEL_KEYS: [(AudioChannelSpec, &str); 2] = [
     (AudioChannelSpec::Keep, "keep"),
@@ -99,7 +104,11 @@ pub(crate) struct StoredAudioConvert {
 pub(crate) struct StoredQuality {
     pub preset: String,
     pub by_target_size: bool,
+    /// 目标大小的数字部分。
     pub target_size: String,
+    /// None = 早先没存过,按 MiB。
+    #[serde(default)]
+    pub target_size_unit: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -197,18 +206,20 @@ impl StoredQuality {
             preset: key_of(&PRESET_KEYS, quality.preset).to_owned(),
             by_target_size: quality.by_target_size,
             target_size: quality.target_size_text.clone(),
+            target_size_unit: Some(key_of(&SIZE_UNIT_KEYS, quality.target_size_unit).to_owned()),
         }
     }
 
     fn to_selection(&self, keys: &mut KeyReader<'_>) -> QualitySelection {
+        let fallback = QualitySelection::default();
         QualitySelection {
-            preset: keys.read(
-                &PRESET_KEYS,
-                &self.preset,
-                QualitySelection::default().preset,
-            ),
+            preset: keys.read(&PRESET_KEYS, &self.preset, fallback.preset),
             by_target_size: self.by_target_size,
             target_size_text: self.target_size.clone(),
+            target_size_unit: match &self.target_size_unit {
+                Some(unit) => keys.read(&SIZE_UNIT_KEYS, unit, fallback.target_size_unit),
+                None => fallback.target_size_unit,
+            },
         }
     }
 }
@@ -303,13 +314,16 @@ mod tests {
         assert_unique(&PRESET_KEYS);
         assert_unique(&CHANNEL_KEYS);
         assert_unique(&PHOTO_METADATA_KEYS);
+        assert_unique(&SIZE_UNIT_KEYS);
         assert_eq!(
             IMAGE_FORMAT_KEYS.len(),
             crate::model::IMAGE_TARGET_FORMATS.len()
         );
         assert_eq!(
             VIDEO_FORMAT_KEYS.len(),
-            crate::model::VIDEO_TARGET_FORMATS.len()
+            VideoTarget::all()
+                .filter(|target| matches!(target, VideoTarget::Video(_)))
+                .count()
         );
         assert_eq!(
             AUDIO_FORMAT_KEYS.len(),
@@ -327,7 +341,8 @@ mod tests {
         defaults.video.target = VideoTarget::Audio(AudioTargetFormat::Flac);
         defaults.video.channels = AudioChannelSpec::Mono;
         defaults.video.quality.by_target_size = true;
-        defaults.video.quality.target_size_text = "8 MiB".to_owned();
+        defaults.video.quality.target_size_text = "8".to_owned();
+        defaults.video.quality.target_size_unit = SizeUnit::GiB;
         defaults.video.fps_override = Some(30);
         defaults.audio.target_format = AudioTargetFormat::Opus;
         defaults.audio.quality.preset = ConversionQualityPreset::Low;

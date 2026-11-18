@@ -113,6 +113,43 @@ async fn changed_source_is_regenerated_in_place() {
     );
 }
 
+/// 界面还没补上大小和修改时间（扫目录只读名字和类型）时发的请求，命中和写入照样按源文件的真实信息。
+#[tokio::test]
+async fn request_made_before_metadata_is_known_still_uses_the_real_source_facts() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("photo.png");
+    let cache_dir = dir.path().join("cache");
+    image::RgbImage::new(64, 32).save(&source).unwrap();
+    let file = std::fs::File::options().write(true).open(&source).unwrap();
+    file.set_modified(UNIX_EPOCH + Duration::from_secs(1_800_000_000))
+        .unwrap();
+    let pending = ThumbnailRequest::new(
+        &source,
+        ThumbnailSourceMetadata {
+            len: 0,
+            modified: None,
+        },
+        64,
+    );
+
+    let first = load_or_generate_thumbnail(&cache_dir, pending.clone())
+        .await
+        .unwrap();
+    let texts = png_texts(&first.output);
+    assert_eq!(text(&texts, "Thumb::MTime"), Some("1800000000"));
+    let len = std::fs::metadata(&source).unwrap().len().to_string();
+    assert_eq!(text(&texts, "Thumb::Size"), Some(len.as_str()));
+
+    let again = load_or_generate_thumbnail(&cache_dir, pending)
+        .await
+        .unwrap();
+    assert!(again.cache_hit);
+    let known = load_or_generate_thumbnail(&cache_dir, thumbnail_request(&source, 64))
+        .await
+        .unwrap();
+    assert!(known.cache_hit);
+}
+
 #[tokio::test]
 async fn thumbnail_written_by_another_program_is_used_as_is() {
     let dir = tempfile::tempdir().unwrap();

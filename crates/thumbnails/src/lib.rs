@@ -57,6 +57,8 @@ impl From<&file_core::EntryMetadata> for ThumbnailSourceMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThumbnailRequest {
     pub source: PathBuf,
+    /// 界面看到的源文件状态，只用来认进程内的条目（变了就换新键重新取）；
+    /// 磁盘缓存的命中和写入以生成时当场读到的为准。
     pub metadata: ThumbnailSourceMetadata,
     pub max_edge: u32,
 }
@@ -128,6 +130,12 @@ pub enum ThumbnailError {
         #[source]
         source: image::ImageError,
     },
+    #[error("could not read thumbnail source {path:?}: {source}")]
+    ReadSource {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("could not write thumbnail {path:?}: {source}")]
     WriteThumbnail {
         path: PathBuf,
@@ -196,19 +204,29 @@ impl CacheSlot {
         })
     }
 
-    /// 磁盘上有对得上的缩略图（不论是谁写的）时返回它。
+    /// 磁盘上有对得上的缩略图（不论是谁写的）时返回它，否则带回源文件此刻的大小和修改时间供生成时写入。
+    /// 只认当场读到的：请求里的是界面看到的，扫目录只读名字和类型，补上之前是空的。
     async fn cached(
         self,
         request: ThumbnailRequest,
-    ) -> Result<Result<CachedThumbnail, Self>, ThumbnailError> {
+    ) -> Result<Result<CachedThumbnail, (Self, ThumbnailSourceMetadata)>, ThumbnailError> {
         let output = self.output.clone();
         let uri = self.uri.clone();
-        let metadata = request.metadata;
-        let dimensions = tokio::task::spawn_blocking(move || {
-            valid_thumbnail_dimensions(&output, &uri, metadata)
+        let source = request.source.clone();
+        let (facts, dimensions) = tokio::task::spawn_blocking(move || {
+            let metadata = std::fs::metadata(&source)?;
+            let facts = ThumbnailSourceMetadata {
+                len: metadata.len(),
+                modified: metadata.modified().ok(),
+            };
+            Ok((facts, valid_thumbnail_dimensions(&output, &uri, facts)))
         })
         .await
-        .map_err(|source| ThumbnailError::Join(source.to_string()))?;
+        .map_err(|source| ThumbnailError::Join(source.to_string()))?
+        .map_err(|source| ThumbnailError::ReadSource {
+            path: request.source.clone(),
+            source,
+        })?;
         Ok(match dimensions {
             Some((width, height)) => Ok(CachedThumbnail {
                 key: self.key,
@@ -218,7 +236,7 @@ impl CacheSlot {
                 height,
                 cache_hit: true,
             }),
-            None => Err(self),
+            None => Err((self, facts)),
         })
     }
 }
@@ -237,7 +255,7 @@ pub async fn load_or_generate_thumbnail(
         max_edge = request.max_edge,
         "thumbnail requested"
     );
-    let slot = match slot.cached(request.clone()).await? {
+    let (slot, facts) = match slot.cached(request.clone()).await? {
         Ok(cached) => {
             tracing::debug!(
                 target: "thumbnails",
@@ -250,10 +268,10 @@ pub async fn load_or_generate_thumbnail(
             );
             return Ok(cached);
         }
-        Err(slot) => slot,
+        Err(stale) => stale,
     };
     // 图片解码和外部视频缩略图命令都会阻塞，必须留在 blocking 线程池。
-    tokio::task::spawn_blocking(move || generate_thumbnail_blocking(request, slot))
+    tokio::task::spawn_blocking(move || generate_thumbnail_blocking(request, slot, facts))
         .await
         .map_err(|source| ThumbnailError::Join(source.to_string()))?
 }
@@ -270,6 +288,7 @@ pub async fn load_cached_thumbnail(
 fn generate_thumbnail_blocking(
     request: ThumbnailRequest,
     slot: CacheSlot,
+    facts: ThumbnailSourceMetadata,
 ) -> Result<CachedThumbnail, ThumbnailError> {
     let edge = request.bucket().edge();
     let temporary = temporary_output_path(&slot.output);
@@ -287,16 +306,11 @@ fn generate_thumbnail_blocking(
         }
         ThumbnailMediaKind::Video => video_thumbnail(&request.source, &temporary, edge)?,
     };
-    write_thumbnail(
-        &image,
-        &slot.output,
-        &temporary,
-        &slot.uri,
-        request.metadata,
-    )
-    .map_err(|source| ThumbnailError::WriteThumbnail {
-        path: slot.output.clone(),
-        source,
+    write_thumbnail(&image, &slot.output, &temporary, &slot.uri, facts).map_err(|source| {
+        ThumbnailError::WriteThumbnail {
+            path: slot.output.clone(),
+            source,
+        }
     })?;
     Ok(CachedThumbnail {
         key: slot.key,

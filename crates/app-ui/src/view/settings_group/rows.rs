@@ -191,21 +191,10 @@ pub(in crate::view) fn expander_row<'a>(
     toggle: Message,
     body: Option<Element<'a, Message>>,
 ) -> SettingsRow<'a> {
-    let rotation = if body.is_some() { 90.0 } else { 0.0 };
-    let mut header = row![
-        rotated_chevron_right_view(rotation, ROW_ICON_SIZE)
-            .style(bennu_theme::icons::icon_tone_style(IconTone::Normal)),
-        readable_text(title).width(Length::Fill),
-    ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-    if body.is_none() {
-        header = header.push(summary.into());
-    }
-    let SettingsRow(header) = clickable(header, toggle);
     let Some(body) = body else {
-        return SettingsRow(header);
+        return expander_header(title, Some(summary.into()), toggle);
     };
+    let SettingsRow(header) = expander_header(title, None, toggle);
     SettingsRow(
         column![
             header,
@@ -220,6 +209,42 @@ pub(in crate::view) fn expander_row<'a>(
         ]
         .into(),
     )
+}
+
+/// 展开后的内容本身就是卡片行（标题 + 控件）时用：头部一行，下面接这些行，
+/// 行间照常有分隔线，不再套一层内边距。
+pub(in crate::view) fn expander_rows<'a>(
+    title: String,
+    summary: impl Into<Element<'a, Message>>,
+    toggle: Message,
+    rows: Option<Vec<SettingsRow<'a>>>,
+) -> Vec<SettingsRow<'a>> {
+    let Some(rows) = rows else {
+        return vec![expander_header(title, Some(summary.into()), toggle)];
+    };
+    std::iter::once(expander_header(title, None, toggle))
+        .chain(rows)
+        .collect()
+}
+
+/// 折叠时 `summary` 是 Some（显示在右边），展开时是 None、箭头转下。
+fn expander_header<'a>(
+    title: String,
+    summary: Option<Element<'a, Message>>,
+    toggle: Message,
+) -> SettingsRow<'a> {
+    let rotation = if summary.is_some() { 0.0 } else { 90.0 };
+    let mut header = row![
+        rotated_chevron_right_view(rotation, ROW_ICON_SIZE)
+            .style(bennu_theme::icons::icon_tone_style(IconTone::Normal)),
+        readable_text(title).width(Length::Fill),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    if let Some(summary) = summary {
+        header = header.push(summary);
+    }
+    clickable(header, toggle)
 }
 
 /// 整行一段说明：空状态、加载中、出错原因。

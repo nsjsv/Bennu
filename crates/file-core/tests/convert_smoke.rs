@@ -57,6 +57,72 @@ fn write_test_video(directory: &Path, name: &str) -> PathBuf {
     path
 }
 
+fn video_dimensions(path: &Path) -> (u32, u32) {
+    let output = Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0",
+        ])
+        .arg(path)
+        .output()
+        .expect("spawn ffprobe");
+    let text = String::from_utf8(output.stdout).expect("utf8");
+    let (width, height) = text.trim().split_once(',').expect("width,height");
+    (
+        width.parse().expect("width"),
+        height.parse().expect("height"),
+    )
+}
+
+#[tokio::test]
+async fn ffmpeg_long_edge_caps_images_and_videos_without_upscaling() {
+    if !ffmpeg_available() {
+        return;
+    }
+    let directory = tempfile::tempdir().expect("tempdir");
+    let portrait = directory.path().join("portrait.png");
+    image::DynamicImage::new_rgb8(300, 400)
+        .save_with_format(&portrait, image::ImageFormat::Png)
+        .expect("write png");
+    let image_request = ConversionRequest {
+        source: portrait,
+        target: ConversionTarget::Image(ImageTargetFormat::Webp),
+        quality: QualitySpec::Preset(file_core::ConversionQualityPreset::Medium),
+        resize: ResizeSpec::LongEdge(100),
+        fps_override: None,
+        audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
+    };
+    let converted = convert_file_with_controls(image_request, &controls())
+        .await
+        .expect("webp convert succeeds");
+    let decoded = image::open(&converted.output).expect("decode webp");
+    assert_eq!((decoded.width(), decoded.height()), (76, 100));
+
+    let source = write_test_video(directory.path(), "clip.mp4");
+    for (long_edge, expected) in [(161, (160, 120)), (1920, (320, 240))] {
+        let request = ConversionRequest {
+            source: source.clone(),
+            target: ConversionTarget::Video(VideoTargetFormat::Mp4H264),
+            quality: QualitySpec::Preset(file_core::ConversionQualityPreset::Low),
+            resize: ResizeSpec::LongEdge(long_edge),
+            fps_override: None,
+            audio_channels: file_core::AudioChannelSpec::Keep,
+            output: file_core::OutputLocation::BesideSource,
+        };
+        let converted = convert_file_with_controls(request, &controls())
+            .await
+            .expect("video convert succeeds");
+        assert_eq!(video_dimensions(&converted.output), expected, "{long_edge}");
+    }
+}
+
 #[tokio::test]
 async fn png_to_webp_target_size_converges() {
     if !ffmpeg_available() {
@@ -72,6 +138,7 @@ async fn png_to_webp_target_size_converges() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await
@@ -96,9 +163,10 @@ async fn mp4_quality_and_resize_conversion() {
         source: source.clone(),
         target: ConversionTarget::Video(VideoTargetFormat::WebmVp9),
         quality: QualitySpec::Preset(file_core::ConversionQualityPreset::Medium),
-        resize: ResizeSpec::Width(160),
+        resize: ResizeSpec::LongEdge(160),
         fps_override: Some(10),
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await
@@ -122,6 +190,7 @@ async fn mp4_target_size_estimates_bitrate() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await
@@ -164,6 +233,7 @@ async fn png_to_gif_palette_conversion() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await
@@ -184,9 +254,10 @@ async fn mp4_to_gif_uses_palette_chain() {
         source,
         target: ConversionTarget::Video(VideoTargetFormat::Gif),
         quality: file_core::QualitySpec::Preset(file_core::ConversionQualityPreset::Medium),
-        resize: ResizeSpec::Width(320),
+        resize: ResizeSpec::LongEdge(320),
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await
@@ -209,6 +280,7 @@ async fn mp4_to_avi_mpeg4_conversion() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await
@@ -246,6 +318,7 @@ async fn wav_to_m4a_conversion() {
         resize: ResizeSpec::Keep,
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
+        output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
         .await

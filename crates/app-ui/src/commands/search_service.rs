@@ -40,9 +40,10 @@ pub(crate) fn configure_search_paths_command(request: SearchPathConfigureRequest
 }
 
 pub(crate) fn search_path_directory_chooser_command(kind: SearchPathEntryKind) -> Task<Message> {
-    Task::perform(choose_search_directory(), move |outcome| {
-        Message::SearchPathDirectoryChosen(kind, outcome)
-    })
+    Task::perform(
+        super::choose_directory(tr!("Select a search location")),
+        move |outcome| Message::SearchPathDirectoryChosen(kind, outcome),
+    )
 }
 
 /// 目录回退的跳过规则：直接读服务同一份路径偏好文件，不经服务进程——服务没运行时
@@ -101,35 +102,6 @@ fn path_configuration_diagnostic(error: file_search::SearchError) -> SearchServi
         SearchServiceDiagnosticKind::EndpointUnavailable,
         error.to_string(),
     )
-}
-
-async fn choose_search_directory() -> Result<Option<PathBuf>, String> {
-    let title = tr!("Select a search location");
-    let accept_label = tr!("Select");
-    let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
-        .title(title.as_str())
-        .accept_label(accept_label.as_str())
-        .modal(true)
-        .directory(true)
-        .multiple(false)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    let selected = match request.response() {
-        Ok(selected) => selected,
-        Err(ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled)) => return Ok(None),
-        Err(error) => return Err(error.to_string()),
-    };
-    selected_search_directory(selected.uris())
-}
-
-fn selected_search_directory(uris: &[url::Url]) -> Result<Option<PathBuf>, String> {
-    uris.first()
-        .map(|uri| {
-            uri.to_file_path()
-                .map_err(|_| tr!("the selected location is not a local directory"))
-        })
-        .transpose()
 }
 
 async fn ensure_search_service() -> Result<SearchServiceStatus, SearchServiceDiagnostic> {

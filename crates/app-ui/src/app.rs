@@ -129,7 +129,6 @@ use crate::app::archive_creation::ArchiveCreationState;
 use crate::app::archive_extraction::ArchiveExtractionState;
 use crate::app::checksum::ChecksumState;
 use crate::app::column_resize::ColumnResizeDrag;
-use crate::app::convert::ConvertState;
 use crate::app::events::global_event_message;
 use crate::app::runtime::{
     desktop_activation_subscription, directory_watch_subscription, foreign_task_wait_subscription,
@@ -151,6 +150,7 @@ use crate::commands::{
 };
 use crate::config;
 use crate::config::UiLanguage;
+use crate::model::ConvertState;
 use crate::model::{
     AdvancedNewFolderAfter, AdvancedNewFolderState, ApplicationLogViewState, BatchRenameState,
     BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,

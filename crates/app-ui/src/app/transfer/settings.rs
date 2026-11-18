@@ -243,36 +243,10 @@ pub(crate) fn receiver_failure_message(failure: &ReceiverFailure) -> String {
     }
 }
 
-/// 设置页接收目录选择（ashpd 目录选择器，复用搜索路径选择先例）。
+/// 设置页接收目录选择。
 pub(super) fn download_dir_chooser_command() -> iced::Task<Message> {
-    iced::Task::perform(choose_download_directory(), |outcome| {
-        Message::Transfer(TransferMessage::DownloadDirChosen(outcome))
-    })
-}
-
-async fn choose_download_directory() -> Result<Option<PathBuf>, String> {
-    let title = tr!("Choose receive directory");
-    let accept_label = tr!("Select");
-    let request = ashpd::desktop::file_chooser::SelectedFiles::open_file()
-        .title(title.as_str())
-        .accept_label(accept_label.as_str())
-        .modal(true)
-        .directory(true)
-        .multiple(false)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
-    let selected = match request.response() {
-        Ok(selected) => selected,
-        Err(ashpd::Error::Response(ashpd::desktop::ResponseError::Cancelled)) => return Ok(None),
-        Err(error) => return Err(error.to_string()),
-    };
-    selected
-        .uris()
-        .first()
-        .map(|uri| {
-            uri.to_file_path()
-                .map_err(|_| tr!("the selected location is not a local directory"))
-        })
-        .transpose()
+    iced::Task::perform(
+        crate::commands::choose_directory(tr!("Choose receive directory")),
+        |outcome| Message::Transfer(TransferMessage::DownloadDirChosen(outcome)),
+    )
 }

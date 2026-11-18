@@ -126,6 +126,9 @@ pub(crate) struct StoredUserPreferences {
     /// 接收 PIN;缺省 = 不要 PIN。
     #[serde(default)]
     pub transfer_receive_pin: Option<String>,
+    /// 转换对话框记住的设置;None = 旧数据或从没转换过。
+    #[serde(default)]
+    pub convert_defaults: Option<super::convert_defaults::StoredConvertDefaults>,
 }
 
 /// 收藏设备条目:fingerprint 是 LocalSend 设备身份(证书指纹)。
@@ -230,6 +233,7 @@ impl Default for StoredUserPreferences {
             transfer_port: default_transfer_port(),
             transfer_accept_mode: default_transfer_accept_mode(),
             transfer_receive_pin: None,
+            convert_defaults: None,
         }
     }
 }

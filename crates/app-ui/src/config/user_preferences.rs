@@ -7,6 +7,7 @@ use desktop_linux::TerminalEmulator;
 use file_core::FileOperationVerification;
 
 use super::app_config::AppConfig;
+use super::convert_defaults::StoredConvertDefaults;
 use super::startup::StartupLocationPolicy;
 use super::unrecognized_settings::UnrecognizedSettings;
 use super::{
@@ -91,6 +92,7 @@ pub(crate) struct UserPreferences {
     pub(crate) transfer_port: u16,
     pub(crate) transfer_accept_mode: TransferAcceptMode,
     pub(crate) transfer_receive_pin: Option<String>,
+    pub(crate) convert_defaults: crate::model::ConvertDefaults,
 }
 
 impl UserPreferences {
@@ -149,6 +151,7 @@ impl UserPreferences {
             transfer_port: config.transfer_port,
             transfer_accept_mode: config.transfer_accept_mode,
             transfer_receive_pin: config.transfer_receive_pin.clone(),
+            convert_defaults: config.convert_defaults.clone(),
         }
     }
 
@@ -202,6 +205,7 @@ impl UserPreferences {
         config.transfer_port = self.transfer_port;
         config.transfer_accept_mode = self.transfer_accept_mode;
         config.transfer_receive_pin = self.transfer_receive_pin.clone();
+        config.convert_defaults = self.convert_defaults.clone();
     }
 
     pub(crate) fn to_stored(&self) -> StoredUserPreferences {
@@ -306,6 +310,8 @@ impl UserPreferences {
         stored.transfer_port = self.transfer_port;
         stored.transfer_accept_mode = self.transfer_accept_mode.config_value().to_owned();
         stored.transfer_receive_pin = self.transfer_receive_pin.clone();
+        stored.convert_defaults =
+            Some(StoredConvertDefaults::from_defaults(&self.convert_defaults));
         stored
     }
 
@@ -520,6 +526,10 @@ impl UserPreferences {
                 }
                 recognized
             }),
+            convert_defaults: stored.convert_defaults.as_ref().map_or_else(
+                || default_preferences.convert_defaults.clone(),
+                |stored| stored.to_defaults(&mut unrecognized),
+            ),
         };
         InterpretedPreferences {
             preferences,

@@ -46,6 +46,8 @@ pub(crate) use archive_extraction::{
 mod browser_session;
 mod config_persistence;
 pub(crate) use config_persistence::{save_app_config_command, save_user_preferences_command};
+mod directory_chooser;
+pub(crate) use directory_chooser::choose_directory;
 mod directory_loading;
 pub(crate) use directory_loading::{load_directory_command, load_expanded_directory_command};
 mod directory_metadata;

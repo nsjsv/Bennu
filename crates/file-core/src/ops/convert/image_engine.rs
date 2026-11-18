@@ -6,6 +6,7 @@ use image::{imageops::FilterType, DynamicImage, ImageFormat, ImageResult};
 use tokio_util::sync::CancellationToken;
 
 use super::super::FileOperationControls;
+use super::command_plan::lossy_image_preset_quality;
 use super::{ConversionRequest, QualitySpec, ResizeSpec};
 use crate::FileError;
 
@@ -28,18 +29,14 @@ pub(super) async fn convert_with_image_crate(
 
     let image = apply_resize(decoded, request.resize);
     let encoded = match request.quality {
-        QualitySpec::Level(level) => encode_jpeg_with_quality(&image, level, controls).await?,
+        QualitySpec::Preset(preset) => {
+            encode_jpeg_with_quality(&image, lossy_image_preset_quality(preset), controls).await?
+        }
         QualitySpec::TargetBytes(target_bytes) => {
             encode_jpeg_towards_target(&image, target_bytes, controls).await?
         }
         QualitySpec::Lossless => {
             encode_lossless(&image, lossless_format(request), controls).await?
-        }
-        QualitySpec::Preset(_) => {
-            return Err(FileError::InvalidInput {
-                path: output.to_path_buf(),
-                message: "image crate engine does not accept presets".to_owned(),
-            })
         }
     };
 
@@ -68,10 +65,11 @@ fn apply_resize(image: DynamicImage, resize: ResizeSpec) -> DynamicImage {
             let height = scaled_dimension(image.height(), u32::from(percent), 100);
             image.resize_exact(width.max(1), height.max(1), FilterType::Lanczos3)
         }
-        ResizeSpec::Width(width) => {
-            let height = scaled_dimension(image.height(), width, image.width().max(1));
-            image.resize_exact(width.max(1), height.max(1), FilterType::Lanczos3)
+        ResizeSpec::LongEdge(long_edge) if image.width().max(image.height()) > long_edge => {
+            // resize 本身就是等比装进 N×N 的框。
+            image.resize(long_edge, long_edge, FilterType::Lanczos3)
         }
+        ResizeSpec::LongEdge(_) => image,
     }
 }
 
@@ -230,7 +228,10 @@ fn join_error(path: &Path, error: tokio::task::JoinError) -> FileError {
 #[cfg(test)]
 mod tests {
     use super::super::ConversionRequest;
-    use super::super::{AudioChannelSpec, TARGET_BYTES_TOLERANCE_DENOMINATOR};
+    use super::super::{
+        AudioChannelSpec, ConversionQualityPreset, OutputLocation,
+        TARGET_BYTES_TOLERANCE_DENOMINATOR,
+    };
     use super::*;
 
     fn gradient_png_bytes(width: u32, height: u32) -> Vec<u8> {
@@ -256,6 +257,7 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            output: OutputLocation::BesideSource,
         }
     }
 
@@ -269,17 +271,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn jpeg_level_conversion_produces_smaller_output() {
+    async fn jpeg_preset_conversion_writes_output() {
         let directory = tempfile::tempdir().expect("tempdir");
         let source = directory.path().join("input.png");
         std::fs::write(&source, gradient_png_bytes(256, 256)).expect("write png");
         let output = directory.path().join("input.jpg");
-        let byte_count = convert(&source, QualitySpec::Level(60)).await;
+        let byte_count = convert(&source, QualitySpec::Preset(ConversionQualityPreset::Low)).await;
         assert!(byte_count > 0);
         assert_eq!(
             std::fs::metadata(&output).expect("output exists").len(),
             byte_count
         );
+    }
+
+    #[tokio::test]
+    async fn jpeg_presets_grow_from_low_to_high() {
+        let mut sizes = Vec::new();
+        for preset in [
+            ConversionQualityPreset::Low,
+            ConversionQualityPreset::Medium,
+            ConversionQualityPreset::High,
+        ] {
+            let directory = tempfile::tempdir().expect("tempdir");
+            let source = directory.path().join("input.png");
+            std::fs::write(&source, gradient_png_bytes(256, 256)).expect("write png");
+            sizes.push(convert(&source, QualitySpec::Preset(preset)).await);
+        }
+        assert!(sizes[0] < sizes[1] && sizes[1] < sizes[2], "{sizes:?}");
+    }
+
+    #[test]
+    fn long_edge_caps_either_orientation_and_never_upscales() {
+        let blank = |width, height| DynamicImage::new_rgb8(width, height);
+        let cases = [
+            ((400, 300), (100, 75)),
+            ((300, 400), (75, 100)),
+            ((80, 60), (80, 60)),
+        ];
+        for ((width, height), expected) in cases {
+            let resized = apply_resize(blank(width, height), ResizeSpec::LongEdge(100));
+            assert_eq!((resized.width(), resized.height()), expected);
+        }
     }
 
     #[tokio::test]
@@ -329,7 +361,10 @@ mod tests {
         let source = directory.path().join("input.png");
         std::fs::write(&source, gradient_png_bytes(200, 100)).expect("write png");
         let output = directory.path().join("input.jpg");
-        let mut request = request(&source, QualitySpec::Level(80));
+        let mut request = request(
+            &source,
+            QualitySpec::Preset(ConversionQualityPreset::Medium),
+        );
         request.resize = ResizeSpec::Percent(50);
         let controls = FileOperationControls::running(CancellationToken::new());
         crate::ops::convert::convert_file_with_controls(request, &controls)

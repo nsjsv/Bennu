@@ -1,6 +1,5 @@
 use std::num::NonZeroU32;
 #[cfg(unix)]
-use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -11,12 +10,10 @@ use file_search::{
 };
 use tempfile::tempdir;
 use tokio::net::UnixListener;
-use url::Url;
 
 use super::{
-    inspect_search_endpoint, selected_search_directory, SearchEndpointProbeFailure,
-    SearchUnitAction, SearchUnitController, SearchUnitSnapshot, UnitActiveState,
-    ValidatedSearchServiceFailure,
+    inspect_search_endpoint, SearchEndpointProbeFailure, SearchUnitAction, SearchUnitController,
+    SearchUnitSnapshot, UnitActiveState, ValidatedSearchServiceFailure,
 };
 use crate::model::{SearchServiceDiagnosticKind, SearchServiceRecoveryAction};
 
@@ -128,22 +125,6 @@ async fn assert_search_endpoint_server_completed_within(
             );
         }
     }
-}
-
-#[cfg(unix)]
-#[test]
-fn search_directory_adapter_preserves_native_non_utf8_paths() {
-    let path = PathBuf::from(std::ffi::OsString::from_vec(
-        b"/tmp/bennu-search-\xff".to_vec(),
-    ));
-    let uri = Url::from_file_path(&path).unwrap();
-
-    assert_eq!(selected_search_directory(&[]).unwrap(), None);
-    assert_eq!(
-        selected_search_directory(&[uri]).unwrap(),
-        Some(path.clone())
-    );
-    assert!(selected_search_directory(&[Url::parse("https://example.com/").unwrap()]).is_err());
 }
 
 #[tokio::test]

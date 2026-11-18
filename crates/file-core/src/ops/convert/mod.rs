@@ -65,11 +65,9 @@ pub enum AudioTargetFormat {
     Wav,
 }
 
-/// 质量与目标体积互斥:质量模式(Level/Preset)或体积模式(TargetBytes);无损目标只接受 Lossless。
+/// 质量与目标体积互斥:质量档位(Preset)或体积模式(TargetBytes);无损目标只接受 Lossless。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QualitySpec {
-    /// 图片质量滑块,0-100。
-    Level(u8),
     Preset(ConversionQualityPreset),
     /// 体积模式:单个输出文件的目标字节数。
     TargetBytes(u64),
@@ -89,14 +87,22 @@ pub enum ResizeSpec {
     Keep,
     /// 百分比 1-100。
     Percent(u8),
-    /// 目标宽度像素;高度按比例自动计算。
-    Width(u32),
+    /// 较长的那条边不超过这么多像素;等比缩小,本来就不超过的不放大。
+    LongEdge(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioChannelSpec {
     Keep,
     Mono,
+}
+
+/// 输出文件放哪。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutputLocation {
+    BesideSource,
+    /// 不存在时转换前建好。
+    Directory(PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +114,7 @@ pub struct ConversionRequest {
     /// 覆盖输出帧率(fps);仅视频目标使用。
     pub fps_override: Option<u32>,
     pub audio_channels: AudioChannelSpec,
+    pub output: OutputLocation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +148,7 @@ pub async fn convert_file_with_controls(
     controls.checkpoint_now()?;
     validate_conversion_request(&request)?;
 
-    let output = reserve_output_path(&request.source, request.target).await?;
+    let output = reserve_output_path(&request.source, &request.output, request.target).await?;
     let convert_output = output.clone();
     let result = dispatch_conversion(&request, &output, controls).await;
     match result {
@@ -184,7 +191,7 @@ fn validate_conversion_request(request: &ConversionRequest) -> Result<(), FileEr
         }
         ConversionTarget::Video(format) => {
             match request.quality {
-                QualitySpec::Lossless | QualitySpec::Level(_) => {
+                QualitySpec::Lossless => {
                     return Err(invalid_quality_for_video(&request.source, format));
                 }
                 // GIF 调色板编码没有码率估算语义。
@@ -240,9 +247,9 @@ fn validate_image_quality(
         })
     };
     match (format, quality) {
-        (ImageTargetFormat::Jpeg, QualitySpec::Level(_) | QualitySpec::TargetBytes(_)) => Ok(()),
+        (ImageTargetFormat::Jpeg, QualitySpec::Preset(_) | QualitySpec::TargetBytes(_)) => Ok(()),
         (ImageTargetFormat::Jpeg, _) => {
-            rejected("jpeg output only accepts a quality level or target size")
+            rejected("jpeg output only accepts a quality preset or target size")
         }
         // 无损目标体积不可调,只接受 Lossless。
         (
@@ -277,10 +284,10 @@ fn validate_image_resize(source: &Path, resize: ResizeSpec) -> Result<(), FileEr
     match resize {
         ResizeSpec::Keep => Ok(()),
         ResizeSpec::Percent(percent) if (1..=100).contains(&percent) => Ok(()),
-        ResizeSpec::Width(width) if width > 0 => Ok(()),
+        ResizeSpec::LongEdge(long_edge) if long_edge > 0 => Ok(()),
         _ => Err(FileError::InvalidInput {
             path: source.to_path_buf(),
-            message: "resize must be a percentage in 1..=100 or a positive width".to_owned(),
+            message: "resize must be a percentage in 1..=100 or a positive long edge".to_owned(),
         }),
     }
 }
@@ -392,16 +399,28 @@ impl ConversionTarget {
     }
 }
 
-/// 在源目录内为输出文件挑选最终名:`原名.新扩展名`,重名时 `_1`、`_2` 递增,
+/// 在输出目录内为输出文件挑选最终名:`原名.新扩展名`,重名时 `_1`、`_2` 递增,
 /// 并以 create_new 原子占位防止并发转换竞争同名。失败路径由调用方删除占位文件。
 async fn reserve_output_path(
     source: &Path,
+    location: &OutputLocation,
     target: ConversionTarget,
 ) -> Result<PathBuf, FileError> {
-    let parent = source.parent().ok_or_else(|| FileError::InvalidInput {
-        path: source.to_path_buf(),
-        message: "source path has no parent directory".to_owned(),
-    })?;
+    let parent = match location {
+        OutputLocation::BesideSource => source.parent().ok_or_else(|| FileError::InvalidInput {
+            path: source.to_path_buf(),
+            message: "source path has no parent directory".to_owned(),
+        })?,
+        OutputLocation::Directory(directory) => {
+            fs::create_dir_all(directory)
+                .await
+                .map_err(|error| FileError::Convert {
+                    path: directory.clone(),
+                    message: format!("could not create output directory: {error}"),
+                })?;
+            directory
+        }
+    };
     let stem = source
         .file_stem()
         .and_then(|name| name.to_str())
@@ -483,14 +502,15 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            output: OutputLocation::BesideSource,
         }
     }
 
     #[test]
-    fn jpeg_accepts_level_and_target_size_only() {
+    fn jpeg_accepts_preset_and_target_size_only() {
         assert!(validate_conversion_request(&base_request(
             ConversionTarget::Image(ImageTargetFormat::Jpeg),
-            QualitySpec::Level(80),
+            QualitySpec::Preset(ConversionQualityPreset::Medium),
         ))
         .is_ok());
         assert!(validate_conversion_request(&base_request(
@@ -501,11 +521,6 @@ mod tests {
         assert!(validate_conversion_request(&base_request(
             ConversionTarget::Image(ImageTargetFormat::Jpeg),
             QualitySpec::Lossless,
-        ))
-        .is_err());
-        assert!(validate_conversion_request(&base_request(
-            ConversionTarget::Image(ImageTargetFormat::Jpeg),
-            QualitySpec::Preset(ConversionQualityPreset::Medium),
         ))
         .is_err());
     }
@@ -519,7 +534,7 @@ mod tests {
         .is_ok());
         assert!(validate_conversion_request(&base_request(
             ConversionTarget::Image(ImageTargetFormat::Png),
-            QualitySpec::Level(80),
+            QualitySpec::Preset(ConversionQualityPreset::Medium),
         ))
         .is_err());
         assert!(validate_conversion_request(&base_request(
@@ -576,15 +591,15 @@ mod tests {
     fn resize_bounds_are_validated() {
         let mut request = base_request(
             ConversionTarget::Image(ImageTargetFormat::Jpeg),
-            QualitySpec::Level(80),
+            QualitySpec::Preset(ConversionQualityPreset::Medium),
         );
         request.resize = ResizeSpec::Percent(0);
         assert!(validate_conversion_request(&request).is_err());
         request.resize = ResizeSpec::Percent(100);
         assert!(validate_conversion_request(&request).is_ok());
-        request.resize = ResizeSpec::Width(0);
+        request.resize = ResizeSpec::LongEdge(0);
         assert!(validate_conversion_request(&request).is_err());
-        request.resize = ResizeSpec::Width(1920);
+        request.resize = ResizeSpec::LongEdge(1920);
         assert!(validate_conversion_request(&request).is_ok());
     }
 
@@ -611,8 +626,6 @@ mod tests {
         assert!(validate_conversion_request(&request).is_ok());
         request.quality = QualitySpec::TargetBytes(1024);
         assert!(validate_conversion_request(&request).is_err());
-        request.quality = QualitySpec::Level(80);
-        assert!(validate_conversion_request(&request).is_err());
     }
 
     #[test]
@@ -624,7 +637,7 @@ mod tests {
         ] {
             let mut request = base_request(ConversionTarget::Image(format), QualitySpec::Lossless);
             assert!(validate_conversion_request(&request).is_ok(), "{format:?}");
-            request.quality = QualitySpec::Level(80);
+            request.quality = QualitySpec::Preset(ConversionQualityPreset::Medium);
             assert!(validate_conversion_request(&request).is_err(), "{format:?}");
             request.quality = QualitySpec::TargetBytes(4096);
             assert!(validate_conversion_request(&request).is_err(), "{format:?}");
@@ -658,21 +671,46 @@ mod tests {
         let source = directory.path().join("photo.png");
         std::fs::write(&source, b"stub").expect("write source");
 
-        let first = reserve_output_path(&source, ConversionTarget::Image(ImageTargetFormat::Jpeg))
+        let beside = OutputLocation::BesideSource;
+        let jpeg = ConversionTarget::Image(ImageTargetFormat::Jpeg);
+        let first = reserve_output_path(&source, &beside, jpeg)
             .await
             .expect("reserve first");
         assert_eq!(first, directory.path().join("photo.jpg"));
 
-        let second = reserve_output_path(&source, ConversionTarget::Image(ImageTargetFormat::Jpeg))
+        let second = reserve_output_path(&source, &beside, jpeg)
             .await
             .expect("reserve second");
         assert_eq!(second, directory.path().join("photo_1.jpg"));
 
         std::fs::remove_file(&first).expect("drop first placeholder");
-        let third = reserve_output_path(&source, ConversionTarget::Image(ImageTargetFormat::Webp))
-            .await
-            .expect("reserve third");
+        let third = reserve_output_path(
+            &source,
+            &beside,
+            ConversionTarget::Image(ImageTargetFormat::Webp),
+        )
+        .await
+        .expect("reserve third");
         assert_eq!(third, directory.path().join("photo.webp"));
+    }
+
+    #[tokio::test]
+    async fn reserve_output_path_creates_the_chosen_directory() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("photo.png");
+        std::fs::write(&source, b"stub").expect("write source");
+        let chosen = directory.path().join("converted/2026");
+        let location = OutputLocation::Directory(chosen.clone());
+        let jpeg = ConversionTarget::Image(ImageTargetFormat::Jpeg);
+
+        let first = reserve_output_path(&source, &location, jpeg)
+            .await
+            .expect("reserve first");
+        assert_eq!(first, chosen.join("photo.jpg"));
+        let second = reserve_output_path(&source, &location, jpeg)
+            .await
+            .expect("reserve second");
+        assert_eq!(second, chosen.join("photo_1.jpg"));
     }
 
     #[tokio::test]
@@ -688,6 +726,7 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            output: OutputLocation::BesideSource,
         };
         let controls = FileOperationControls::running(tokio_util::sync::CancellationToken::new());
         let result = convert_file_with_controls(request, &controls).await;

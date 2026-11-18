@@ -36,6 +36,7 @@ mod settings_recovery;
 #[cfg(test)]
 pub(crate) use settings_recovery::ResetSettings;
 pub(crate) use settings_recovery::{SettingsPersistence, SettingsRecovery, SettingsSource};
+mod convert_defaults;
 #[cfg(test)]
 mod settings_recovery_tests;
 mod stored_preferences;
@@ -392,6 +393,8 @@ pub(crate) struct UserConfig {
     pub(crate) transfer_accept_mode: TransferAcceptMode,
     /// 别人发文件进来要输的 PIN;None = 不要。只存 `transfer_receive_pin_from` 认可的值。
     pub(crate) transfer_receive_pin: Option<String>,
+    /// 转换对话框每类媒体上次提交的选项。
+    pub(crate) convert_defaults: crate::model::ConvertDefaults,
 }
 
 /// 谁发来的文件不用确认就收;默认收藏自动收(合并收藏前"信任设备自动收"的行为)。
@@ -527,6 +530,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         transfer_port: local_send::DEFAULT_PORT,
         transfer_accept_mode: TransferAcceptMode::AcceptFavorites,
         transfer_receive_pin: None,
+        convert_defaults: crate::model::ConvertDefaults::default(),
     }
 }
 
@@ -583,6 +587,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         transfer_port: local_send::DEFAULT_PORT,
         transfer_accept_mode: TransferAcceptMode::AcceptFavorites,
         transfer_receive_pin: None,
+        convert_defaults: crate::model::ConvertDefaults::default(),
     }
 }
 

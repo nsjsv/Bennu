@@ -8,9 +8,9 @@ use tokio::process::Command;
 
 use super::super::FileOperationControls;
 use super::command_plan::{
-    audio_encoder_name, avif_preset_crf, gif_stream_args, quality_level_to_avif_crf,
+    audio_encoder_name, avif_preset_crf, gif_stream_args, lossy_image_preset_quality,
     quality_mode_audio_args, resolve_targeted_rate, scale_filter_args, video_stream_args,
-    webp_preset_quality, ImageEncodingParameter, ResolvedRate,
+    ImageEncodingParameter, ResolvedRate,
 };
 use super::{
     output_satisfies_target, AudioChannelSpec, AudioTargetFormat, ConversionRequest,
@@ -63,6 +63,13 @@ impl ConversionEncoderAvailability {
         }
     }
 
+    /// 名字与 `ffmpeg -encoders` 列出的一致(`libx264`、`aac`……)。
+    pub fn from_encoder_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
+        Self {
+            encoder_names: names.into_iter().map(str::to_owned).collect(),
+        }
+    }
+
     pub fn supports_video(&self, format: VideoTargetFormat) -> bool {
         match format {
             VideoTargetFormat::Mp4H264 | VideoTargetFormat::MovH264 => {
@@ -76,7 +83,7 @@ impl ConversionEncoderAvailability {
             }
             VideoTargetFormat::WebmVp9 => self.encoder_names.contains("libvpx-vp9"),
             // mpeg4 与 gif 是 ffmpeg 内置编码器,存在 ffmpeg 即可用。
-            VideoTargetFormat::AviMpeg4 | VideoTargetFormat::Gif => true,
+            VideoTargetFormat::AviMpeg4 | VideoTargetFormat::Gif => !self.is_empty(),
         }
     }
 
@@ -100,9 +107,13 @@ impl ConversionEncoderAvailability {
             }
             ImageTargetFormat::Avif => self.any(&["libsvtav1", "libaom-av1"]),
             ImageTargetFormat::Jxl => self.encoder_names.contains("libjxl"),
-            // gif 是内置编码器;jpeg/png 由 image crate 处理,不依赖 ffmpeg。
-            ImageTargetFormat::Gif | ImageTargetFormat::Jpeg | ImageTargetFormat::Png => true,
-            ImageTargetFormat::Tiff | ImageTargetFormat::Bmp | ImageTargetFormat::Ico => true,
+            ImageTargetFormat::Gif => !self.is_empty(),
+            // 这几种由 image crate 处理,不依赖 ffmpeg。
+            ImageTargetFormat::Jpeg
+            | ImageTargetFormat::Png
+            | ImageTargetFormat::Tiff
+            | ImageTargetFormat::Bmp
+            | ImageTargetFormat::Ico => true,
         }
     }
 
@@ -139,12 +150,11 @@ async fn probe_encoder_names(ffmpeg_command: &str) -> Option<ConversionEncoderAv
 
     // 行形如 " A....L libmp3lame  description";第二个空白分隔字段是编码器名。
     let listing = String::from_utf8_lossy(&output.stdout);
-    let encoder_names = listing
-        .lines()
-        .filter_map(|line| line.split_whitespace().nth(1))
-        .map(str::to_owned)
-        .collect::<HashSet<_>>();
-    Some(ConversionEncoderAvailability { encoder_names })
+    Some(ConversionEncoderAvailability::from_encoder_names(
+        listing
+            .lines()
+            .filter_map(|line| line.split_whitespace().nth(1)),
+    ))
 }
 
 /// ffprobe 读取媒体总时长;视频/音频体积模式依赖它做码率估算。
@@ -279,11 +289,8 @@ async fn convert_image_format(
                 message: "lossy image output does not accept lossless quality".to_owned(),
             })
         }
-        (ImageTargetFormat::Webp | ImageTargetFormat::Jxl, QualitySpec::Level(level)) => {
-            ImageEncodingParameter::EncoderQuality(*level)
-        }
         (ImageTargetFormat::Webp | ImageTargetFormat::Jxl, QualitySpec::Preset(preset)) => {
-            ImageEncodingParameter::EncoderQuality(webp_preset_quality(*preset))
+            ImageEncodingParameter::EncoderQuality(lossy_image_preset_quality(*preset))
         }
         (ImageTargetFormat::Webp | ImageTargetFormat::Jxl, QualitySpec::TargetBytes(_)) => {
             return encode_image_towards_target(
@@ -296,9 +303,6 @@ async fn convert_image_format(
                 controls,
             )
             .await;
-        }
-        (ImageTargetFormat::Avif, QualitySpec::Level(level)) => {
-            ImageEncodingParameter::AvifCrf(quality_level_to_avif_crf(*level))
         }
         (ImageTargetFormat::Avif, QualitySpec::Preset(preset)) => {
             ImageEncodingParameter::AvifCrf(avif_preset_crf(*preset))
@@ -824,19 +828,14 @@ mod tests {
 
     #[test]
     fn encoder_availability_reports_format_support() {
-        let availability = ConversionEncoderAvailability {
-            encoder_names: [
-                "libx264",
-                "libmp3lame",
-                "flac",
-                "libwebp",
-                "libsvtav1",
-                "libjxl",
-            ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<HashSet<_>>(),
-        };
+        let availability = ConversionEncoderAvailability::from_encoder_names([
+            "libx264",
+            "libmp3lame",
+            "flac",
+            "libwebp",
+            "libsvtav1",
+            "libjxl",
+        ]);
 
         assert!(availability.supports_video(VideoTargetFormat::Mp4H264));
         assert!(!availability.supports_video(VideoTargetFormat::MkvH265));
@@ -853,14 +852,18 @@ mod tests {
         assert!(availability.supports_lossy_image(ImageTargetFormat::Jpeg));
         assert!(availability.supports_lossy_image(ImageTargetFormat::Gif));
         // 没有 libjxl 时 JXL 目标应不可用。
-        let without_jxl = ConversionEncoderAvailability {
-            encoder_names: ["libx264"].into_iter().map(str::to_owned).collect(),
-        };
+        let without_jxl = ConversionEncoderAvailability::from_encoder_names(["libx264"]);
         assert!(!without_jxl.supports_lossy_image(ImageTargetFormat::Jxl));
     }
 
     #[test]
-    fn unavailable_availability_is_empty() {
-        assert!(ConversionEncoderAvailability::unavailable().is_empty());
+    fn missing_ffmpeg_leaves_only_image_crate_targets() {
+        let missing = ConversionEncoderAvailability::unavailable();
+        assert!(missing.is_empty());
+        assert!(!missing.supports_video(VideoTargetFormat::AviMpeg4));
+        assert!(!missing.supports_video(VideoTargetFormat::Gif));
+        assert!(!missing.supports_lossy_image(ImageTargetFormat::Gif));
+        assert!(missing.supports_lossy_image(ImageTargetFormat::Jpeg));
+        assert!(missing.supports_lossy_image(ImageTargetFormat::Png));
     }
 }

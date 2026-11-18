@@ -170,7 +170,8 @@ pub(super) enum ResolvedRate {
     Audio { bps: u64 },
 }
 
-pub(super) fn webp_preset_quality(preset: ConversionQualityPreset) -> u8 {
+/// JPEG、WebP、JPEG XL 共用的 0-100 质量档。
+pub(super) fn lossy_image_preset_quality(preset: ConversionQualityPreset) -> u8 {
     match preset {
         ConversionQualityPreset::Low => 60,
         ConversionQualityPreset::Medium => 80,
@@ -184,12 +185,6 @@ pub(super) fn avif_preset_crf(preset: ConversionQualityPreset) -> u32 {
         ConversionQualityPreset::Medium => 35,
         ConversionQualityPreset::High => 25,
     }
-}
-
-/// 图片质量滑块 0-100 → AV1 crf 域 0-63(方向反转)。
-pub(super) fn quality_level_to_avif_crf(level: u8) -> u32 {
-    let level = u32::from(level).min(100);
-    ((100 - level) * 63 + 50) / 100
 }
 
 /// 体积模式 → 码率估算;视频按时长均摊,音频选可用码率档。
@@ -395,15 +390,16 @@ fn ogg_or_lossless_audio_args(
     }
 }
 
-/// 缩放表达式;宽度向偶数取整以满足 H.264/VP9 等编码器的偶数尺寸要求。
+/// 缩放表达式;宽高取偶数以满足 H.264/VP9 等编码器的偶数尺寸要求。
 pub(super) fn scale_expression(resize: ResizeSpec) -> Option<String> {
     match resize {
         ResizeSpec::Keep => None,
         ResizeSpec::Percent(percent) => Some(format!("scale=trunc(iw*{percent}/100/2)*2:-2")),
-        ResizeSpec::Width(width) => {
-            let even_width = (width.div_ceil(2) * 2).max(2);
-            Some(format!("scale={even_width}:-2"))
-        }
+        // 框先按原尺寸收小(min),decrease 才不会把小片放大到 N。
+        ResizeSpec::LongEdge(long_edge) => Some(format!(
+            "scale='min({long_edge},iw)':'min({long_edge},ih)'\
+             :force_original_aspect_ratio=decrease:force_divisible_by=2"
+        )),
     }
 }
 
@@ -420,7 +416,7 @@ mod tests {
 
     use super::super::AudioChannelSpec;
     use super::*;
-    use crate::ops::convert::{ConversionRequest, ConversionTarget};
+    use crate::ops::convert::{ConversionRequest, ConversionTarget, OutputLocation};
 
     fn request(target: ConversionTarget, quality: QualitySpec) -> ConversionRequest {
         ConversionRequest {
@@ -430,14 +426,8 @@ mod tests {
             resize: ResizeSpec::Keep,
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
+            output: OutputLocation::BesideSource,
         }
-    }
-
-    #[test]
-    fn quality_level_maps_to_avif_crf_inverted() {
-        assert_eq!(quality_level_to_avif_crf(100), 0);
-        assert_eq!(quality_level_to_avif_crf(0), 63);
-        assert_eq!(quality_level_to_avif_crf(50), 32);
     }
 
     #[test]
@@ -515,15 +505,15 @@ mod tests {
     }
 
     #[test]
-    fn scale_filter_enforces_even_width() {
-        // 自定义宽度向上取偶,避免缩小丢列。
+    fn scale_filter_caps_the_long_edge_without_upscaling() {
         assert_eq!(
-            scale_filter_args(ResizeSpec::Width(1921)),
-            vec!["-vf".to_owned(), "scale=1922:-2".to_owned()]
-        );
-        assert_eq!(
-            scale_filter_args(ResizeSpec::Width(1920)),
-            vec!["-vf".to_owned(), "scale=1920:-2".to_owned()]
+            scale_filter_args(ResizeSpec::LongEdge(1920)),
+            vec![
+                "-vf".to_owned(),
+                "scale='min(1920,iw)':'min(1920,ih)'\
+                 :force_original_aspect_ratio=decrease:force_divisible_by=2"
+                    .to_owned()
+            ]
         );
         assert_eq!(
             scale_filter_args(ResizeSpec::Percent(50)),
@@ -580,7 +570,7 @@ mod tests {
     fn gif_stream_args_build_palette_chain() {
         let args = gif_stream_args(
             ConversionQualityPreset::Medium,
-            ResizeSpec::Width(480),
+            ResizeSpec::LongEdge(480),
             None,
         );
         let filter = args
@@ -589,7 +579,10 @@ mod tests {
             .map(|index| args[index + 1].clone())
             .expect("filter complex");
         assert!(filter.starts_with("fps=15,"));
-        assert!(filter.contains("scale=480:-2:flags=lanczos"));
+        assert!(filter.contains(
+            "scale='min(480,iw)':'min(480,ih)'\
+             :force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos"
+        ));
         assert!(filter.contains("palettegen=max_colors=128"));
         assert!(filter.contains("paletteuse=dither=sierra2_4a"));
         assert!(args.iter().any(|arg| arg == "-an"));

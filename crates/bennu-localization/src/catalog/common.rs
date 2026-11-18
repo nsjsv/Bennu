@@ -60,7 +60,6 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("%1 items", "%1 个项目"),
     ("Trash", "回收站"),
     ("Format", "格式"),
-    ("Width", "宽度"),
     ("Hide", "隐藏"),
     ("New File", "新建文件"),
     ("New Folder", "新建文件夹"),

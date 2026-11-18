@@ -50,6 +50,13 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "Write times like 1:30 or 0:01:30.5, with the end after the start.",
         "时间写成 1:30 或 0:01:30.5，结束要晚于开始。",
     ),
+    // 图片：照片信息。
+    ("Photo info", "照片信息"),
+    (
+        "Date taken, camera, location and color profile",
+        "拍摄时间、相机、位置和颜色配置",
+    ),
+    ("No photo info", "去掉照片信息"),
     (
         "Enter a target size like 500 KiB or 2 MiB.",
         "请输入目标体积,例如 500 KiB 或 2 MiB。",

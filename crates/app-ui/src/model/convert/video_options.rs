@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use file_core::{
     AudioChannelSpec, AudioTargetFormat, ConversionEncoderAvailability, ConversionQualityPreset,
-    ConversionTarget, MediaEdits, ResizeSpec, TrimRange, VideoRotation, VideoSound,
+    ConversionTarget, MediaEdits, PhotoMetadata, ResizeSpec, TrimRange, VideoRotation, VideoSound,
     VideoTargetFormat,
 };
 
@@ -225,6 +225,7 @@ impl MediaOptions for VideoConvertOptions {
                     rotation: self.clip.rotation,
                     sound: self.clip.sound,
                 },
+                photo_metadata: PhotoMetadata::Keep,
             },
             // 只要声音：画面上的缩放、帧率、旋转都用不上。
             VideoTarget::Audio(format) => ConversionSettings {
@@ -237,6 +238,7 @@ impl MediaOptions for VideoConvertOptions {
                     trim,
                     ..MediaEdits::default()
                 },
+                photo_metadata: PhotoMetadata::Keep,
             },
         })
     }

@@ -2,7 +2,7 @@
 //! 字符串键：file-core 改变体名不该悄悄改掉用户磁盘上的数据。
 
 use file_core::{
-    AudioChannelSpec, AudioTargetFormat, ConversionQualityPreset, ImageTargetFormat,
+    AudioChannelSpec, AudioTargetFormat, ConversionQualityPreset, ImageTargetFormat, PhotoMetadata,
     VideoTargetFormat,
 };
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,10 @@ const PRESET_KEYS: [(ConversionQualityPreset, &str); 3] = [
     (ConversionQualityPreset::Medium, "medium"),
     (ConversionQualityPreset::High, "high"),
 ];
+const PHOTO_METADATA_KEYS: [(PhotoMetadata, &str); 2] = [
+    (PhotoMetadata::Keep, "keep"),
+    (PhotoMetadata::Strip, "strip"),
+];
 const CHANNEL_KEYS: [(AudioChannelSpec, &str); 2] = [
     (AudioChannelSpec::Keep, "keep"),
     (AudioChannelSpec::Mono, "mono"),
@@ -68,6 +72,9 @@ pub(crate) struct StoredImageConvert {
     pub format: String,
     pub quality: StoredQuality,
     pub resize: StoredResize,
+    /// 照片信息;None = 早先没存过,按保留。
+    #[serde(default)]
+    pub metadata: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +127,7 @@ impl StoredConvertDefaults {
                 format: key_of(&IMAGE_FORMAT_KEYS, image.target_format).to_owned(),
                 quality: StoredQuality::from_selection(&image.quality),
                 resize: StoredResize::from_selection(&image.resize),
+                metadata: Some(key_of(&PHOTO_METADATA_KEYS, image.metadata).to_owned()),
             },
             video: StoredVideoConvert {
                 format: video_target_key(video.target),
@@ -149,6 +157,12 @@ impl StoredConvertDefaults {
                 ),
                 quality: self.image.quality.to_selection(&mut keys),
                 resize: self.image.resize.to_selection(),
+                metadata: match &self.image.metadata {
+                    Some(metadata) => {
+                        keys.read(&PHOTO_METADATA_KEYS, metadata, fallback.image.metadata)
+                    }
+                    None => fallback.image.metadata,
+                },
             },
             video: VideoConvertOptions {
                 target: keys.recognize(
@@ -288,6 +302,7 @@ mod tests {
         assert_unique(&AUDIO_FORMAT_KEYS);
         assert_unique(&PRESET_KEYS);
         assert_unique(&CHANNEL_KEYS);
+        assert_unique(&PHOTO_METADATA_KEYS);
         assert_eq!(
             IMAGE_FORMAT_KEYS.len(),
             crate::model::IMAGE_TARGET_FORMATS.len()
@@ -308,6 +323,7 @@ mod tests {
         defaults.image.target_format = ImageTargetFormat::Avif;
         defaults.image.resize.choice = ResizeChoice::LongEdge;
         defaults.image.resize.long_edge_text = "1280".to_owned();
+        defaults.image.metadata = PhotoMetadata::Strip;
         defaults.video.target = VideoTarget::Audio(AudioTargetFormat::Flac);
         defaults.video.channels = AudioChannelSpec::Mono;
         defaults.video.quality.by_target_size = true;

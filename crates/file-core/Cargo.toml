@@ -14,6 +14,10 @@ encoding_rs = "0.8.35"
 getrandom = "0.4.2"
 filetime = "0.2.29"
 image.workspace = true
+# 转换时把 JPEG/PNG/WebP 输出里的 EXIF、ICC 补上（容器级读写，不重编码）。
+img-parts = "0.4"
+# 从各种照片容器（含 HEIC）读 EXIF，并重写成转换后该有的样子。
+kamadak-exif = "0.6"
 # 大 JPEG 在解码时就缩小（DCT 缩放），image 用的解码器只能解整图；不开 rayon，解码不另开线程池。
 jpeg-decoder = { version = "0.3", default-features = false }
 libc = "0.2"

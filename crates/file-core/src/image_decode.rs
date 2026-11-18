@@ -191,11 +191,11 @@ fn decode_route(format: Option<ImageFormat>, plan: &ShrinkPlan, whole_bytes: u64
     }
 }
 
-/// 格式转换用：内置格式原样解（保留 16 位等色深，和以前一样不转方向），其余交给 ffmpeg。
+/// 格式转换用：内置格式原样解（保留 16 位等色深）并按 EXIF 方向摆正，其余交给 ffmpeg
+/// （它自己按旋转元数据摆正）。输出不再带原来的方向标记，像素必须是正的。
 pub fn open_picture(path: &Path) -> Result<DynamicImage, ImageDecodeError> {
     with_ffmpeg_fallback(
-        guessed_reader(path)
-            .and_then(|reader| reader.map(|reader| Ok(reader.decode()?)).transpose()),
+        builtin_decoder(path).and_then(|decoder| decoder.map(decode_upright).transpose()),
         || {
             let plan = ffmpeg_still::probe(path)?;
             Ok(DynamicImage::ImageRgba8(ffmpeg_still::decode(
@@ -233,6 +233,13 @@ fn guessed_reader(
         .format()
         .is_some_and(|format| format.reading_enabled())
         .then_some(reader))
+}
+
+fn decode_upright(mut decoder: impl ImageDecoder) -> Result<DynamicImage, ImageDecodeError> {
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut image = DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    Ok(image)
 }
 
 fn builtin_decoder(path: &Path) -> Result<Option<impl ImageDecoder>, ImageDecodeError> {

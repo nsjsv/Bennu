@@ -453,3 +453,23 @@ fn a_remembered_sound_only_target_falls_back_to_another_sound_format() {
         VideoTarget::Audio(AudioTargetFormat::Mp3)
     );
 }
+
+#[test]
+fn photo_metadata_choice_reaches_image_requests_and_is_remembered() {
+    let mut state = mixed_state(full_encoders());
+    assert!(state
+        .requests()
+        .expect("valid")
+        .iter()
+        .all(|request| request.photo_metadata == PhotoMetadata::Keep));
+
+    state.apply(ConvertEdit::Image(SectionEdit::Options(
+        ImageEdit::Metadata(PhotoMetadata::Strip),
+    )));
+    let requests = state.requests().expect("valid");
+    assert_eq!(requests[0].photo_metadata, PhotoMetadata::Strip);
+    assert_eq!(
+        state.remembered(&ConvertDefaults::default()).image.metadata,
+        PhotoMetadata::Strip
+    );
+}

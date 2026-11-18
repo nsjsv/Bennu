@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use file_core::{
     AudioChannelSpec, AudioTargetFormat, ConversionEncoderAvailability, ConversionQualityPreset,
     ConversionRequest, ConversionTarget, ImageTargetFormat, MediaEdits, OutputLocation,
-    QualitySpec, ResizeSpec, VideoTargetFormat,
+    PhotoMetadata, QualitySpec, ResizeSpec, VideoTargetFormat,
 };
 
 mod media_options;
@@ -255,6 +255,8 @@ pub(crate) struct ConversionSettings {
     fps_override: Option<u32>,
     audio_channels: AudioChannelSpec,
     edits: MediaEdits,
+    /// 只对图片有意义；视频、音频填 Keep，引擎不看。
+    photo_metadata: PhotoMetadata,
 }
 
 impl ConversionSettings {
@@ -267,6 +269,7 @@ impl ConversionSettings {
             fps_override: self.fps_override,
             audio_channels: self.audio_channels,
             edits: self.edits,
+            photo_metadata: self.photo_metadata,
             output: output.clone(),
         }
     }

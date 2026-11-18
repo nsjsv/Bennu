@@ -4,7 +4,9 @@
 use iced::widget::row;
 use iced::{Alignment, Element, Length};
 
-use file_core::{AudioChannelSpec, ConversionEncoderAvailability, ConversionQualityPreset};
+use file_core::{
+    AudioChannelSpec, ConversionEncoderAvailability, ConversionQualityPreset, PhotoMetadata,
+};
 
 use crate::app::convert::ConvertMessage;
 use crate::model::{
@@ -17,7 +19,7 @@ use bennu_theme::controls::{dropdown, segmented_choice_row, text_field, Segmente
 
 use super::super::dialog;
 use super::super::settings_group::{
-    control_row, expander_rows, muted_setting_text, settings_card, SettingsRow,
+    control_row, expander_rows, muted_setting_text, settings_card, RowNote, SettingsRow,
 };
 
 const FORMAT_PICK_WIDTH: f32 = 240.0;
@@ -35,12 +37,19 @@ pub(super) fn image_section<'a>(
         image_edit(SectionEdit::Options(ImageEdit::Format(format)))
     })];
     rows.extend(quality_rows(options, image_edit));
-    let summary = resize_summary(&options.resize).into_iter().collect();
-    let more = resize_rows(
+    let mut summary: Vec<String> = resize_summary(&options.resize).into_iter().collect();
+    let mut more = resize_rows(
         &options.resize,
         |choice| image_edit(SectionEdit::Options(ImageEdit::Resize(choice))),
         |text| image_edit(SectionEdit::Options(ImageEdit::LongEdge(text))),
     );
+    // 别的格式写不进这些信息，不给一个不起作用的开关。
+    if options.target_format.carries_photo_metadata() {
+        if options.metadata == PhotoMetadata::Strip {
+            summary.push(tr!("No photo info"));
+        }
+        more.push(photo_metadata_row(options.metadata));
+    }
     rows.extend(more_rows(section, summary, image_edit, more));
     section_card(tr!("Images"), section, rows)
 }
@@ -236,6 +245,31 @@ pub(super) fn resize_rows<'a>(
         ));
     }
     rows
+}
+
+/// 拍摄时间、相机、GPS、颜色配置；去掉时连位置一起去掉，发给别人更放心。
+fn photo_metadata_row(selected: PhotoMetadata) -> SettingsRow<'static> {
+    let choices = [
+        (PhotoMetadata::Keep, tr!("Keep")),
+        (PhotoMetadata::Strip, tr!("Remove")),
+    ]
+    .into_iter()
+    .map(|(metadata, label)| SegmentedChoice {
+        label,
+        selected: selected == metadata,
+        message: Some(image_edit(SectionEdit::Options(ImageEdit::Metadata(
+            metadata,
+        )))),
+        tooltip: None,
+    })
+    .collect();
+    control_row(
+        tr!("Photo info"),
+        Some(RowNote::Hint(tr!(
+            "Date taken, camera, location and color profile"
+        ))),
+        segmented_choice_row(choices),
+    )
 }
 
 pub(super) fn channels_summary(channels: AudioChannelSpec) -> Option<String> {

@@ -136,6 +136,7 @@ fn clip_request(source: PathBuf, target: ConversionTarget, edits: MediaEdits) ->
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits,
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     }
 }
@@ -225,6 +226,7 @@ async fn ffmpeg_long_edge_caps_images_and_videos_without_upscaling() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(image_request, &controls())
@@ -243,6 +245,7 @@ async fn ffmpeg_long_edge_caps_images_and_videos_without_upscaling() {
             fps_override: None,
             audio_channels: file_core::AudioChannelSpec::Keep,
             edits: file_core::MediaEdits::default(),
+            photo_metadata: file_core::PhotoMetadata::Keep,
             output: file_core::OutputLocation::BesideSource,
         };
         let converted = convert_file_with_controls(request, &controls())
@@ -268,6 +271,7 @@ async fn png_to_webp_target_size_converges() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -297,6 +301,7 @@ async fn mp4_quality_and_resize_conversion() {
         fps_override: Some(10),
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -322,6 +327,7 @@ async fn mp4_target_size_estimates_bitrate() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -366,6 +372,7 @@ async fn png_to_gif_palette_conversion() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -391,6 +398,7 @@ async fn mp4_to_gif_uses_palette_chain() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -415,6 +423,7 @@ async fn mp4_to_avi_mpeg4_conversion() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())
@@ -454,6 +463,7 @@ async fn wav_to_m4a_conversion() {
         fps_override: None,
         audio_channels: file_core::AudioChannelSpec::Keep,
         edits: file_core::MediaEdits::default(),
+        photo_metadata: file_core::PhotoMetadata::Keep,
         output: file_core::OutputLocation::BesideSource,
     };
     let converted = convert_file_with_controls(request, &controls())

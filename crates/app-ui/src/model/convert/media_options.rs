@@ -2,7 +2,7 @@
 
 use file_core::{
     AudioChannelSpec, AudioTargetFormat, ConversionEncoderAvailability, ConversionQualityPreset,
-    ConversionTarget, ImageTargetFormat, MediaEdits, ResizeSpec,
+    ConversionTarget, ImageTargetFormat, MediaEdits, PhotoMetadata, ResizeSpec,
 };
 
 use super::{
@@ -42,6 +42,7 @@ pub(crate) struct ImageConvertOptions {
     pub(crate) target_format: ImageTargetFormat,
     pub(crate) quality: QualitySelection,
     pub(crate) resize: ResizeSelection,
+    pub(crate) metadata: PhotoMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +58,7 @@ impl Default for ImageConvertOptions {
             target_format: ImageTargetFormat::Jpeg,
             quality: QualitySelection::default(),
             resize: ResizeSelection::default(),
+            metadata: PhotoMetadata::Keep,
         }
     }
 }
@@ -76,6 +78,7 @@ pub(crate) enum ImageEdit {
     Format(ImageTargetFormat),
     Resize(ResizeChoice),
     LongEdge(String),
+    Metadata(PhotoMetadata),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +107,7 @@ impl MediaOptions for ImageConvertOptions {
             ImageEdit::Format(format) => self.target_format = format,
             ImageEdit::Resize(choice) => self.resize.choice = choice,
             ImageEdit::LongEdge(text) => self.resize.long_edge_text = text,
+            ImageEdit::Metadata(metadata) => self.metadata = metadata,
         }
     }
 
@@ -154,6 +158,7 @@ impl MediaOptions for ImageConvertOptions {
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
             edits: MediaEdits::default(),
+            photo_metadata: self.metadata,
         })
     }
 }
@@ -221,6 +226,7 @@ impl MediaOptions for AudioConvertOptions {
             fps_override: None,
             audio_channels: self.channels,
             edits: MediaEdits::default(),
+            photo_metadata: PhotoMetadata::Keep,
         })
     }
 }

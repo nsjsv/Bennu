@@ -227,9 +227,10 @@ fn join_error(path: &Path, error: tokio::task::JoinError) -> FileError {
 
 #[cfg(test)]
 mod tests {
+    use super::super::photo_metadata::fixtures::{exif_of, icc, write_phone_photo};
     use super::super::ConversionRequest;
     use super::super::{
-        AudioChannelSpec, ConversionQualityPreset, MediaEdits, OutputLocation,
+        AudioChannelSpec, ConversionQualityPreset, MediaEdits, OutputLocation, PhotoMetadata,
         TARGET_BYTES_TOLERANCE_DENOMINATOR,
     };
     use super::*;
@@ -258,6 +259,7 @@ mod tests {
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
             edits: MediaEdits::default(),
+            photo_metadata: PhotoMetadata::Keep,
             output: OutputLocation::BesideSource,
         }
     }
@@ -374,5 +376,123 @@ mod tests {
 
         let decoded = image::open(&output).expect("decode output");
         assert_eq!((decoded.width(), decoded.height()), (100, 50));
+    }
+
+    fn photo_request(
+        source: &Path,
+        target: super::super::ImageTargetFormat,
+        quality: QualitySpec,
+        photo_metadata: PhotoMetadata,
+    ) -> ConversionRequest {
+        ConversionRequest {
+            target: super::super::ConversionTarget::Image(target),
+            photo_metadata,
+            ..request(source, quality)
+        }
+    }
+
+    async fn convert_photo(request: ConversionRequest) -> super::super::ConvertedFile {
+        let controls = FileOperationControls::running(CancellationToken::new());
+        crate::ops::convert::convert_file_with_controls(request, &controls)
+            .await
+            .expect("convert succeeds")
+    }
+
+    fn icc_of(path: &Path) -> Option<Vec<u8>> {
+        use image::ImageDecoder;
+        image::ImageReader::open(path)
+            .expect("open output")
+            .with_guessed_format()
+            .expect("guess format")
+            .into_decoder()
+            .expect("decoder")
+            .icc_profile()
+            .expect("read icc")
+    }
+
+    /// 竖拍照片（方向 6、像素横着存）不管带不带信息，转出来都是竖的。
+    #[tokio::test]
+    async fn phone_photos_come_out_upright() {
+        use super::super::ImageTargetFormat::{Jpeg, Png};
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("portrait.jpg");
+        write_phone_photo(&source, b"RGB ");
+        let medium = QualitySpec::Preset(ConversionQualityPreset::Medium);
+        for (target, quality) in [(Jpeg, medium), (Png, QualitySpec::Lossless)] {
+            for metadata in [PhotoMetadata::Keep, PhotoMetadata::Strip] {
+                let converted =
+                    convert_photo(photo_request(&source, target, quality, metadata)).await;
+                let decoded = image::open(&converted.output).expect("decode output");
+                assert_eq!(
+                    (decoded.width(), decoded.height()),
+                    (300, 400),
+                    "{target:?} {metadata:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn kept_photo_metadata_is_upright_and_complete() {
+        use super::super::ImageTargetFormat::{Jpeg, Png};
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("trip.jpg");
+        write_phone_photo(&source, b"RGB ");
+        let medium = QualitySpec::Preset(ConversionQualityPreset::Medium);
+        for (target, quality) in [(Jpeg, medium), (Png, QualitySpec::Lossless)] {
+            let converted =
+                convert_photo(photo_request(&source, target, quality, PhotoMetadata::Keep)).await;
+            let exif = exif_of(&converted.output).expect("exif kept");
+            let field = |tag| exif.get_field(tag, exif::In::PRIMARY);
+            assert_eq!(
+                field(exif::Tag::Orientation).and_then(|field| field.value.get_uint(0)),
+                Some(1),
+                "{target:?}"
+            );
+            assert!(field(exif::Tag::GPSLatitude).is_some(), "{target:?}");
+            assert!(field(exif::Tag::DateTimeOriginal).is_some(), "{target:?}");
+            assert_eq!(icc_of(&converted.output), Some(icc(b"RGB ")), "{target:?}");
+            assert_eq!(
+                converted.byte_count,
+                std::fs::metadata(&converted.output).expect("output").len()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stripped_outputs_carry_no_photo_metadata() {
+        use super::super::ImageTargetFormat::{Jpeg, Png};
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("private.jpg");
+        write_phone_photo(&source, b"RGB ");
+        let medium = QualitySpec::Preset(ConversionQualityPreset::Medium);
+        for (target, quality) in [(Jpeg, medium), (Png, QualitySpec::Lossless)] {
+            let converted = convert_photo(photo_request(
+                &source,
+                target,
+                quality,
+                PhotoMetadata::Strip,
+            ))
+            .await;
+            assert!(exif_of(&converted.output).is_none(), "{target:?}");
+            assert_eq!(icc_of(&converted.output), None, "{target:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn target_size_leaves_room_for_the_carried_metadata() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let source = directory.path().join("small.jpg");
+        write_phone_photo(&source, b"RGB ");
+        let target = 6 * 1024;
+        let converted = convert_photo(photo_request(
+            &source,
+            super::super::ImageTargetFormat::Jpeg,
+            QualitySpec::TargetBytes(target),
+            PhotoMetadata::Keep,
+        ))
+        .await;
+        assert!(converted.byte_count <= target, "{}", converted.byte_count);
+        assert!(exif_of(&converted.output).is_some());
     }
 }

@@ -468,7 +468,9 @@ mod tests {
 
     use super::super::AudioChannelSpec;
     use super::*;
-    use crate::ops::convert::{ConversionRequest, ConversionTarget, MediaEdits, OutputLocation};
+    use crate::ops::convert::{
+        ConversionRequest, ConversionTarget, MediaEdits, OutputLocation, PhotoMetadata,
+    };
 
     fn request(target: ConversionTarget, quality: QualitySpec) -> ConversionRequest {
         ConversionRequest {
@@ -479,6 +481,7 @@ mod tests {
             fps_override: None,
             audio_channels: AudioChannelSpec::Keep,
             edits: MediaEdits::default(),
+            photo_metadata: PhotoMetadata::Keep,
             output: OutputLocation::BesideSource,
         }
     }

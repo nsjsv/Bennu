@@ -52,7 +52,7 @@ fn start_directory_file_drag(browser: &mut FileBrowser, path: &Path) {
     drop(browser.update_file_drag(Point::new(10.0, 0.0)));
 }
 
-/// 侧栏量出来的样子：「收藏夹」标题 30 + 间距 2，收藏行 32 + 间距 2，末尾空白带 32。
+/// 侧栏量出来的样子：「收藏夹」标题 30 + 间距 2，收藏行 32 + 间距 2；整区到最后一行底下为止。
 const SECTION_TOP: f32 = 100.0;
 
 fn first_row_top() -> f32 {
@@ -66,7 +66,10 @@ fn measured_sidebar(favorites: &[&str]) -> FileDragHitTestBounds {
             Size::new(160.0, SIDEBAR_LOCATION_ROW_HEIGHT),
         )
     };
-    let section_bottom = first_row_top() + favorites.len() as f32 * 34.0 + 32.0;
+    let section_bottom = match favorites.len() {
+        0 => SECTION_TOP + 30.0,
+        count => first_row_top() + (count - 1) as f32 * 34.0 + SIDEBAR_LOCATION_ROW_HEIGHT,
+    };
     FileDragHitTestBounds {
         sidebar_directories: favorites
             .iter()
@@ -178,7 +181,7 @@ fn in_app_drag_over_the_sidebar_lands_where_native_drag_lands() {
     let label = SECTION_TOP + 10.0;
     let gap = first_row_top() + SIDEBAR_LOCATION_ROW_HEIGHT + SIDEBAR_ROW_SPACING / 2.0;
     let beta_middle = first_row_top() + 34.0 + SIDEBAR_LOCATION_ROW_HEIGHT / 2.0;
-    let below_list = first_row_top() + 2.0 * 34.0 + 16.0;
+    let last_row_bottom_edge = first_row_top() + 34.0 + SIDEBAR_LOCATION_ROW_HEIGHT - 2.0;
     assert_eq!(hover_sidebar_at(&mut browser, label), Some(insert_at(0)));
     assert_eq!(
         browser.sidebar_bookmark_drop_slot,
@@ -191,7 +194,7 @@ fn in_app_drag_over_the_sidebar_lands_where_native_drag_lands() {
     );
     assert_eq!(browser.sidebar_bookmark_drop_slot, None);
     assert_eq!(
-        hover_sidebar_at(&mut browser, below_list),
+        hover_sidebar_at(&mut browser, last_row_bottom_edge),
         Some(insert_at(2))
     );
 }
@@ -202,8 +205,8 @@ fn pointer_moves_after_the_native_handoff_leave_the_drop_position_alone() {
     let mut browser = browser_with_bookmarks(vec![bookmark("/home/user/alpha")]);
     start_directory_file_drag(&mut browser, Path::new("/home/user/projects"));
     measure_drop_layout(&mut browser, measured_sidebar(&["/home/user/alpha"]));
-    let gap = first_row_top() + SIDEBAR_LOCATION_ROW_HEIGHT + SIDEBAR_ROW_SPACING / 2.0;
-    assert_eq!(hover_sidebar_at(&mut browser, gap), Some(insert_at(1)));
+    let bottom_edge = first_row_top() + SIDEBAR_LOCATION_ROW_HEIGHT - 2.0;
+    assert_eq!(hover_sidebar_at(&mut browser, bottom_edge), Some(insert_at(1)));
 
     let session_id = desktop_linux::WaylandDndController::new()
         .start_file_drag(
@@ -216,7 +219,7 @@ fn pointer_moves_after_the_native_handoff_leave_the_drop_position_alone() {
     hover_sidebar_at(&mut browser, SECTION_TOP + 10.0);
 
     let session = browser.file_drop_session.as_ref().expect("drop session");
-    assert_eq!(session.position, Some(Point::new(20.0, gap)));
+    assert_eq!(session.position, Some(Point::new(20.0, bottom_edge)));
     assert_eq!(session.hovered_target, Some(insert_at(1)));
 }
 

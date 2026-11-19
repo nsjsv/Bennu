@@ -254,7 +254,10 @@ fn sidebar_location_item_content<'a>(
     };
 
     let item_container = if let Some(favorite_index) = favorite_index {
-        with_favorite_drop_line(browser, favorite_index, item_container)
+        with_drop_line(
+            item_container,
+            favorite_row_drop_line(browser, favorite_index),
+        )
     } else {
         item_container.into()
     };
@@ -305,33 +308,30 @@ fn sidebar_location_item_content<'a>(
     )
 }
 
-/// 收藏区：「收藏夹」标题 + 收藏行；拖新收藏时末尾再多一条空白带，拖到列表下面就是加到最后。
-/// 整区量一个矩形，拖入落点按它和里面的行算（`favorite_drop_target`）。
+/// 收藏区：「收藏夹」标题 + 收藏行。整区量一个矩形，拖入落点按它和里面的行算
+/// （`favorite_drop_target`）：标题插到最前，行的上下沿和行间缝插在那里，最后一行的下沿加到最后。
 fn sidebar_favorites_section(browser: &FileBrowser) -> Option<Element<'_, Message>> {
     let favorites = browser
         .sidebar_locations
         .iter()
         .filter(|location| location.kind.is_user_favorite())
         .collect::<Vec<_>>();
-    let accepts_new_favorite = browser.can_drop_sidebar_bookmark();
-    if favorites.is_empty() && !accepts_new_favorite {
+    if favorites.is_empty() && !browser.can_drop_sidebar_bookmark() {
         return None;
     }
+    // 收藏夹为空时只有标题能接，插入线画在标题底下。
+    let label_line = (favorites.is_empty()
+        && browser.sidebar_bookmark_drop_slot
+            == Some(SidebarBookmarkDropSlot::Insert { index: 0 }))
+    .then_some(DropLineEdge::Bottom);
     let mut section = Column::new()
         .spacing(SIDEBAR_ROW_SPACING)
-        .push(sidebar_section_label(tr!("Favorites")));
+        .push(with_drop_line(
+            sidebar_section_label(tr!("Favorites")),
+            label_line,
+        ));
     for (index, location) in favorites.iter().enumerate() {
         section = section.push(sidebar_location_item_with_index(browser, location, index));
-    }
-    if accepts_new_favorite {
-        let append_band = Space::new()
-            .width(Length::Fill)
-            .height(Length::Fixed(SIDEBAR_ROW_HEIGHT));
-        section = section.push(with_favorite_drop_line(
-            browser,
-            favorites.len(),
-            append_band,
-        ));
     }
     Some(track_file_drag_hit_test_marker(
         section,
@@ -339,28 +339,43 @@ fn sidebar_favorites_section(browser: &FileBrowser) -> Option<Element<'_, Messag
     ))
 }
 
-/// 插到第 `slot_index` 个位置时，插入线画在那个位置的顶上：第几行，或者末尾空白带
-/// （加到最后、收藏夹为空）。
-fn with_favorite_drop_line<'a>(
-    browser: &FileBrowser,
-    slot_index: usize,
-    content: impl Into<Element<'a, Message>>,
-) -> Element<'a, Message> {
-    if browser.sidebar_bookmark_drop_slot
-        != Some(SidebarBookmarkDropSlot::Insert { index: slot_index })
-    {
-        return content.into();
+#[derive(Debug, Clone, Copy)]
+enum DropLineEdge {
+    Top,
+    Bottom,
+}
+
+/// 插到第 i 个位置时线画在哪一行：第一个位置在第一行顶上，其余在前一行底下（加到最后就是
+/// 最后一行底下）。
+fn favorite_row_drop_line(browser: &FileBrowser, favorite_index: usize) -> Option<DropLineEdge> {
+    let SidebarBookmarkDropSlot::Insert { index } = browser.sidebar_bookmark_drop_slot?;
+    if index == 0 && favorite_index == 0 {
+        Some(DropLineEdge::Top)
+    } else if index == favorite_index + 1 {
+        Some(DropLineEdge::Bottom)
+    } else {
+        None
     }
+}
+
+fn with_drop_line<'a>(
+    content: impl Into<Element<'a, Message>>,
+    edge: Option<DropLineEdge>,
+) -> Element<'a, Message> {
+    let Some(edge) = edge else {
+        return content.into();
+    };
     let line = container(Space::new().height(Length::Fixed(SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT)))
         .height(Length::Fixed(SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT))
         .width(Length::Fill)
         .style(sidebar_bookmark_drop_slot_style);
-    stack([
-        content.into(),
-        container(line).align_top(Length::Fill).into(),
-    ])
-    .width(Length::Fill)
-    .into()
+    let aligned_line = match edge {
+        DropLineEdge::Top => container(line).align_top(Length::Fill),
+        DropLineEdge::Bottom => container(line).align_bottom(Length::Fill),
+    };
+    stack([content.into(), aligned_line.into()])
+        .width(Length::Fill)
+        .into()
 }
 
 fn sidebar_device_provider_failure_message(

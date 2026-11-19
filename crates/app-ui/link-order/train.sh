@@ -54,7 +54,8 @@ for scenario in "$@"; do
     work=$(mktemp -d)
     export XDG_CONFIG_HOME=$work/config XDG_DATA_HOME=$work/data XDG_CACHE_HOME=$work/cache XDG_STATE_HOME=$work/state
     # 第一次启动要探测显卡、建设置库，那些只跑一次的代码不进清单：先启动一次再关掉。
-    "$binary" "$HOME" >/dev/null 2>&1 & pid=$!
+    # 从终端启动时程序会 fork 离开终端，$! 就不是窗口进程了；setsid 先让它没有终端（PID 不变）。
+    setsid "$binary" "$HOME" >/dev/null 2>&1 & pid=$!
     sleep 8; kill "$pid"; wait "$pid" 2>/dev/null || true
     python3 - "$XDG_DATA_HOME/bennu/state.sqlite" "$view" <<'PY'
 import json, sqlite3, sys
@@ -67,7 +68,7 @@ for key, payload in db.execute("select preference_key, payload_json from user_pr
 db.commit()
 PY
     sync; echo 3 | sudo tee /proc/sys/vm/drop_caches >/dev/null
-    "$binary" "$directory" >/dev/null 2>&1 & pid=$!
+    setsid "$binary" "$directory" >/dev/null 2>&1 & pid=$!
     sleep 15
     scroll "$pid" 20
     sleep 3

@@ -133,7 +133,15 @@ impl FileBrowser {
 
         match drag.target {
             Some(PaneDropTarget::Merge(target_pane_id)) => {
-                self.merge_dragged_pane_into_target(drag.source_pane_id, target_pane_id);
+                // 拖过去的那一侧是用户正在看的，合并后切到它原来的当前标签页。
+                if let Some(dragged_tab_id) =
+                    self.merge_pane_into(drag.source_pane_id, target_pane_id)
+                {
+                    if let Some(target) = self.pane_by_id_mut(target_pane_id) {
+                        target.activate_tab(dragged_tab_id);
+                    }
+                    self.reset_active_pane_context();
+                }
                 // 合并把布局改回 Single 并增删 panes；与会话保存不变量对齐。
                 self.request_browser_session_save()
             }
@@ -292,22 +300,20 @@ impl FileBrowser {
         self.reset_active_pane_context();
     }
 
-    fn merge_dragged_pane_into_target(
+    /// 把 `source` 窗格的标签页接到 `target` 后面，布局回到单窗格；`target` 的当前标签页不变，
+    /// 要切到哪个由调用方决定。返回 `source` 原来的当前标签页。
+    pub(super) fn merge_pane_into(
         &mut self,
         source_pane_id: BrowserPaneId,
         target_pane_id: BrowserPaneId,
-    ) {
-        if source_pane_id == target_pane_id {
-            return;
+    ) -> Option<usize> {
+        if source_pane_id == target_pane_id || self.pane_by_id(target_pane_id).is_none() {
+            return None;
         }
-
-        if self.pane_by_id(target_pane_id).is_none() {
-            return;
-        }
-        let Some(source_index) = self.panes.iter().position(|pane| pane.id == source_pane_id)
-        else {
-            return;
-        };
+        let source_index = self
+            .panes
+            .iter()
+            .position(|pane| pane.id == source_pane_id)?;
 
         let source = self.panes.remove(source_index);
         self.icon_grid_viewports.remove(&source_pane_id);
@@ -315,12 +321,11 @@ impl FileBrowser {
             .pane_by_id_mut(target_pane_id)
             .expect("the target pane was checked above");
         target.tabs.extend(source.tabs);
-        target.activate_tab(source.active_tab_id);
 
         self.pane_layout = BrowserPaneLayout::Single {
             active: target_pane_id,
         };
-        self.reset_active_pane_context();
+        Some(source.active_tab_id)
     }
 
     fn pane_drag_content_bounds(&self) -> PaneDragContentBounds {

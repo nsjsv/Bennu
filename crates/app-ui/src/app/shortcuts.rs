@@ -5,7 +5,9 @@ use super::tabs::TabDirection;
 use super::text_input_shortcuts;
 use super::FileBrowser;
 use crate::config::{ViewDensityLevel, ViewDensityStep};
-use crate::model::{AdvancedNewFolderMessage, BrowserViewMode, Message, PathSuggestionDirection};
+use crate::model::{
+    AdvancedNewFolderMessage, BrowserViewMode, Message, PathSuggestionDirection, PendingOperation,
+};
 use crate::shortcuts::{
     fixed_key, routing_context, CaptureRejection, CaptureSlot, FileBrowserShortcutOwnership,
     FileContentKey, FixedKey, KeyArea, KeyPress, ShortcutAction, ShortcutCaptureState,
@@ -269,6 +271,14 @@ impl FileBrowser {
             ShortcutAction::CloseTab => self.close_active_tab_from_keyboard(),
             ShortcutAction::RestoreClosedTab => self.restore_closed_tab(),
             ShortcutAction::CloseWindow => self.close_auxiliary_window(self.main_window),
+            ShortcutAction::ToggleSplit => self.toggle_split_view(),
+            ShortcutAction::FocusOtherPane => self.focus_other_pane(),
+            ShortcutAction::CopyToOtherPane => {
+                self.transfer_selection_to_other_pane(PendingOperation::Copy)
+            }
+            ShortcutAction::MoveToOtherPane => {
+                self.transfer_selection_to_other_pane(PendingOperation::Move)
+            }
             ShortcutAction::NextTab => self.select_neighbor_tab(TabDirection::Right),
             ShortcutAction::PreviousTab => self.select_neighbor_tab(TabDirection::Left),
             ShortcutAction::MoveTabLeft => self.move_active_tab(TabDirection::Left),

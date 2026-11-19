@@ -75,6 +75,7 @@ mod sidebar_devices;
 mod sidebar_resize;
 mod smart_extract;
 pub(crate) mod smooth_scroll;
+mod split_commands;
 mod split_resize;
 mod startup;
 mod startup_settings;

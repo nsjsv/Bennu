@@ -27,7 +27,11 @@ impl FileBrowser {
         }
     }
 
-    fn open_directory_in_split(&mut self, directory: PathBuf, axis: SplitAxis) -> Task<Message> {
+    pub(in crate::app) fn open_directory_in_split(
+        &mut self,
+        directory: PathBuf,
+        axis: SplitAxis,
+    ) -> Task<Message> {
         self.context_menu = None;
         self.preview_engine.clear_preview();
 
@@ -78,10 +82,13 @@ impl FileBrowser {
         }
     }
 
+    /// 分屏里新开的标签页和普通新标签页一样，沿用当前标签页的视图。
     fn next_directory_tab(&mut self, directory: PathBuf) -> BrowserTab {
         let tab_id = self.next_tab_id;
         self.next_tab_id += 1;
-        BrowserTab::directory(tab_id, directory)
+        let mut tab = BrowserTab::directory(tab_id, directory);
+        tab.choose_view_mode(self.tab().chosen_view_mode());
+        tab
     }
 
     fn put_directory_tab_in_pane(&mut self, pane_id: BrowserPaneId, tab: BrowserTab) {

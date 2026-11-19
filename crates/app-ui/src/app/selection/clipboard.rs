@@ -443,18 +443,35 @@ impl FileBrowser {
         self.paste_operation(paste_directory, operation)
     }
 
-    /// 粘贴落地唯一入口(桌面剪贴板/内部待粘贴共用)。包内只读门控与
-    /// 源拆分在此收口;拖拽落地复用同一套语义,可见性对同目录测试模块开放。
+    /// 粘贴落地唯一入口(桌面剪贴板/内部待粘贴共用):落地后，移动消耗掉剪切状态。
     pub(super) fn paste_operation(
         &mut self,
         paste_directory: PathBuf,
         operation: PendingOperation,
     ) -> Task<Message> {
+        let consumes_cut = matches!(operation, PendingOperation::Move(_));
+        let Some(landing) = self.land_operation_in(paste_directory, operation) else {
+            return Task::none();
+        };
+        if consumes_cut {
+            self.pending_operation = None;
+        }
+        landing
+    }
+
+    /// 把一组复制 / 移动落到某个文件夹：包内只读门控与源拆分在此收口(包内源走提取)，
+    /// 冲突询问随后。粘贴和“复制 / 移动到另一侧”共用；不碰剪贴板状态。目标在包内时
+    /// 什么都不做，返回 None。
+    pub(in crate::app) fn land_operation_in(
+        &mut self,
+        paste_directory: PathBuf,
+        operation: PendingOperation,
+    ) -> Option<Task<Message>> {
         // 包内只读：目标在包内时粘贴语义不成立，直接吞掉。
         if file_core::archive_path_identity(&paste_directory)
             != file_core::ArchivePathIdentity::RealFile
         {
-            return Task::none();
+            return None;
         }
         let (mode, transfers, archive_members) = match operation {
             PendingOperation::Copy(sources) => {
@@ -486,14 +503,9 @@ impl FileBrowser {
                     }
                 });
                 let transfers = move_paste_transfers(&paste_directory, &real_sources);
-                self.pending_operation = None;
                 (TransferConflictMode::Move, transfers, members)
             }
         };
-
-        if transfers.is_empty() && archive_members.is_none() {
-            return Task::none();
-        }
 
         let mut commands = Vec::new();
         if let Some(members) = archive_members {
@@ -502,7 +514,7 @@ impl FileBrowser {
         if !transfers.is_empty() {
             commands.push(self.enqueue_or_confirm_transfers(mode, transfers));
         }
-        Task::batch(commands)
+        Some(Task::batch(commands))
     }
 
     /// 回收站和搜索结果不是目录，没有粘贴目标。

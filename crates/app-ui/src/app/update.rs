@@ -568,10 +568,15 @@ impl FileBrowser {
                     keyboard_command
                 }
             }
-            Message::FileContentShortcutRouted(action) => self.invoke_shortcut(action),
-            Message::ShortcutCaptureStarted(binding_id) => self.start_shortcut_capture(binding_id),
+            Message::FileContentKeyRouted(content_key) => {
+                self.invoke_routed_file_content_key(content_key)
+            }
+            Message::ShortcutCaptureStarted(action, slot) => {
+                self.start_shortcut_capture(action, slot)
+            }
             Message::ShortcutCaptureCanceled => self.cancel_shortcut_capture(),
-            Message::ShortcutBindingReset(binding_id) => self.reset_shortcut_binding(binding_id),
+            Message::ShortcutCapturedKeyRemoved => self.remove_captured_shortcut_key(),
+            Message::ShortcutBindingReset(action) => self.reset_shortcut_keys(action),
             Message::WindowPointerReleased(status) => {
                 self.release_pointer();
                 match status {

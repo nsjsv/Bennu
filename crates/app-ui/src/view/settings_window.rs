@@ -30,7 +30,7 @@ use super::settings_group::{
     choice_row, control_row, custom_row, entry_row, settings_card, settings_group, settings_page,
     switch_row, EntryRow, RowNote, SettingsRow,
 };
-use super::shortcut_settings::shortcut_settings_section;
+use super::shortcut_settings::shortcut_settings_sections;
 use super::transfer_settings::{favorite_devices_group, transfer_receive_rows};
 use super::window_chrome::window_shell;
 use super::window_control_settings::window_control_settings_row;
@@ -179,7 +179,7 @@ fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
         SettingsCategory::Files => settings_page(files_settings_sections(browser)),
         SettingsCategory::Transfer => settings_page(transfer_settings_sections(browser)),
         SettingsCategory::Search => settings_page(search_settings_sections(browser)),
-        SettingsCategory::Shortcuts => settings_page(vec![shortcut_settings_section(browser)]),
+        SettingsCategory::Shortcuts => settings_page(shortcut_settings_sections(browser)),
         SettingsCategory::Logs => settings_page(application_logs_sections(browser)),
         SettingsCategory::About => settings_page(about_settings_sections()),
     }

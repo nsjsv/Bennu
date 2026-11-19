@@ -44,7 +44,7 @@ mod unrecognized_settings;
 pub(crate) use stored_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
     StoredFavoriteTransferDevice, StoredLastSearchScope, StoredListViewColumn,
-    StoredShortcutBinding, StoredUserPreferences, StoredWindowControlPlacement,
+    StoredShortcutOverride, StoredUserPreferences, StoredWindowControlPlacement,
     COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM,
     LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
 };
@@ -526,7 +526,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         save_view_state: false,
         launch_window_policy: DEFAULT_LAUNCH_WINDOW_POLICY,
         column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,
-        shortcuts: ShortcutConfig::defaults(),
+        shortcuts: ShortcutConfig::default(),
         context_menus: crate::model::ContextMenuPreferences::defaults(),
         transfer_download_dir: None,
         transfer_device_alias: None,
@@ -582,7 +582,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         startup_location_policy: StartupLocationPolicy::Home,
         startup_custom_directory: PathBuf::new(),
         save_view_state: false,
-        shortcuts: ShortcutConfig::defaults(),
+        shortcuts: ShortcutConfig::default(),
         context_menus: ContextMenuPreferences::defaults(),
         launch_window_policy: DEFAULT_LAUNCH_WINDOW_POLICY,
         column_width_adjust_mode: DEFAULT_COLUMN_WIDTH_ADJUST_MODE,

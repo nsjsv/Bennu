@@ -18,7 +18,7 @@ use iced::{Point, Task};
 
 use crate::app::FileBrowser;
 use crate::model::Message;
-use crate::shortcuts::ShortcutAction;
+use crate::shortcuts::{KeyArea, KeyPress};
 
 use session::SessionId;
 use tabs::TerminalTab;
@@ -475,16 +475,11 @@ impl FileBrowser {
             return None;
         }
 
-        // 宿主保留键:开关面板、新建/关闭标签、复制、粘贴。
-        match self.shortcut_config().matching_action(key, modifiers) {
-            Some(ShortcutAction::ToggleTerminal) => {
-                return Some(self.toggle_terminal_via_shortcut());
-            }
-            Some(ShortcutAction::TerminalNewTab) => return Some(self.add_terminal_tab()),
-            Some(ShortcutAction::TerminalCloseTab) => {
-                return Some(self.close_active_terminal_tab_via_shortcut());
-            }
-            _ => {}
+        // 宿主保留键:终端作用域的键(开关面板、新建/关闭标签),以及下面的复制、粘贴。
+        if let Some(action) = KeyPress::from_iced(key, modifiers)
+            .and_then(|press| self.shortcut_config().action_for(KeyArea::Terminal, &press))
+        {
+            return Some(self.invoke_shortcut(action));
         }
         if modifiers.control() && modifiers.shift() {
             match key.as_ref() {

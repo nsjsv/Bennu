@@ -217,7 +217,7 @@ fn opening_a_result_folder_records_the_search_and_back_searches_again() {
 #[test]
 fn escape_and_close_return_to_the_starting_folder() {
     let mut fixture = searched_folder();
-    drop(fixture.browser.invoke_shortcut(ShortcutAction::Escape));
+    drop(fixture.browser.handle_escape_shortcut());
     assert!(fixture.browser.active_search().is_none());
     assert_eq!(
         fixture.browser.tab().current_directory(),
@@ -283,7 +283,7 @@ fn columns_view_shows_search_results_as_a_list() {
         .choose_view_mode(BrowserViewMode::Columns);
     assert_eq!(fixture.browser.tab().view_mode(), BrowserViewMode::List);
 
-    drop(fixture.browser.invoke_shortcut(ShortcutAction::Escape));
+    drop(fixture.browser.handle_escape_shortcut());
     assert_eq!(fixture.browser.tab().view_mode(), BrowserViewMode::Columns);
 }
 

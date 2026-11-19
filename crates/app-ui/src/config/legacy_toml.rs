@@ -141,7 +141,10 @@ pub(super) fn parse_toml_user_config(content: &str, default: UserConfig) -> User
     }
     startup::apply_toml_startup_config(&mut config, &document);
     if let Some(table) = document.get(SHORTCUTS_KEY).and_then(toml::Value::as_table) {
-        config.shortcuts.apply_toml_table(table);
+        let entries = table
+            .iter()
+            .filter_map(|(action_key, value)| Some((action_key.as_str(), value.as_str()?)));
+        config.shortcuts = crate::shortcuts::ShortcutConfig::from_legacy(entries).config;
     }
     config
 }

@@ -33,7 +33,7 @@ use crate::config::{RenderingGpuPreference, UiLanguage, UiLanguageSetting, UserC
 use crate::network_connections::{
     NetworkConnectionMessage, SidebarNetworkConnectionContextMenuState,
 };
-use crate::shortcuts::{ShortcutAction, ShortcutBindingId};
+use crate::shortcuts::{CaptureSlot, FileContentKey, ShortcutAction};
 use crate::sidebar_devices::{
     SidebarDeviceAction, SidebarDeviceActionRequest, SidebarDeviceContextMenuState,
 };
@@ -494,10 +494,11 @@ pub(crate) enum Message {
         modifiers: keyboard::Modifiers,
         status: event::Status,
     },
-    FileContentShortcutRouted(ShortcutAction),
-    ShortcutCaptureStarted(ShortcutBindingId),
+    FileContentKeyRouted(FileContentKey),
+    ShortcutCaptureStarted(ShortcutAction, CaptureSlot),
     ShortcutCaptureCanceled,
-    ShortcutBindingReset(ShortcutBindingId),
+    ShortcutCapturedKeyRemoved,
+    ShortcutBindingReset(ShortcutAction),
     DragSelectionFinished,
     GlobalErrorNotificationElapsed(u64),
     GlobalErrorNotificationPointerEntered(u64),

@@ -13,7 +13,7 @@ use crate::model::{
     WindowControlKind, WindowControlSide, WindowControlVisibility,
 };
 use crate::network_connections::SavedNetworkConnection;
-use crate::shortcuts::ShortcutBindingId;
+use crate::shortcuts::{KeyPress, ShortcutAction};
 
 use super::*;
 
@@ -72,11 +72,8 @@ network_connections = [
     assert_eq!(parsed.startup_custom_directory, PathBuf::from("/workspace"));
     assert!(!parsed.save_view_state);
     assert_eq!(
-        parsed
-            .shortcuts
-            .binding(ShortcutBindingId::FocusPathInput)
-            .config_value(),
-        "Ctrl+Alt+L"
+        parsed.shortcuts.keys(ShortcutAction::FocusPathInput),
+        [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
     );
     assert_eq!(parsed.sidebar_favorites.as_ref().map(Vec::len), Some(2));
     assert_eq!(parsed.network_connections.len(), 3);
@@ -250,12 +247,10 @@ fn user_preferences_round_trip_through_sqlite() {
     config.search_history.record_submission("report");
     config.search_history.record_submission("images");
     config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
-    let mut shortcut_table = toml::Table::new();
-    shortcut_table.insert(
-        "focus_path_input".to_owned(),
-        toml::Value::String("Ctrl+Alt+L".to_owned()),
+    config.shortcuts.set_keys(
+        ShortcutAction::FocusPathInput,
+        vec![KeyPress::from_config_value("Ctrl+Alt+L").unwrap()],
     );
-    config.shortcuts.apply_toml_table(&shortcut_table);
 
     save_user_preferences(
         &store,
@@ -332,11 +327,8 @@ fn user_preferences_round_trip_through_sqlite() {
         Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")))
     );
     assert_eq!(
-        loaded
-            .shortcuts
-            .binding(ShortcutBindingId::FocusPathInput)
-            .config_value(),
-        "Ctrl+Alt+L"
+        loaded.shortcuts.keys(ShortcutAction::FocusPathInput),
+        [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
     );
 }
 
@@ -645,11 +637,8 @@ network_connections = [
     assert_eq!(loaded.network_connections.len(), 1);
     assert_eq!(loaded.network_connections[0].connection.id.as_str(), "good");
     assert_eq!(
-        loaded
-            .shortcuts
-            .binding(ShortcutBindingId::FocusPathInput)
-            .config_value(),
-        "Ctrl+Alt+L"
+        loaded.shortcuts.keys(ShortcutAction::FocusPathInput),
+        [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
     );
 
     let store = UserSettingsStore::new(&state_database_path).expect("open migrated store");

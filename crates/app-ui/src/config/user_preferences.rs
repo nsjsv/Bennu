@@ -21,8 +21,8 @@ use super::{
     ColumnWidthAdjustMode, FavoriteTransferDevice, LaunchWindowPolicy, PreviewExtensionRules,
     PreviewFileSizeLimits, SidebarFavoriteConfig, StoredContextMenuItemEntry,
     StoredContextMenuLayout, StoredContextMenuLayouts, StoredLastSearchScope, StoredListViewColumn,
-    StoredShortcutBinding, StoredUserPreferences, StoredWindowControlPlacement, TransferAcceptMode,
-    UiLanguageSetting, UserConfig, ViewDensityLevel,
+    StoredShortcutOverride, StoredUserPreferences, StoredWindowControlPlacement,
+    TransferAcceptMode, UiLanguageSetting, UserConfig, ViewDensityLevel,
 };
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
@@ -292,7 +292,7 @@ impl UserPreferences {
         stored.column_width_adjust_mode = self.column_width_adjust_mode.config_value().to_owned();
         stored.startup_custom_directory = StoredPath::from_path(&self.startup_custom_directory);
         stored.save_view_state = self.startup_location_policy.saves_view_state();
-        stored.shortcuts = stored_shortcuts(&self.shortcuts);
+        stored.shortcut_overrides = Some(stored_shortcut_overrides(&self.shortcuts));
         stored.search_history = self.search_history.entries().to_vec();
         stored.last_search_scope = self.last_search_scope.as_ref().map(|scope| match scope {
             LastSearchScope::Global => StoredLastSearchScope::Global,
@@ -384,6 +384,7 @@ impl UserPreferences {
             ),
             None => default_preferences.file_grouping,
         };
+        let shortcuts = shortcut_config_from_stored(&stored, &mut unrecognized);
         let preferences = Self {
             network_list_thumbnail_downloads_enabled: stored
                 .network_list_thumbnail_downloads_enabled,
@@ -494,7 +495,7 @@ impl UserPreferences {
             ),
             startup_custom_directory: stored.startup_custom_directory.to_path_buf(),
             save_view_state: startup_location_policy.saves_view_state(),
-            shortcuts: shortcut_config_from_stored(&stored.shortcuts, &mut unrecognized),
+            shortcuts,
             search_history: crate::model::SearchHistory::from_persisted(
                 stored.search_history.clone(),
             ),
@@ -796,38 +797,35 @@ fn stored_window_controls(
         .collect()
 }
 
-fn stored_shortcuts(shortcuts: &ShortcutConfig) -> Vec<StoredShortcutBinding> {
+fn stored_shortcut_overrides(shortcuts: &ShortcutConfig) -> Vec<StoredShortcutOverride> {
     shortcuts
-        .toml_table()
+        .to_stored()
         .into_iter()
-        .filter_map(|(action_key, value)| {
-            let binding = value.as_str()?.to_owned();
-            Some(StoredShortcutBinding {
-                action_key,
-                binding,
-            })
-        })
+        .map(|(action_key, keys)| StoredShortcutOverride { action_key, keys })
         .collect()
 }
 
 fn shortcut_config_from_stored(
-    shortcuts: &[StoredShortcutBinding],
+    stored: &StoredUserPreferences,
     unrecognized: &mut UnrecognizedSettings,
 ) -> ShortcutConfig {
-    let mut config = ShortcutConfig::defaults();
-    let table = shortcuts
-        .iter()
-        .map(|binding| {
-            (
-                binding.action_key.clone(),
-                toml::Value::String(binding.binding.clone()),
-            )
-        })
-        .collect();
-    if config.apply_toml_table(&table) > 0 {
+    let loaded = match &stored.shortcut_overrides {
+        Some(overrides) => ShortcutConfig::from_stored(
+            overrides
+                .iter()
+                .map(|entry| (entry.action_key.as_str(), entry.keys.as_slice())),
+        ),
+        None => ShortcutConfig::from_legacy(
+            stored
+                .shortcuts
+                .iter()
+                .map(|entry| (entry.action_key.as_str(), entry.binding.as_str())),
+        ),
+    };
+    if loaded.skipped > 0 {
         unrecognized.note("shortcuts");
     }
-    config
+    loaded.config
 }
 
 mod transfer_favorites;

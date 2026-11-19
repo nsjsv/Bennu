@@ -1,90 +1,137 @@
-use iced::widget::{row, Space};
+use iced::widget::{row, Row, Space};
 use iced::{Alignment, Element, Length};
 
 use crate::app::FileBrowser;
 use crate::model::Message;
-use crate::shortcuts::{ShortcutBinding, ShortcutCaptureState, ShortcutConfig};
+use crate::shortcuts::{
+    CaptureRejection, CaptureSlot, ShortcutAction, ShortcutCaptureState, ShortcutConfig,
+    ShortcutGroup,
+};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::{icon_button, normal_button, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::metrics::CONTROL_HEIGHT;
 
-use super::settings_group::{control_row, settings_group, SettingsRow};
+use super::settings_group::{control_row, settings_group, RowNote, SettingsRow};
 use super::{themed_icon, IconTone};
 
-const SHORTCUT_BINDING_BUTTON_WIDTH: f32 = 142.0;
 const ROW_ICON_SIZE: f32 = 14.0;
 
-pub(super) fn shortcut_settings_section(browser: &FileBrowser) -> Element<'_, Message> {
+/// 每个分组一张卡片；正在录键的动作上面多一行提示。
+pub(super) fn shortcut_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
+    let config = browser.shortcut_config();
     let capture = browser.shortcut_capture.as_ref();
-    let mut rows = Vec::new();
-    if let Some(capture) = capture {
-        rows.push(shortcut_capture_feedback(capture));
+    let mut groups: Vec<(ShortcutGroup, Vec<SettingsRow<'static>>)> = Vec::new();
+    for action in ShortcutAction::all().iter().copied() {
+        let rows = match groups.last_mut() {
+            Some((group, rows)) if *group == action.group() => rows,
+            _ => {
+                groups.push((action.group(), Vec::new()));
+                &mut groups.last_mut().expect("group was just pushed").1
+            }
+        };
+        if let Some(capture) = capture.filter(|capture| capture.action == action) {
+            rows.push(capture_feedback_row(capture));
+        }
+        rows.push(action_row(config, action, capture));
     }
-    rows.extend(
-        browser
-            .shortcut_config()
-            .bindings()
-            .iter()
-            .map(|binding| shortcut_binding_row(binding, capture)),
-    );
-    settings_group(
-        tr!("Shortcuts"),
-        Some(tr!("Click a shortcut, then press the replacement keys.")),
-        rows,
-    )
+    groups
+        .into_iter()
+        .enumerate()
+        .map(|(index, (group, rows))| {
+            let description = (index == 0)
+                .then(|| tr!("Click a key to record a new one, or + to add another key."));
+            settings_group(group.label(), description, rows)
+        })
+        .collect()
 }
 
-/// 按键按钮在右边；改过的快捷键后面才有“恢复默认”图标（没改过的行只显示按键）。
-fn shortcut_binding_row(
-    binding: &ShortcutBinding,
+/// 名称在左，键按钮在右，后面是“加一个键”，改过的行再加“恢复默认”。
+fn action_row(
+    config: &ShortcutConfig,
+    action: ShortcutAction,
     capture: Option<&ShortcutCaptureState>,
 ) -> SettingsRow<'static> {
-    let is_capturing = capture.is_some_and(|capture| capture.binding_id == binding.id);
-    let binding_label = if is_capturing {
-        tr!("Press keys...")
-    } else {
-        binding.binding.config_value()
-    };
-    let mut controls = row![normal_button(readable_text(binding_label))
-        .width(Length::Fixed(SHORTCUT_BINDING_BUTTON_WIDTH))
-        .on_press(Message::ShortcutCaptureStarted(binding.id))]
-    .spacing(4)
-    .align_y(Alignment::Center);
-    // 没改过的行留出同宽的空位，各行的按键按钮才上下对齐。
-    controls = if binding.binding != ShortcutConfig::default_binding(binding.id) {
-        controls.push(iced::widget::tooltip(
-            icon_button(themed_icon(
-                IconSymbol::RotateCcw,
-                IconTone::Normal,
-                ROW_ICON_SIZE,
-            ))
-            .on_press(Message::ShortcutBindingReset(binding.id)),
-            tooltip_bubble(tr!("Reset")),
-            iced::widget::tooltip::Position::Left,
+    let capturing = capture
+        .filter(|capture| capture.action == action)
+        .map(|capture| capture.slot);
+    let mut controls = Row::new().spacing(4).align_y(Alignment::Center);
+    for (index, key) in config.keys(action).iter().enumerate() {
+        let label = if capturing == Some(CaptureSlot::Replace(index)) {
+            tr!("Press keys...")
+        } else {
+            key.display_label()
+        };
+        controls = controls.push(normal_button(readable_text(label)).on_press(
+            Message::ShortcutCaptureStarted(action, CaptureSlot::Replace(index)),
+        ));
+    }
+    if capturing == Some(CaptureSlot::Add) {
+        controls = controls.push(normal_button(readable_text(tr!("Press keys..."))));
+    }
+    controls = controls.push(row_icon_button(
+        IconSymbol::Plus,
+        tr!("Add a Key"),
+        Message::ShortcutCaptureStarted(action, CaptureSlot::Add),
+    ));
+    // 没改过的行留出同宽的空位，各行的按钮才上下对齐。
+    controls = if config.is_customized(action) {
+        controls.push(row_icon_button(
+            IconSymbol::RotateCcw,
+            tr!("Reset"),
+            Message::ShortcutBindingReset(action),
         ))
     } else {
         controls.push(Space::new().width(Length::Fixed(CONTROL_HEIGHT)))
     };
-    control_row(binding.id.label(), None, controls)
+    control_row(action.label(), None, controls)
 }
 
-fn shortcut_capture_feedback(capture: &ShortcutCaptureState) -> SettingsRow<'static> {
-    let message = if capture.unsupported_key {
-        tr!("Unsupported shortcut. Use a letter, number, function key, arrow, or named edit key.")
-    } else if let Some(conflict) = capture.conflict_binding_id {
-        let rejected = capture
-            .rejected_binding
-            .as_ref()
-            .map(|binding| binding.config_value())
-            .unwrap_or_else(|| tr!("Shortcut"));
-        tr!("%1 conflicts with %2.", rejected, conflict.label())
-    } else {
-        tr!("Listening for %1...", capture.binding_id.label())
+fn row_icon_button(
+    icon: IconSymbol,
+    tooltip: String,
+    message: Message,
+) -> Element<'static, Message> {
+    iced::widget::tooltip(
+        icon_button(themed_icon(icon, IconTone::Normal, ROW_ICON_SIZE)).on_press(message),
+        tooltip_bubble(tooltip),
+        iced::widget::tooltip::Position::Left,
+    )
+    .into()
+}
+
+fn capture_feedback_row(capture: &ShortcutCaptureState) -> SettingsRow<'static> {
+    let note = match capture.rejection {
+        None => RowNote::Hint(tr!("Esc cancels.")),
+        Some(CaptureRejection::Unsupported) => RowNote::Error(tr!(
+            "This key cannot be used. Use a function key, a named key, or a letter or digit with Ctrl or Alt."
+        )),
+        Some(CaptureRejection::LetterKey) => RowNote::Error(tr!(
+            "Single letters, digits and symbols are for typing to jump to files. Add Ctrl or Alt."
+        )),
+        Some(CaptureRejection::Reserved) => RowNote::Error(tr!(
+            "Movement keys, Esc, Tab and Alt+1…9 are fixed and cannot be reassigned."
+        )),
+        Some(CaptureRejection::Conflict { key, action }) => RowNote::Error(tr!(
+            "%1 conflicts with %2.",
+            key.display_label(),
+            action.label()
+        )),
     };
+    let mut controls = row![
+        normal_button(readable_text(tr!("Cancel"))).on_press(Message::ShortcutCaptureCanceled)
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center);
+    if matches!(capture.slot, CaptureSlot::Replace(_)) {
+        controls = controls.push(
+            normal_button(readable_text(tr!("Remove This Key")))
+                .on_press(Message::ShortcutCapturedKeyRemoved),
+        );
+    }
     control_row(
-        message,
-        None,
-        normal_button(readable_text(tr!("Cancel"))).on_press(Message::ShortcutCaptureCanceled),
+        tr!("Press the new keys for %1", capture.action.label()),
+        Some(note),
+        controls,
     )
 }

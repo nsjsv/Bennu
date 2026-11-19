@@ -5,8 +5,9 @@ use super::text_input_shortcuts;
 use super::FileBrowser;
 use crate::model::{AdvancedNewFolderMessage, Message, PathSuggestionDirection};
 use crate::shortcuts::{
-    FileBrowserShortcutOwnership, KeyBinding, ShortcutAction, ShortcutBindingId,
-    ShortcutCaptureState, ShortcutConfig, ShortcutRoutingContext,
+    fixed_key, routing_context, CaptureRejection, CaptureSlot, FileBrowserShortcutOwnership,
+    FileContentKey, FixedKey, KeyArea, KeyPress, ShortcutAction, ShortcutCaptureState,
+    ShortcutConfig, ShortcutRoutingContext,
 };
 
 impl FileBrowser {
@@ -21,10 +22,7 @@ impl FileBrowser {
         status: event::Status,
     ) -> Task<Message> {
         if self.shortcut_capture.is_some() {
-            return match KeyBinding::from_iced_key(&key, modifiers) {
-                Some(binding) => self.accept_shortcut_capture(binding),
-                None => self.reject_unsupported_shortcut_capture(),
-            };
+            return self.capture_shortcut_key(&key, modifiers);
         }
 
         if let Some(task) = self.video_fullscreen_key(&key) {
@@ -49,32 +47,95 @@ impl FileBrowser {
             return command;
         }
 
-        let Some(action) = self.user_config.shortcuts.matching_action(&key, modifiers) else {
+        let Some(press) = KeyPress::from_iced(&key, modifiers) else {
             return Task::none();
         };
-        if self.escape_left_a_text_field(action, status) {
+        match fixed_key(&press) {
+            Some(FixedKey::Escape) => return self.handle_escape_key(status),
+            Some(FixedKey::Move(direction)) => {
+                return self.route_file_content_key(
+                    FileContentKey::Move(direction),
+                    routing_context(
+                        &press,
+                        crate::shortcuts::DeclaredContext::FileBrowserContent,
+                    ),
+                    status,
+                );
+            }
+            None => {}
+        }
+
+        let Some(action) = self
+            .user_config
+            .shortcuts
+            .action_for(KeyArea::FileBrowser, &press)
+        else {
             return Task::none();
+        };
+        if action == ShortcutAction::Preview && status == event::Status::Captured {
+            return self.handle_captured_preview_shortcut();
         }
-        match keyboard_shortcut_route(action, &key, status) {
-            KeyboardShortcutRoute::InvokeApplication => self.invoke_shortcut(action),
-            KeyboardShortcutRoute::InvokeFileBrowserContent => {
-                self.invoke_file_browser_content_shortcut(action)
-            }
-            KeyboardShortcutRoute::QueryTextInputFocus => {
-                text_input_shortcuts::route_ignored_file_content_shortcut(action)
-            }
-            KeyboardShortcutRoute::CapturedPreview => self.handle_captured_preview_shortcut(),
-            KeyboardShortcutRoute::Stop => Task::none(),
-        }
+        self.route_file_content_key(
+            FileContentKey::Action(action),
+            routing_context(&press, action.declared_context()),
+            status,
+        )
     }
 
     /// 辅助窗口里被捕获的 Escape，是聚焦的输入框吃掉的（iced text_input 只在聚焦时
     /// 捕获 Escape，并借此失焦）：这一下只离开输入框，第二下才关窗口。主窗口不算：
     /// 地址栏编辑正是靠这次被捕获的 Escape 来取消编辑。
-    fn escape_left_a_text_field(&self, action: ShortcutAction, status: event::Status) -> bool {
-        action == ShortcutAction::Escape
-            && status == event::Status::Captured
-            && self.auxiliary_window(self.focused_window).is_some()
+    fn handle_escape_key(&mut self, status: event::Status) -> Task<Message> {
+        if status == event::Status::Captured && self.auxiliary_window(self.focused_window).is_some()
+        {
+            return Task::none();
+        }
+        self.handle_escape_shortcut()
+    }
+
+    fn route_file_content_key(
+        &mut self,
+        content_key: FileContentKey,
+        context: ShortcutRoutingContext,
+        status: event::Status,
+    ) -> Task<Message> {
+        match (context, status) {
+            (ShortcutRoutingContext::Application, _) => self.invoke_file_content_key(content_key),
+            (ShortcutRoutingContext::FileBrowserContent(_), event::Status::Captured) => {
+                Task::none()
+            }
+            (
+                ShortcutRoutingContext::FileBrowserContent(
+                    FileBrowserShortcutOwnership::CapturedDeleteEvent,
+                ),
+                event::Status::Ignored,
+            ) => self.invoke_routed_file_content_key(content_key),
+            (
+                ShortcutRoutingContext::FileBrowserContent(
+                    FileBrowserShortcutOwnership::FocusedTextInputProbe,
+                ),
+                event::Status::Ignored,
+            ) => text_input_shortcuts::route_ignored_file_content_key(content_key),
+        }
+    }
+
+    /// 已确认没有文本框在用这个键的文件区按键：弹窗、菜单、辅助窗口在前台时仍不执行。
+    pub(super) fn invoke_routed_file_content_key(
+        &mut self,
+        content_key: FileContentKey,
+    ) -> Task<Message> {
+        if self.file_browser_content_shortcuts_enabled() {
+            self.invoke_file_content_key(content_key)
+        } else {
+            Task::none()
+        }
+    }
+
+    fn invoke_file_content_key(&mut self, content_key: FileContentKey) -> Task<Message> {
+        match content_key {
+            FileContentKey::Action(action) => self.invoke_shortcut(action),
+            FileContentKey::Move(direction) => self.move_file_selection(direction),
+        }
     }
 
     fn handle_path_suggestion_keyboard_key(
@@ -109,14 +170,6 @@ impl FileBrowser {
         }
     }
 
-    fn invoke_file_browser_content_shortcut(&mut self, action: ShortcutAction) -> Task<Message> {
-        if self.file_browser_content_shortcuts_enabled() {
-            self.invoke_shortcut(action)
-        } else {
-            Task::none()
-        }
-    }
-
     pub(super) fn file_browser_content_shortcuts_enabled(&self) -> bool {
         self.destructive_action_confirmation.is_none()
             && self.file_drop_prompt.is_none()
@@ -143,7 +196,7 @@ impl FileBrowser {
             || !self.file_browser_content_shortcuts_enabled()
     }
 
-    pub(super) fn invoke_shortcut(&mut self, action: ShortcutAction) -> Task<Message> {
+    pub(crate) fn invoke_shortcut(&mut self, action: ShortcutAction) -> Task<Message> {
         match action {
             ShortcutAction::OpenSelected => self.activate_selected_path(),
             ShortcutAction::RenameSelected => self.begin_rename_selected(),
@@ -157,12 +210,10 @@ impl FileBrowser {
             ShortcutAction::NavigateUp => {
                 Task::batch([self.commit_rename_if_active(), self.navigate_up()])
             }
-            ShortcutAction::MoveSelection(direction) => self.move_file_selection(direction),
             ShortcutAction::FileProperties => self.open_selected_file_properties(),
             ShortcutAction::Refresh => {
                 Task::batch([self.commit_rename_if_active(), self.reload_visible_panes()])
             }
-            ShortcutAction::Escape => self.handle_escape_shortcut(),
             ShortcutAction::Preview => self.request_preview(),
             ShortcutAction::ToggleRightPreviewPanel => self.toggle_right_preview_panel(),
             ShortcutAction::ToggleTerminal => self.toggle_terminal_via_shortcut(),
@@ -181,7 +232,7 @@ impl FileBrowser {
     }
 
     /// 先收搜索历史浮层、筛选下拉；在搜索结果里且没有别的浮层占着键盘时退出搜索。
-    fn handle_escape_shortcut(&mut self) -> Task<Message> {
+    pub(super) fn handle_escape_shortcut(&mut self) -> Task<Message> {
         if self
             .search_history_interaction
             .popup_is_visible(&self.user_config.search_history)
@@ -200,9 +251,10 @@ impl FileBrowser {
 
     pub(super) fn start_shortcut_capture(
         &mut self,
-        binding_id: ShortcutBindingId,
+        action: ShortcutAction,
+        slot: CaptureSlot,
     ) -> Task<Message> {
-        self.shortcut_capture = Some(ShortcutCaptureState::new(binding_id));
+        self.shortcut_capture = Some(ShortcutCaptureState::new(action, slot));
         Task::none()
     }
 
@@ -211,93 +263,73 @@ impl FileBrowser {
         Task::none()
     }
 
-    pub(super) fn accept_shortcut_capture(&mut self, binding: KeyBinding) -> Task<Message> {
-        let Some(capture) = &self.shortcut_capture else {
-            return Task::none();
-        };
-        let binding_id = capture.binding_id;
-
-        if let Some(conflict) = self
-            .user_config
-            .shortcuts
-            .conflicting_binding(binding_id, &binding)
-        {
-            self.shortcut_capture = Some(ShortcutCaptureState::conflict(
-                binding_id, binding, conflict,
-            ));
-            return Task::none();
-        }
-
-        self.user_config.shortcuts.set_binding(binding_id, binding);
-        self.shortcut_capture = None;
-        self.persist_user_preferences_command()
-    }
-
-    pub(super) fn reject_unsupported_shortcut_capture(&mut self) -> Task<Message> {
-        let Some(capture) = &self.shortcut_capture else {
-            return Task::none();
-        };
-        self.shortcut_capture = Some(ShortcutCaptureState::unsupported(capture.binding_id));
-        Task::none()
-    }
-
-    pub(super) fn reset_shortcut_binding(
+    /// 录键：单独按下的修饰键是组合键的开头，不算；Esc 是固定键，按它就是取消。
+    fn capture_shortcut_key(
         &mut self,
-        binding_id: ShortcutBindingId,
+        key: &keyboard::Key,
+        modifiers: keyboard::Modifiers,
     ) -> Task<Message> {
-        let binding = ShortcutConfig::default_binding(binding_id);
-        if let Some(conflict) = self
-            .user_config
-            .shortcuts
-            .conflicting_binding(binding_id, &binding)
-        {
-            self.shortcut_capture = Some(ShortcutCaptureState::conflict(
-                binding_id, binding, conflict,
-            ));
+        let Some(capture) = self.shortcut_capture else {
             return Task::none();
+        };
+        match key.as_ref() {
+            keyboard::Key::Named(key::Named::Escape) => return self.cancel_shortcut_capture(),
+            keyboard::Key::Named(
+                key::Named::Control
+                | key::Named::Shift
+                | key::Named::Alt
+                | key::Named::AltGraph
+                | key::Named::Super
+                | key::Named::Meta,
+            ) => return Task::none(),
+            _ => {}
         }
+        let captured = KeyPress::from_iced(key, modifiers)
+            .ok_or(CaptureRejection::Unsupported)
+            .and_then(|press| {
+                self.user_config
+                    .shortcuts
+                    .keys_after_capture(capture.action, capture.slot, press)
+            });
+        match captured {
+            Ok(keys) => self.save_shortcut_keys(capture.action, keys),
+            Err(rejection) => {
+                self.shortcut_capture = Some(ShortcutCaptureState {
+                    rejection: Some(rejection),
+                    ..capture
+                });
+                Task::none()
+            }
+        }
+    }
 
-        self.user_config.shortcuts.reset_binding(binding_id);
+    /// 录键提示行上的“删掉这个键”：只对替换某个已有键的录键有效。
+    pub(super) fn remove_captured_shortcut_key(&mut self) -> Task<Message> {
+        let Some(ShortcutCaptureState {
+            action,
+            slot: CaptureSlot::Replace(index),
+            ..
+        }) = self.shortcut_capture
+        else {
+            return Task::none();
+        };
+        let mut keys = self.user_config.shortcuts.keys(action).to_vec();
+        if index < keys.len() {
+            keys.remove(index);
+        }
+        self.save_shortcut_keys(action, keys)
+    }
+
+    pub(super) fn reset_shortcut_keys(&mut self, action: ShortcutAction) -> Task<Message> {
+        self.user_config.shortcuts.reset(action);
         self.shortcut_capture = None;
         self.persist_user_preferences_command()
     }
-}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum KeyboardShortcutRoute {
-    InvokeApplication,
-    InvokeFileBrowserContent,
-    QueryTextInputFocus,
-    CapturedPreview,
-    Stop,
-}
-
-fn keyboard_shortcut_route(
-    action: ShortcutAction,
-    key: &keyboard::Key,
-    status: event::Status,
-) -> KeyboardShortcutRoute {
-    if action.is_preview_toggle() && matches!(status, event::Status::Captured) {
-        return KeyboardShortcutRoute::CapturedPreview;
-    }
-
-    match (action.routing_context(key), status) {
-        (ShortcutRoutingContext::Application, _) => KeyboardShortcutRoute::InvokeApplication,
-        (ShortcutRoutingContext::FileBrowserContent(_), event::Status::Captured) => {
-            KeyboardShortcutRoute::Stop
-        }
-        (
-            ShortcutRoutingContext::FileBrowserContent(
-                FileBrowserShortcutOwnership::CapturedDeleteEvent,
-            ),
-            event::Status::Ignored,
-        ) => KeyboardShortcutRoute::InvokeFileBrowserContent,
-        (
-            ShortcutRoutingContext::FileBrowserContent(
-                FileBrowserShortcutOwnership::FocusedTextInputProbe,
-            ),
-            event::Status::Ignored,
-        ) => KeyboardShortcutRoute::QueryTextInputFocus,
+    fn save_shortcut_keys(&mut self, action: ShortcutAction, keys: Vec<KeyPress>) -> Task<Message> {
+        self.user_config.shortcuts.set_keys(action, keys);
+        self.shortcut_capture = None;
+        self.persist_user_preferences_command()
     }
 }
 
@@ -512,54 +544,40 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_shortcut_route_enforces_context_ownership_matrix() {
+    fn captured_backspace_stays_with_the_text_field() {
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        let directory = PathBuf::from("/workspace/project");
+        browser.tab_mut().location = BrowserLocation::Directory(directory.clone());
+
+        drop(browser.handle_keyboard_key_pressed(
+            keyboard::Key::Named(key::Named::Backspace),
+            keyboard::Modifiers::default(),
+            event::Status::Captured,
+        ));
+
         assert_eq!(
-            keyboard_shortcut_route(
-                ShortcutAction::Delete,
-                &keyboard::Key::Named(key::Named::Delete),
-                event::Status::Captured,
-            ),
-            KeyboardShortcutRoute::Stop
+            browser.tab().location,
+            BrowserLocation::Directory(directory)
         );
-        assert_eq!(
-            keyboard_shortcut_route(
-                ShortcutAction::Delete,
-                &keyboard::Key::Named(key::Named::Delete),
-                event::Status::Ignored,
-            ),
-            KeyboardShortcutRoute::InvokeFileBrowserContent
+    }
+
+    #[test]
+    fn routed_file_content_keys_wait_for_an_open_prompt_to_close() {
+        let selected_path = PathBuf::from("/workspace/report.txt");
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+        browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
+        browser.tab_mut().selected = Some(selected_path.clone());
+        browser.tab_mut().selected_paths = HashSet::from([selected_path]);
+        browser.file_drop_prompt = Some(crate::model::FileDropPrompt {
+            paste_directory: PathBuf::from("/workspace"),
+            paths: vec![PathBuf::from("/incoming/report.txt")],
+        });
+
+        drop(
+            browser.invoke_routed_file_content_key(FileContentKey::Action(ShortcutAction::Delete)),
         );
-        assert_eq!(
-            keyboard_shortcut_route(
-                ShortcutAction::Undo,
-                &keyboard::Key::Character("z".into()),
-                event::Status::Ignored,
-            ),
-            KeyboardShortcutRoute::QueryTextInputFocus
-        );
-        assert_eq!(
-            keyboard_shortcut_route(
-                ShortcutAction::Delete,
-                &keyboard::Key::Character("d".into()),
-                event::Status::Ignored,
-            ),
-            KeyboardShortcutRoute::QueryTextInputFocus
-        );
-        assert_eq!(
-            keyboard_shortcut_route(
-                ShortcutAction::Escape,
-                &keyboard::Key::Named(key::Named::Escape),
-                event::Status::Captured,
-            ),
-            KeyboardShortcutRoute::InvokeApplication
-        );
-        assert_eq!(
-            keyboard_shortcut_route(
-                ShortcutAction::Preview,
-                &keyboard::Key::Named(key::Named::Space),
-                event::Status::Captured,
-            ),
-            KeyboardShortcutRoute::CapturedPreview
-        );
+
+        assert!(browser.operation_queue.tasks().is_empty());
     }
 }

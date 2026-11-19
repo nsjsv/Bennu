@@ -3,11 +3,11 @@ use iced::advanced::widget::operation::{Focusable, Operation, Outcome, TextInput
 use iced::{Rectangle, Task};
 
 use crate::model::Message;
-use crate::shortcuts::ShortcutAction;
+use crate::shortcuts::{FileContentKey, ShortcutAction};
 use crate::view::rename_input_id;
 
-pub(super) fn route_ignored_file_content_shortcut(action: ShortcutAction) -> Task<Message> {
-    advanced_widget::operate(FocusedTextInputShortcutRoute::new(action))
+pub(super) fn route_ignored_file_content_key(content_key: FileContentKey) -> Task<Message> {
+    advanced_widget::operate(FocusedTextInputShortcutRoute::new(content_key))
 }
 
 struct FocusedWidget {
@@ -16,15 +16,15 @@ struct FocusedWidget {
 }
 
 struct FocusedTextInputShortcutRoute {
-    action: ShortcutAction,
+    content_key: FileContentKey,
     focused_widgets: Vec<FocusedWidget>,
     text_input_state_addresses: Vec<usize>,
 }
 
 impl FocusedTextInputShortcutRoute {
-    fn new(action: ShortcutAction) -> Self {
+    fn new(content_key: FileContentKey) -> Self {
         Self {
-            action,
+            content_key,
             focused_widgets: Vec::new(),
             text_input_state_addresses: Vec::new(),
         }
@@ -69,14 +69,18 @@ impl Operation<Message> for FocusedTextInputShortcutRoute {
 
     fn finish(&self) -> Outcome<Message> {
         let Some(focused_text_input) = self.focused_text_input() else {
-            return Outcome::Some(Message::FileContentShortcutRouted(self.action));
+            return Outcome::Some(Message::FileContentKeyRouted(self.content_key));
         };
         let rename_id: advanced_widget::Id = rename_input_id().into();
 
         if focused_text_input.id.as_ref() == Some(&rename_id) {
-            return match self.action {
-                ShortcutAction::Undo => Outcome::Some(Message::RenameInputUndoRequested),
-                ShortcutAction::Redo => Outcome::Some(Message::RenameInputRedoRequested),
+            return match self.content_key {
+                FileContentKey::Action(ShortcutAction::Undo) => {
+                    Outcome::Some(Message::RenameInputUndoRequested)
+                }
+                FileContentKey::Action(ShortcutAction::Redo) => {
+                    Outcome::Some(Message::RenameInputRedoRequested)
+                }
                 _ => Outcome::None,
             };
         }
@@ -131,7 +135,8 @@ mod tests {
 
     #[test]
     fn focused_text_input_consumes_file_shortcut_when_text_input_is_visited_first() {
-        let mut operation = FocusedTextInputShortcutRoute::new(ShortcutAction::SelectAll);
+        let mut operation =
+            FocusedTextInputShortcutRoute::new(FileContentKey::Action(ShortcutAction::SelectAll));
         let input_id: advanced_widget::Id = iced::widget::Id::new("focused-input").into();
         let mut input_probe = TextInputFocusProbe { focused: true };
 
@@ -143,7 +148,8 @@ mod tests {
 
     #[test]
     fn focused_text_input_consumes_file_shortcut_when_focusable_is_visited_first() {
-        let mut operation = FocusedTextInputShortcutRoute::new(ShortcutAction::SelectAll);
+        let mut operation =
+            FocusedTextInputShortcutRoute::new(FileContentKey::Action(ShortcutAction::SelectAll));
         let input_id: advanced_widget::Id = iced::widget::Id::new("focused-input").into();
         let mut input_probe = TextInputFocusProbe { focused: true };
 
@@ -155,7 +161,8 @@ mod tests {
 
     #[test]
     fn focused_text_input_without_id_still_consumes_file_shortcut() {
-        let mut operation = FocusedTextInputShortcutRoute::new(ShortcutAction::Undo);
+        let mut operation =
+            FocusedTextInputShortcutRoute::new(FileContentKey::Action(ShortcutAction::Undo));
         let mut input_probe = TextInputFocusProbe { focused: true };
 
         operation.text_input(None, Rectangle::default(), &mut input_probe);
@@ -168,8 +175,10 @@ mod tests {
     fn focused_rename_input_routes_undo_and_redo_to_text_history() {
         let rename_id: advanced_widget::Id = rename_input_id().into();
         let mut input_probe = TextInputFocusProbe { focused: true };
-        let mut undo_operation = FocusedTextInputShortcutRoute::new(ShortcutAction::Undo);
-        let mut redo_operation = FocusedTextInputShortcutRoute::new(ShortcutAction::Redo);
+        let mut undo_operation =
+            FocusedTextInputShortcutRoute::new(FileContentKey::Action(ShortcutAction::Undo));
+        let mut redo_operation =
+            FocusedTextInputShortcutRoute::new(FileContentKey::Action(ShortcutAction::Redo));
 
         undo_operation.text_input(Some(&rename_id), Rectangle::default(), &mut input_probe);
         undo_operation.focusable(Some(&rename_id), Rectangle::default(), &mut input_probe);
@@ -188,7 +197,8 @@ mod tests {
 
     #[test]
     fn missing_focused_text_input_routes_original_file_shortcut() {
-        let mut operation = FocusedTextInputShortcutRoute::new(ShortcutAction::Undo);
+        let mut operation =
+            FocusedTextInputShortcutRoute::new(FileContentKey::Action(ShortcutAction::Undo));
         let input_id: advanced_widget::Id = iced::widget::Id::new("unfocused-input").into();
         let mut input_probe = TextInputFocusProbe::default();
 
@@ -197,7 +207,9 @@ mod tests {
 
         assert!(matches!(
             operation.finish(),
-            Outcome::Some(Message::FileContentShortcutRouted(ShortcutAction::Undo))
+            Outcome::Some(Message::FileContentKeyRouted(FileContentKey::Action(
+                ShortcutAction::Undo
+            )))
         ));
     }
 }

@@ -71,7 +71,13 @@ pub(crate) struct StoredUserPreferences {
     pub startup_location: String,
     pub startup_custom_directory: StoredPath,
     pub save_view_state: bool,
+    /// 0.4.6 及以前：全部快捷键，每个动作一个键。只读，读到后换算成
+    /// `shortcut_overrides`，写回时不再出现这个键。
+    #[serde(default, skip_serializing)]
     pub shortcuts: Vec<StoredShortcutBinding>,
+    /// 用户改过的快捷键（没改过的动作不在里面）。`None` = 旧版本写的数据，看 `shortcuts`。
+    #[serde(default)]
+    pub shortcut_overrides: Option<Vec<StoredShortcutOverride>>,
     #[serde(default = "default_stored_list_view_columns")]
     pub list_view_columns: Vec<StoredListViewColumn>,
     #[serde(default = "default_list_sort_field")]
@@ -216,6 +222,7 @@ impl Default for StoredUserPreferences {
             startup_custom_directory: StoredPath::from_path(Path::new("")),
             save_view_state: false,
             shortcuts: Vec::new(),
+            shortcut_overrides: Some(Vec::new()),
             list_view_columns: default_stored_list_view_columns(),
             list_sort_field: default_list_sort_field(),
             list_sort_direction: default_list_sort_direction(),
@@ -284,6 +291,12 @@ pub(crate) struct StoredListViewColumn {
 pub(crate) struct StoredShortcutBinding {
     pub action_key: String,
     pub binding: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct StoredShortcutOverride {
+    pub action_key: String,
+    pub keys: Vec<String>,
 }
 
 fn default_stored_list_view_columns() -> Vec<StoredListViewColumn> {

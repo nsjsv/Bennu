@@ -587,3 +587,54 @@ fn saving_the_config_file_keeps_a_key_another_window_changed() {
         !defaults.search_content_indexing_enabled
     );
 }
+
+/// 0.4.6 写的设置：全部快捷键都在 `shortcuts` 里，还没有 `shortcut_overrides`。
+fn payload_from_0_4_6(shortcuts: &[(&str, &str)]) -> String {
+    let mut payload: Value = serde_json::from_str(&default_payload_with(json!({
+        "shortcuts": shortcuts
+            .iter()
+            .map(|(action_key, binding)| json!({"action_key": action_key, "binding": binding}))
+            .collect::<Vec<_>>(),
+    })))
+    .unwrap();
+    payload
+        .as_object_mut()
+        .unwrap()
+        .remove("shortcut_overrides");
+    payload.to_string()
+}
+
+#[test]
+fn shortcuts_saved_by_0_4_6_keep_only_what_the_user_changed() {
+    let directory = tempfile::tempdir().unwrap();
+    let payload = payload_from_0_4_6(&[
+        ("focus_path_input", "Ctrl+Alt+L"),
+        ("new_folder_from_selection", "Ctrl+Shift+N"),
+        ("move_selection_up", "Up"),
+        ("copy_named", "Copy"),
+        ("redo", "Primary+Y"),
+    ]);
+    let database = database_with_preferences(directory.path(), &payload);
+
+    let loaded = load_user_config_from_sources(default_app_config(), &database, None);
+
+    assert_eq!(loaded.recovery, None);
+    let shortcuts = &loaded.config.shortcuts;
+    assert_eq!(
+        shortcuts.to_stored(),
+        vec![("focus_path_input".to_owned(), vec!["Ctrl+Alt+L".to_owned()])]
+    );
+}
+
+#[test]
+fn a_changed_0_4_6_shortcut_that_no_longer_exists_is_reported() {
+    let directory = tempfile::tempdir().unwrap();
+    let payload = payload_from_0_4_6(&[("move_selection_up", "K"), ("refresh", "F5")]);
+    let database = database_with_preferences(directory.path(), &payload);
+
+    let loaded = load_user_config_from_sources(default_app_config(), &database, None);
+
+    let (reset, _) = restored(loaded.recovery);
+    assert_eq!(reset, ResetSettings::Keys(vec!["shortcuts".to_owned()]));
+    assert!(loaded.config.shortcuts.overrides().is_empty());
+}

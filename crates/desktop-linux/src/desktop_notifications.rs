@@ -6,7 +6,7 @@ use tokio::process::Command;
 
 const NOTIFY_SEND_COMMAND: &str = "notify-send";
 const NOTIFICATION_APP_NAME: &str = "Bennu";
-const NOTIFICATION_ICON_NAME: &str = "system-file-manager";
+const NOTIFICATION_ICON_NAME: &str = "bennu";
 
 #[derive(Debug, Error)]
 pub enum DesktopNotificationError {
@@ -93,7 +93,7 @@ mod tests {
                 "--app-name",
                 "Bennu",
                 "--icon",
-                "system-file-manager",
+                "bennu",
                 "--urgency",
                 "normal",
                 "--",

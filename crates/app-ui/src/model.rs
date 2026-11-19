@@ -496,8 +496,10 @@ pub(crate) enum Message {
         status: event::Status,
     },
     FileContentKeyRouted(FileContentKey),
-    /// 打字跳转停了 1 秒：清掉缓冲（界面上那段字跟着消失）。
-    TypeAheadDeadlinePassed,
+    /// 字母层停了 1 秒：打字跳转的缓冲、vim 待定的第一个键和 `/` 跳转到期作废（底栏那段字
+    /// 跟着消失）。
+    LetterInputDeadlinePassed,
+    LetterModeSelected(crate::shortcuts::LetterMode),
     ShortcutCaptureStarted(ShortcutAction, CaptureSlot),
     ShortcutCaptureCanceled,
     ShortcutCapturedKeyRemoved,

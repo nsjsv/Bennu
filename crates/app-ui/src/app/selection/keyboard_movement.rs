@@ -145,10 +145,26 @@ impl FileBrowser {
     /// 以所打内容开头的项，跳过去单选它。到截止时刻发一条消息清掉显示的缓冲。
     pub(in crate::app) fn jump_to_typed_name(&mut self, typed: char) -> Task<Message> {
         let query = self.type_ahead.push(typed, Instant::now());
-        let expire = Task::perform(
-            async { tokio::time::sleep(type_ahead::RESET_AFTER).await },
-            |()| Message::TypeAheadDeadlinePassed,
-        );
+        let jump = self
+            .jump_to_name_matching(|names, current| type_ahead::find_match(names, current, &query));
+        Task::batch([jump, letter_input_deadline()])
+    }
+
+    /// vim 的 n / N：从当前项往后 / 往前找下一个匹配上一次跳转的词的项。
+    pub(in crate::app) fn jump_to_adjacent_match(
+        &mut self,
+        needle: &str,
+        direction: type_ahead::MatchDirection,
+    ) -> Task<Message> {
+        self.jump_to_name_matching(|names, current| {
+            type_ahead::find_adjacent_match(names, current, needle, direction)
+        })
+    }
+
+    fn jump_to_name_matching(
+        &mut self,
+        find: impl FnOnce(&[std::borrow::Cow<'_, str>], Option<usize>) -> Option<usize>,
+    ) -> Task<Message> {
         let paths = self.keyboard_move_sequence();
         let names = paths
             .iter()
@@ -163,11 +179,13 @@ impl FileBrowser {
             .selected
             .as_ref()
             .and_then(|selected| paths.iter().position(|path| path == selected));
-        let Some(index) = type_ahead::find_match(&names, current, &query) else {
-            return expire;
-        };
-        let target = paths[index].clone();
-        Task::batch([self.jump_keyboard_cursor_to(target), expire])
+        match find(&names, current) {
+            Some(index) => {
+                let target = paths[index].clone();
+                self.jump_keyboard_cursor_to(target)
+            }
+            None => Task::none(),
+        }
     }
 
     /// 移动键在当前视图里走的那一串项。
@@ -475,6 +493,14 @@ impl FileBrowser {
             }
         })
     }
+}
+
+/// 字母层停一会儿后发一条消息，让到期的输入（打字缓冲、vim 待定键、`/` 跳转）作废。
+pub(in crate::app) fn letter_input_deadline() -> Task<Message> {
+    Task::perform(
+        async { tokio::time::sleep(type_ahead::RESET_AFTER).await },
+        |()| Message::LetterInputDeadlinePassed,
+    )
 }
 
 fn stepped_selection_target(

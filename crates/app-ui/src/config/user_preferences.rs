@@ -19,17 +19,15 @@ use super::{
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
     sort_field_from_config_value, transfer_port_from, transfer_receive_pin_from,
     ColumnWidthAdjustMode, FavoriteTransferDevice, LaunchWindowPolicy, PreviewExtensionRules,
-    PreviewFileSizeLimits, SidebarFavoriteConfig, StoredContextMenuItemEntry,
-    StoredContextMenuLayout, StoredContextMenuLayouts, StoredLastSearchScope, StoredListViewColumn,
-    StoredShortcutOverride, StoredUserPreferences, StoredWindowControlPlacement,
-    TransferAcceptMode, UiLanguageSetting, UserConfig, ViewDensityLevel,
+    PreviewFileSizeLimits, SidebarFavoriteConfig, StoredLastSearchScope, StoredListViewColumn,
+    StoredUserPreferences, StoredWindowControlPlacement, TransferAcceptMode, UiLanguageSetting,
+    UserConfig, ViewDensityLevel,
 };
 use crate::model::{
     list_column_kind_config_value, list_column_kind_from_config_value, BrowserViewMode,
-    ContextMenuLayoutConfigValues, ContextMenuPreferences, FileGroupingMode, LastSearchScope,
-    ListColumnConfig, ListDirectorySizeDisplayMode, ListSortPreference, ListViewPreferences,
-    WindowControlKind, WindowControlPlacement, WindowControlSide, WindowControlVisibility,
-    WindowControlsConfig,
+    ContextMenuPreferences, FileGroupingMode, LastSearchScope, ListColumnConfig,
+    ListDirectorySizeDisplayMode, ListSortPreference, ListViewPreferences, WindowControlKind,
+    WindowControlPlacement, WindowControlSide, WindowControlVisibility, WindowControlsConfig,
 };
 use crate::network_connections::SavedNetworkConnection;
 use crate::shortcuts::ShortcutConfig;
@@ -82,6 +80,7 @@ pub(crate) struct UserPreferences {
     pub(crate) startup_custom_directory: PathBuf,
     pub(crate) save_view_state: bool,
     pub(crate) shortcuts: ShortcutConfig,
+    pub(crate) letter_mode: crate::shortcuts::LetterMode,
     pub(crate) search_history: crate::model::SearchHistory,
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
@@ -143,6 +142,7 @@ impl UserPreferences {
             startup_custom_directory: config.startup_custom_directory.clone(),
             save_view_state: config.startup_location_policy.saves_view_state(),
             shortcuts: config.shortcuts.clone(),
+            letter_mode: config.letter_mode,
             search_history: config.search_history.clone(),
             last_search_scope: config.last_search_scope.clone(),
             theme_mode: config.theme_mode,
@@ -199,6 +199,7 @@ impl UserPreferences {
         config.startup_custom_directory = self.startup_custom_directory.clone();
         config.save_view_state = self.startup_location_policy.saves_view_state();
         config.shortcuts = self.shortcuts.clone();
+        config.letter_mode = self.letter_mode;
         config.search_history = self.search_history.clone();
         config.last_search_scope = self.last_search_scope.clone();
         config.theme_mode = self.theme_mode;
@@ -297,6 +298,7 @@ impl UserPreferences {
         stored.startup_custom_directory = StoredPath::from_path(&self.startup_custom_directory);
         stored.save_view_state = self.startup_location_policy.saves_view_state();
         stored.shortcut_overrides = Some(stored_shortcut_overrides(&self.shortcuts));
+        stored.letter_keys = self.letter_mode.config_value().to_owned();
         stored.search_history = self.search_history.entries().to_vec();
         stored.last_search_scope = self.last_search_scope.as_ref().map(|scope| match scope {
             LastSearchScope::Global => StoredLastSearchScope::Global,
@@ -501,6 +503,11 @@ impl UserPreferences {
             startup_custom_directory: stored.startup_custom_directory.to_path_buf(),
             save_view_state: startup_location_policy.saves_view_state(),
             shortcuts,
+            letter_mode: unrecognized.value_or_default(
+                "letter_keys",
+                crate::shortcuts::LetterMode::from_config_value(&stored.letter_keys),
+                default_preferences.letter_mode,
+            ),
             search_history: crate::model::SearchHistory::from_persisted(
                 stored.search_history.clone(),
             ),
@@ -629,86 +636,6 @@ fn network_connections_from_stored(
     restored
 }
 
-fn stored_context_menu_layouts(preferences: &ContextMenuPreferences) -> StoredContextMenuLayouts {
-    let values = preferences.to_config_values();
-    let layout = |items: &Vec<(String, bool)>| StoredContextMenuLayout {
-        items: items
-            .iter()
-            .map(|(id, visible)| StoredContextMenuItemEntry {
-                id: id.clone(),
-                visible: *visible,
-            })
-            .collect(),
-    };
-    StoredContextMenuLayouts {
-        file_entry: layout(&values.file_entry),
-        file_blank: layout(&values.file_blank),
-        trash: layout(&values.trash),
-        search_entry_types: layout(&values.search_entry_types),
-        list_columns: layout(&values.list_columns),
-        sidebar_bookmark: layout(&values.sidebar_bookmark),
-        sidebar_device: layout(&values.sidebar_device),
-        network_connection: layout(&values.network_connection),
-    }
-}
-
-fn context_menu_preferences_from_stored(
-    stored: &StoredUserPreferences,
-    default: &UserPreferences,
-    unrecognized: &mut UnrecognizedSettings,
-) -> ContextMenuPreferences {
-    let Some(layouts) = &stored.context_menu_layouts else {
-        return default.context_menus.clone();
-    };
-    let config_values = |layout: &StoredContextMenuLayout| {
-        layout
-            .items
-            .iter()
-            .map(|entry| (entry.id.clone(), entry.visible))
-            .collect::<Vec<(String, bool)>>()
-    };
-    let stored_values = ContextMenuLayoutConfigValues {
-        file_entry: config_values(&layouts.file_entry),
-        file_blank: config_values(&layouts.file_blank),
-        trash: config_values(&layouts.trash),
-        search_entry_types: config_values(&layouts.search_entry_types),
-        list_columns: config_values(&layouts.list_columns),
-        sidebar_bookmark: config_values(&layouts.sidebar_bookmark),
-        sidebar_device: config_values(&layouts.sidebar_device),
-        network_connection: config_values(&layouts.network_connection),
-    };
-    let preferences = ContextMenuPreferences::from_config_values(&stored_values);
-    // 解码会丢掉不认识的菜单项；转回配置值后，原来有、现在没有的 id 就是被丢掉的。
-    let decoded_values = preferences.to_config_values();
-    let dropped_unknown_item = context_menu_layout_lists(&stored_values)
-        .into_iter()
-        .zip(context_menu_layout_lists(&decoded_values))
-        .any(|(stored_items, decoded_items)| {
-            stored_items.iter().any(|(stored_id, _)| {
-                !decoded_items
-                    .iter()
-                    .any(|(decoded_id, _)| decoded_id == stored_id)
-            })
-        });
-    if dropped_unknown_item {
-        unrecognized.note("context_menu_layouts");
-    }
-    preferences
-}
-
-fn context_menu_layout_lists(values: &ContextMenuLayoutConfigValues) -> [&Vec<(String, bool)>; 8] {
-    [
-        &values.file_entry,
-        &values.file_blank,
-        &values.trash,
-        &values.search_entry_types,
-        &values.list_columns,
-        &values.sidebar_bookmark,
-        &values.sidebar_device,
-        &values.network_connection,
-    ]
-}
-
 fn stored_list_view_columns(preferences: &ListViewPreferences) -> Vec<StoredListViewColumn> {
     preferences
         .columns()
@@ -802,37 +729,10 @@ fn stored_window_controls(
         .collect()
 }
 
-fn stored_shortcut_overrides(shortcuts: &ShortcutConfig) -> Vec<StoredShortcutOverride> {
-    shortcuts
-        .to_stored()
-        .into_iter()
-        .map(|(action_key, keys)| StoredShortcutOverride { action_key, keys })
-        .collect()
-}
-
-fn shortcut_config_from_stored(
-    stored: &StoredUserPreferences,
-    unrecognized: &mut UnrecognizedSettings,
-) -> ShortcutConfig {
-    let loaded = match &stored.shortcut_overrides {
-        Some(overrides) => ShortcutConfig::from_stored(
-            overrides
-                .iter()
-                .map(|entry| (entry.action_key.as_str(), entry.keys.as_slice())),
-        ),
-        None => ShortcutConfig::from_legacy(
-            stored
-                .shortcuts
-                .iter()
-                .map(|entry| (entry.action_key.as_str(), entry.binding.as_str())),
-        ),
-    };
-    if loaded.skipped > 0 {
-        unrecognized.note("shortcuts");
-    }
-    loaded.config
-}
-
+mod context_menu_storage;
+use context_menu_storage::{context_menu_preferences_from_stored, stored_context_menu_layouts};
+mod shortcut_storage;
+use shortcut_storage::{shortcut_config_from_stored, stored_shortcut_overrides};
 mod transfer_favorites;
 use transfer_favorites::{favorite_transfer_devices_from_stored, stored_favorite_transfer_devices};
 

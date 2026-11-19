@@ -572,10 +572,13 @@ impl FileBrowser {
             Message::FileContentKeyRouted(content_key) => {
                 self.invoke_routed_file_content_key(content_key)
             }
-            Message::TypeAheadDeadlinePassed => {
-                self.type_ahead.expire(std::time::Instant::now());
+            Message::LetterInputDeadlinePassed => {
+                let now = std::time::Instant::now();
+                self.type_ahead.expire(now);
+                self.vim.expire(now);
                 Task::none()
             }
+            Message::LetterModeSelected(mode) => self.select_letter_mode(mode),
             Message::ShortcutCaptureStarted(action, slot) => {
                 self.start_shortcut_capture(action, slot)
             }

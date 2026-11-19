@@ -78,6 +78,8 @@ pub(crate) struct StoredUserPreferences {
     /// 用户改过的快捷键（没改过的动作不在里面）。`None` = 旧版本写的数据，看 `shortcuts`。
     #[serde(default)]
     pub shortcut_overrides: Option<Vec<StoredShortcutOverride>>,
+    #[serde(default = "default_letter_keys")]
+    pub letter_keys: String,
     #[serde(default = "default_stored_list_view_columns")]
     pub list_view_columns: Vec<StoredListViewColumn>,
     #[serde(default = "default_list_sort_field")]
@@ -225,6 +227,7 @@ impl Default for StoredUserPreferences {
             save_view_state: false,
             shortcuts: Vec::new(),
             shortcut_overrides: Some(Vec::new()),
+            letter_keys: default_letter_keys(),
             list_view_columns: default_stored_list_view_columns(),
             list_sort_field: default_list_sort_field(),
             list_sort_direction: default_list_sort_direction(),
@@ -357,6 +360,10 @@ fn default_sidebar_style() -> String {
 
 fn default_sidebar_visible() -> bool {
     true
+}
+
+fn default_letter_keys() -> String {
+    "type_to_jump".to_owned()
 }
 
 fn default_stored_window_controls() -> Vec<StoredWindowControlPlacement> {

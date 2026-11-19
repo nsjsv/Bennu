@@ -89,6 +89,36 @@ pub fn find_match<S: AsRef<str>>(
         .find(|index| name_matches(names[*index].as_ref(), &needle))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchDirection {
+    Forward,
+    Backward,
+}
+
+/// 从当前项的下一项（或上一项）起找下一个匹配 `needle` 的名字，到头绕回；用来重复上一次跳转。
+pub fn find_adjacent_match<S: AsRef<str>>(
+    names: &[S],
+    current: Option<usize>,
+    needle: &str,
+    direction: MatchDirection,
+) -> Option<usize> {
+    let count = names.len();
+    if count == 0 {
+        return None;
+    }
+    let needle = needle.to_lowercase();
+    let start = current.unwrap_or(match direction {
+        MatchDirection::Forward => count - 1,
+        MatchDirection::Backward => 0,
+    });
+    (1..=count)
+        .map(|offset| match direction {
+            MatchDirection::Forward => (start + offset) % count,
+            MatchDirection::Backward => (start + count - offset % count) % count,
+        })
+        .find(|index| name_matches(names[*index].as_ref(), &needle))
+}
+
 /// 名字小写后以 `needle` 开头，或把常用汉字换成拼音首字母（其余字符小写，空白去掉）后
 /// 以 `needle` 开头。
 pub fn name_matches(name: &str, needle: &str) -> bool {
@@ -191,6 +221,24 @@ mod tests {
         assert_eq!(
             find_match(&names, Some(4), &TypeAheadQuery::Cycle('a')),
             Some(0)
+        );
+    }
+
+    #[test]
+    fn adjacent_matches_skip_the_current_item_both_ways() {
+        let names = ["apple", "banana", "avocado", "cherry", "apricot"];
+        let next = |current| find_adjacent_match(&names, current, "a", MatchDirection::Forward);
+        let previous =
+            |current| find_adjacent_match(&names, current, "a", MatchDirection::Backward);
+
+        assert_eq!(next(Some(0)), Some(2));
+        assert_eq!(next(Some(4)), Some(0));
+        assert_eq!(next(None), Some(0));
+        assert_eq!(previous(Some(2)), Some(0));
+        assert_eq!(previous(Some(0)), Some(4));
+        assert_eq!(
+            find_adjacent_match(&names, Some(1), "Z", MatchDirection::Forward),
+            None
         );
     }
 }

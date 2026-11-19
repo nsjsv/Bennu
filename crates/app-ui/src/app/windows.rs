@@ -664,10 +664,14 @@ impl FileBrowser {
             .map(|expansion_command| Task::batch([dismiss_command, expansion_command]))
     }
 
-    /// Esc 的最后几层：没有别的东西可关时，先清掉打字跳转的缓冲，再清空选择。弹窗、菜单
-    /// 开着时不会走到这里。
+    /// Esc 的最后几层：没有别的东西可关时，先退 vim 的 `/` 跳转、待定键、范围选择，再清掉
+    /// 打字跳转的缓冲，最后清空选择。弹窗、菜单开着时不会走到这里。
     fn clear_selection_by_escape(&mut self) -> Task<Message> {
-        if self.type_ahead.is_active(std::time::Instant::now()) {
+        let now = std::time::Instant::now();
+        if self.vim.escape(now) {
+            return Task::none();
+        }
+        if self.type_ahead.is_active(now) {
             self.type_ahead.clear();
             return Task::none();
         }

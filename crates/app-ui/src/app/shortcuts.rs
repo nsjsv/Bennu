@@ -10,8 +10,8 @@ use crate::model::{
 };
 use crate::shortcuts::{
     fixed_key, routing_context, CaptureRejection, CaptureSlot, FileBrowserShortcutOwnership,
-    FileContentKey, FixedKey, KeyArea, KeyPress, ShortcutAction, ShortcutCaptureState,
-    ShortcutConfig, ShortcutRoutingContext, TypedLetter,
+    FileContentKey, FixedKey, KeyArea, KeyPress, LetterMode, NamedKey, ShortcutAction,
+    ShortcutCaptureState, ShortcutConfig, ShortcutRoutingContext, TypedLetter,
 };
 
 impl FileBrowser {
@@ -64,6 +64,13 @@ impl FileBrowser {
         let Some(press) = KeyPress::from_iced(&key, modifiers) else {
             return Task::none();
         };
+        // vim 的 `/` 跳转用 Enter 收尾：光标已经在匹配项上，这一下不再打开它。
+        if press == KeyPress::named(NamedKey::Enter)
+            && status == event::Status::Ignored
+            && self.vim.finish_jump(std::time::Instant::now())
+        {
+            return Task::none();
+        }
         match fixed_key(&press) {
             Some(FixedKey::Escape) => return self.handle_escape_key(status),
             Some(FixedKey::TabNumber(number)) if self.application_shortcuts_enabled() => {
@@ -152,14 +159,17 @@ impl FileBrowser {
         }
     }
 
-    fn invoke_file_content_key(&mut self, content_key: FileContentKey) -> Task<Message> {
+    pub(super) fn invoke_file_content_key(&mut self, content_key: FileContentKey) -> Task<Message> {
         match content_key {
             FileContentKey::Action(action) => self.invoke_shortcut(action),
             FileContentKey::Move(movement) => {
                 self.type_ahead.clear();
                 self.move_file_selection(movement)
             }
-            FileContentKey::Letter(letter) => self.jump_to_typed_name(letter.character),
+            FileContentKey::Letter(letter) => match self.user_config.letter_mode {
+                LetterMode::TypeToJump => self.jump_to_typed_name(letter.character),
+                LetterMode::Vim => self.run_vim_letter(letter),
+            },
         }
     }
 

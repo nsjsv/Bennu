@@ -4,15 +4,16 @@ use iced::{Alignment, Element, Length};
 use crate::app::FileBrowser;
 use crate::model::Message;
 use crate::shortcuts::{
-    CaptureRejection, CaptureSlot, ShortcutAction, ShortcutCaptureState, ShortcutConfig,
-    ShortcutGroup,
+    CaptureRejection, CaptureSlot, LetterMode, ShortcutAction, ShortcutCaptureState,
+    ShortcutConfig, ShortcutGroup,
 };
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::SegmentedChoice;
 use bennu_theme::controls::{icon_button, normal_button, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::metrics::CONTROL_HEIGHT;
 
-use super::settings_group::{control_row, settings_group, RowNote, SettingsRow};
+use super::settings_group::{choice_row, control_row, settings_group, RowNote, SettingsRow};
 use super::{themed_icon, IconTone};
 
 const ROW_ICON_SIZE: f32 = 14.0;
@@ -35,15 +36,38 @@ pub(super) fn shortcut_settings_sections(browser: &FileBrowser) -> Vec<Element<'
         }
         rows.push(action_row(config, action, capture));
     }
-    groups
+    let mut sections = vec![letter_mode_section(browser.user_config().letter_mode)];
+    sections.extend(
+        groups
+            .into_iter()
+            .enumerate()
+            .map(|(index, (group, rows))| {
+                let description = (index == 0)
+                    .then(|| tr!("Click a key to record a new one, or + to add another key."));
+                settings_group(group.label(), description, rows)
+            }),
+    );
+    sections
+}
+
+/// 字母键：打字跳转还是 vim 命令。
+fn letter_mode_section(selected: LetterMode) -> Element<'static, Message> {
+    let choices = LetterMode::ALL
         .into_iter()
-        .enumerate()
-        .map(|(index, (group, rows))| {
-            let description = (index == 0)
-                .then(|| tr!("Click a key to record a new one, or + to add another key."));
-            settings_group(group.label(), description, rows)
+        .map(|mode| SegmentedChoice {
+            label: mode.label(),
+            selected: mode == selected,
+            message: Some(Message::LetterModeSelected(mode)),
+            tooltip: None,
         })
-        .collect()
+        .collect();
+    settings_group(
+        tr!("Letter Keys"),
+        Some(tr!(
+            "What plain letters do in the file list. With Vim commands, h j k l move, y x p copy, cut and paste, d moves to the trash and / jumps to a name; F1 lists them all."
+        )),
+        vec![choice_row(tr!("Letter Keys"), None, choices)],
+    )
 }
 
 /// 名称在左，键按钮在右，后面是“加一个键”，改过的行再加“恢复默认”。
@@ -107,7 +131,7 @@ fn capture_feedback_row(capture: &ShortcutCaptureState) -> SettingsRow<'static> 
             "This key cannot be used. Use a function key, a named key, or a letter or digit with Ctrl or Alt."
         )),
         Some(CaptureRejection::LetterKey) => RowNote::Error(tr!(
-            "Single letters, digits and symbols are for typing to jump to files. Add Ctrl or Alt."
+            "Single letters, digits and symbols are for typing to jump to files and for Vim commands. Add Ctrl or Alt."
         )),
         Some(CaptureRejection::Reserved) => RowNote::Error(tr!(
             "Movement keys, Esc, Tab and Alt+1…9 are fixed and cannot be reassigned."

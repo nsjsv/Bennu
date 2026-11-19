@@ -32,6 +32,7 @@ mod entry_actions;
 mod file_drop;
 mod file_drop_target;
 mod keyboard_movement;
+pub(in crate::app) use keyboard_movement::letter_input_deadline;
 mod keyboard_navigation;
 mod marquee;
 mod media_next;

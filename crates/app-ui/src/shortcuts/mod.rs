@@ -2,6 +2,7 @@ mod action;
 mod fixed_keys;
 mod key_press;
 mod keymap;
+mod letter_layer;
 mod overrides;
 
 pub(crate) use action::{DeclaredContext, ShortcutAction, ShortcutGroup};
@@ -10,6 +11,7 @@ pub(crate) use fixed_keys::{
 };
 pub(crate) use key_press::{KeyPress, NamedKey, ShortcutKey};
 pub(crate) use keymap::{KeyArea, ShortcutConfig};
+pub(crate) use letter_layer::{LetterMode, VimCommand, VimFeed, VimState};
 
 /// 一次落到文件区的按键：可改键的命令、固定的移动键，或字母层的一个字符。经文本焦点探测
 /// 后以 `Message::FileContentKeyRouted` 回到 update。

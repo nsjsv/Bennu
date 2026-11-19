@@ -63,7 +63,7 @@ pub use checksum::{
     ChecksumProgress, FileChecksums, ALL_CHECKSUM_ALGORITHMS,
 };
 pub use directory_metadata::{
-    group_name, resolve_directory_metadata, user_name, DirectoryFilesystemMetadata,
+    group_name, resolve_directory_metadata, status_changed, user_name, DirectoryFilesystemMetadata,
     DirectoryIdentityNames, DirectoryMetadataRequest, DirectoryMetadataRequirement,
     DirectoryMetadataResolution, DirectoryMetadataResolver, DirectoryMetadataState,
     DirectoryMetadataUnavailable, DiscoveredDirectoryEntry,

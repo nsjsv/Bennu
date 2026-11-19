@@ -431,6 +431,7 @@ fn stored_preferences_drop_removed_list_columns_and_restore_supported_defaults()
             ListColumnKind::Permissions,
             ListColumnKind::Accessed,
             ListColumnKind::Created,
+            ListColumnKind::Changed,
         ]
     );
     assert!(preferences

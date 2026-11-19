@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use file_core::{
     discovered_sort_is_ready, sort_discovered_entry_indices, DirectoryDiscovery,
-    DirectoryMetadataRequirement, DirectoryMetadataResolution, DirectoryMetadataState, SortField,
+    DirectoryMetadataRequirement, DirectoryMetadataResolution, DirectoryMetadataState,
 };
 use iced::Task;
 
@@ -286,15 +286,13 @@ impl FileBrowser {
                     | ListColumnKind::Permissions
                     | ListColumnKind::Accessed
                     | ListColumnKind::Created
+                    | ListColumnKind::Changed
             )
         });
         let identity_names_are_visible = visible_columns
             .iter()
             .any(|kind| matches!(kind, ListColumnKind::Owner | ListColumnKind::Group));
-        let sort_requires_filesystem = matches!(
-            self.options.sort_field,
-            SortField::Size | SortField::Modified
-        );
+        let sort_requires_filesystem = self.options.sort_field.needs_filesystem_metadata();
         let mut tasks = Vec::new();
         for source in sources {
             let filesystem_targets = if sort_requires_filesystem {
@@ -373,10 +371,7 @@ impl FileBrowser {
         let request_generation = self.next_directory_metadata_request_generation;
         self.next_directory_metadata_request_generation = request_generation.wrapping_add(1);
         if requirement == DirectoryMetadataRequirement::Filesystem
-            && matches!(
-                self.options.sort_field,
-                SortField::Size | SortField::Modified
-            )
+            && self.options.sort_field.needs_filesystem_metadata()
         {
             self.set_directory_order_waiting(&context, request_generation);
         }

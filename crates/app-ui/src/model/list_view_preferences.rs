@@ -19,10 +19,12 @@ pub(crate) enum ListColumnKind {
     Permissions,
     Accessed,
     Created,
+    /// 状态改变时间（ctime）；默认不显示，只在文件夹里能排序（搜索服务的索引里没有它）。
+    Changed,
 }
 
 impl ListColumnKind {
-    pub(crate) const ALL: [Self; 10] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::Name,
         Self::Location,
         Self::Modified,
@@ -33,6 +35,7 @@ impl ListColumnKind {
         Self::Permissions,
         Self::Accessed,
         Self::Created,
+        Self::Changed,
     ];
 
     pub(crate) fn label(self) -> String {
@@ -47,6 +50,7 @@ impl ListColumnKind {
             Self::Permissions => tr!("Permissions"),
             Self::Accessed => tr!("Accessed Time"),
             Self::Created => tr!("Created Time"),
+            Self::Changed => tr!("Status Change Time"),
         }
     }
 
@@ -62,6 +66,7 @@ impl ListColumnKind {
             Self::Permissions => "permissions",
             Self::Accessed => "accessed",
             Self::Created => "created",
+            Self::Changed => "changed",
         }
     }
 
@@ -77,6 +82,7 @@ impl ListColumnKind {
             "permissions" => Some(Self::Permissions),
             "accessed" => Some(Self::Accessed),
             "created" => Some(Self::Created),
+            "changed" => Some(Self::Changed),
             _ => None,
         }
     }
@@ -87,6 +93,7 @@ impl ListColumnKind {
             Self::Modified => Some(SortField::Modified),
             Self::Size => Some(SortField::Size),
             Self::Kind => Some(SortField::Kind),
+            Self::Changed => Some(SortField::Changed),
             Self::Location
             | Self::Owner
             | Self::Group
@@ -352,6 +359,7 @@ fn default_column_width(kind: ListColumnKind) -> f32 {
         ListColumnKind::Permissions => 128.0,
         ListColumnKind::Accessed => 168.0,
         ListColumnKind::Created => 168.0,
+        ListColumnKind::Changed => 168.0,
     }
 }
 
@@ -455,8 +463,28 @@ mod tests {
                 ListColumnKind::Permissions,
                 ListColumnKind::Accessed,
                 ListColumnKind::Created,
+                ListColumnKind::Changed,
             ]
         );
+    }
+
+    /// 状态改变时间默认不显示；打开后在文件夹里能点表头排序，搜索结果里不能（索引里没有它）。
+    #[test]
+    fn status_change_time_is_hidden_by_default_and_sorts_only_in_folders() {
+        let preferences = ListViewPreferences::default();
+        assert!(preferences
+            .columns()
+            .iter()
+            .find(|column| column.kind == ListColumnKind::Changed)
+            .is_some_and(|column| !column.visible));
+        assert_eq!(
+            ListColumnKind::Changed.sort_field(),
+            Some(SortField::Changed)
+        );
+
+        let mut sort = ListSortPreference::default();
+        sort.select_column(ListColumnKind::Changed);
+        assert_eq!(sort.field, SortField::Changed);
     }
 
     #[test]
@@ -509,6 +537,7 @@ mod tests {
                 ListColumnKind::Permissions,
                 ListColumnKind::Accessed,
                 ListColumnKind::Created,
+                ListColumnKind::Changed,
             ]
         );
     }
@@ -532,6 +561,7 @@ mod tests {
                 ListColumnKind::Permissions,
                 ListColumnKind::Accessed,
                 ListColumnKind::Created,
+                ListColumnKind::Changed,
             ]
         );
         assert!(!preferences.move_column_to(ListColumnKind::Name, ListColumnKind::Name));
@@ -556,6 +586,7 @@ mod tests {
                 ListColumnKind::Permissions,
                 ListColumnKind::Accessed,
                 ListColumnKind::Created,
+                ListColumnKind::Changed,
             ]
         );
     }

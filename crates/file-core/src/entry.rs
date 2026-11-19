@@ -32,6 +32,7 @@ pub struct EntryMetadata {
     pub modified: Option<SystemTime>,
     pub accessed: Option<SystemTime>,
     pub created: Option<SystemTime>,
+    pub changed: Option<SystemTime>,
     pub readonly: bool,
     pub owner_name: Option<String>,
     pub group_name: Option<String>,
@@ -68,6 +69,7 @@ mod tests {
         assert_eq!(metadata.modified, None);
         assert_eq!(metadata.accessed, None);
         assert_eq!(metadata.created, None);
+        assert_eq!(metadata.changed, None);
         assert_eq!(metadata.owner_name, None);
         assert_eq!(metadata.group_name, None);
         assert_eq!(metadata.permissions_mode, None);
@@ -269,6 +271,14 @@ impl DirectoryEntry {
     pub fn accessed(&self) -> Option<SystemTime> {
         match self.record.filesystem_metadata() {
             DirectoryMetadataState::Complete(metadata) => metadata.accessed,
+            DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => None,
+        }
+    }
+
+    /// 状态改变时间（ctime），用法同 [`Self::size`]。
+    pub fn changed(&self) -> Option<SystemTime> {
+        match self.record.filesystem_metadata() {
+            DirectoryMetadataState::Complete(metadata) => metadata.changed,
             DirectoryMetadataState::Pending | DirectoryMetadataState::Unavailable(_) => None,
         }
     }

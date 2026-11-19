@@ -138,6 +138,8 @@ pub(crate) struct FilePropertiesSnapshot {
     pub(crate) created: Option<SystemTime>,
     pub(crate) modified: Option<SystemTime>,
     pub(crate) accessed: Option<SystemTime>,
+    /// 状态改变时间（ctime）。
+    pub(crate) changed: Option<SystemTime>,
     pub(crate) size_bytes: u64,
     pub(crate) disk_size_bytes: u64,
     pub(crate) details: FilePropertiesKindDetails,
@@ -222,6 +224,7 @@ pub(crate) struct FilePropertiesAggregateSnapshot {
     pub(crate) common_created: Option<SystemTime>,
     pub(crate) common_modified: Option<SystemTime>,
     pub(crate) common_accessed: Option<SystemTime>,
+    pub(crate) common_changed: Option<SystemTime>,
     pub(crate) permissions: Option<FilePropertiesPermissions>,
     pub(crate) permission_baselines: Vec<FilePropertiesPermissionBaseline>,
 }

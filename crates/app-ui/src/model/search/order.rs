@@ -106,7 +106,8 @@ fn search_sort_field(column: ListColumnKind) -> Option<SearchSortField> {
         | ListColumnKind::Group
         | ListColumnKind::Permissions
         | ListColumnKind::Accessed
-        | ListColumnKind::Created => None,
+        | ListColumnKind::Created
+        | ListColumnKind::Changed => None,
     }
 }
 

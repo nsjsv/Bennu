@@ -136,11 +136,7 @@ fn single_information<'a>(
         }
     }
     page.push(volume_group(&snapshot.volume))
-        .push(times_card(
-            snapshot.created,
-            snapshot.modified,
-            snapshot.accessed,
-        ))
+        .push(times_card(snapshot))
         .push(permissions_section(
             &properties.permission_update,
             snapshot.permissions,
@@ -271,16 +267,32 @@ fn used_fraction(volume: &VolumeUsage) -> f32 {
     (used as f64 / volume.total_bytes as f64) as f32
 }
 
-fn times_card(
-    created: Option<SystemTime>,
-    modified: Option<SystemTime>,
-    accessed: Option<SystemTime>,
-) -> Element<'static, Message> {
-    settings_card(vec![
-        value_row(tr!("Created"), display_optional_time(created)),
-        value_row(tr!("Modified"), display_optional_time(modified)),
-        value_row(tr!("Accessed"), display_optional_time(accessed)),
-    ])
+fn times_card(snapshot: &FilePropertiesSnapshot) -> Element<'static, Message> {
+    settings_card(
+        time_rows(snapshot)
+            .into_iter()
+            .map(|(label, value)| value_row(label, value))
+            .collect(),
+    )
+}
+
+/// 文件系统不记创建时间（老式 ext4、网络和共享目录）时不显示这一行，不写「不可用」：
+/// 这是文件系统的事，不是这个文件出了问题。状态改变时间（ctime）放最后。
+fn time_rows(snapshot: &FilePropertiesSnapshot) -> Vec<(String, String)> {
+    let created = snapshot
+        .created
+        .map(|created| (tr!("Created"), format_system_time(created)));
+    created
+        .into_iter()
+        .chain([
+            (tr!("Modified"), display_optional_time(snapshot.modified)),
+            (tr!("Accessed"), display_optional_time(snapshot.accessed)),
+            (
+                tr!("Status Changed"),
+                display_optional_time(snapshot.changed),
+            ),
+        ])
+        .collect()
 }
 
 /// 多选：标题是“N 项”，卡片里是各类各几个、在哪、总大小，时间只在大家都一样时有。
@@ -333,6 +345,10 @@ fn aggregate_information(snapshot: &FilePropertiesAggregateSnapshot) -> Column<'
             value_row(
                 tr!("Accessed"),
                 aggregate_optional_time(snapshot.common_accessed)
+            ),
+            value_row(
+                tr!("Status Changed"),
+                aggregate_optional_time(snapshot.common_changed)
             ),
         ]),
     ]
@@ -602,6 +618,52 @@ mod tests {
             permissions_status(&FilePropertiesPermissionUpdate::Failed("denied".to_owned())),
             Some(RowNote::Error(_))
         ));
+    }
+
+    fn snapshot_with_times(created: Option<SystemTime>) -> FilePropertiesSnapshot {
+        let time = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        FilePropertiesSnapshot {
+            name: "notes.txt".into(),
+            location: "/tmp".into(),
+            created,
+            modified: Some(time),
+            accessed: Some(time),
+            changed: Some(time),
+            size_bytes: 0,
+            disk_size_bytes: 0,
+            details: file_details(None),
+            owner: crate::model::FilePropertiesOwner {
+                user: "alice".to_owned(),
+                group: "staff".to_owned(),
+            },
+            volume: Err("not measured".to_owned()),
+            permissions: None,
+        }
+    }
+
+    #[test]
+    fn creation_time_is_left_out_when_the_file_system_has_none() {
+        let labels = |created| {
+            time_rows(&snapshot_with_times(created))
+                .into_iter()
+                .map(|(label, _)| label)
+                .collect::<Vec<_>>()
+        };
+        let created = Some(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1));
+
+        assert_eq!(
+            labels(created),
+            [
+                tr!("Created"),
+                tr!("Modified"),
+                tr!("Accessed"),
+                tr!("Status Changed")
+            ]
+        );
+        assert_eq!(
+            labels(None),
+            [tr!("Modified"), tr!("Accessed"), tr!("Status Changed")]
+        );
     }
 
     #[test]

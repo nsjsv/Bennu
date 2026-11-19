@@ -291,6 +291,7 @@ fn read_file_properties(
             created: metadata.created().ok(),
             modified: metadata.modified().ok(),
             accessed: metadata.accessed().ok(),
+            changed: file_core::status_changed(&metadata),
             size_bytes: metadata.len(),
             disk_size_bytes: metadata_disk_size(&metadata),
             details,
@@ -382,6 +383,7 @@ fn aggregate_snapshot_for_targets(
     let mut common_created = first.metadata.created().ok();
     let mut common_modified = first.metadata.modified().ok();
     let mut common_accessed = first.metadata.accessed().ok();
+    let mut common_changed = file_core::status_changed(&first.metadata);
     let mut common_permissions =
         metadata_properties_permissions(&first.metadata, first.metadata.file_type().is_symlink());
     let mut permission_baselines = Vec::with_capacity(targets.len());
@@ -408,6 +410,10 @@ fn aggregate_snapshot_for_targets(
         retain_common_optional(&mut common_created, target.metadata.created().ok());
         retain_common_optional(&mut common_modified, target.metadata.modified().ok());
         retain_common_optional(&mut common_accessed, target.metadata.accessed().ok());
+        retain_common_optional(
+            &mut common_changed,
+            file_core::status_changed(&target.metadata),
+        );
         let permissions = metadata_properties_permissions(
             &target.metadata,
             target.metadata.file_type().is_symlink(),
@@ -451,6 +457,7 @@ fn aggregate_snapshot_for_targets(
         common_created,
         common_modified,
         common_accessed,
+        common_changed,
         permissions: common_permissions,
         permission_baselines,
     })

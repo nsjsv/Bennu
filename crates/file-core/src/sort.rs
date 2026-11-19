@@ -13,6 +13,18 @@ pub enum SortField {
     Size,
     Kind,
     Modified,
+    /// 状态改变时间（ctime）。
+    Changed,
+}
+
+impl SortField {
+    /// 按它排要先读每个条目的文件信息（stat）；名字和类型在列目录时就有。
+    pub fn needs_filesystem_metadata(self) -> bool {
+        match self {
+            Self::Name | Self::Kind => false,
+            Self::Size | Self::Modified | Self::Changed => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,12 +52,10 @@ pub fn discovered_sort_is_ready(
     entries: &[DiscoveredDirectoryEntry],
     options: &ScanOptions,
 ) -> bool {
-    match options.sort_field {
-        SortField::Name | SortField::Kind => true,
-        SortField::Size | SortField::Modified => entries
+    !options.sort_field.needs_filesystem_metadata()
+        || entries
             .iter()
-            .all(|entry| !matches!(entry.filesystem_metadata(), DirectoryMetadataState::Pending)),
-    }
+            .all(|entry| !matches!(entry.filesystem_metadata(), DirectoryMetadataState::Pending))
 }
 
 pub fn sort_discovered_entry_indices(
@@ -81,6 +91,11 @@ fn compare_discovered_entries(
         SortField::Modified => {
             return compare_discovered_filesystem_metadata(left, right, options, |metadata| {
                 metadata.modified
+            });
+        }
+        SortField::Changed => {
+            return compare_discovered_filesystem_metadata(left, right, options, |metadata| {
+                metadata.changed
             });
         }
     };
@@ -138,6 +153,10 @@ pub fn compare_entries(
             .modified()
             .cmp(&right.modified())
             .then_with(|| compare_names(left.name(), right.name())),
+        SortField::Changed => left
+            .changed()
+            .cmp(&right.changed())
+            .then_with(|| compare_names(left.name(), right.name())),
     };
 
     apply_sort_direction(ordering, options.sort_direction)
@@ -178,4 +197,81 @@ fn compare_names(left: &OsStr, right: &OsStr) -> Ordering {
 #[cfg(not(unix))]
 fn compare_names(left: &OsStr, right: &OsStr) -> Ordering {
     left.to_string_lossy().cmp(&right.to_string_lossy())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+
+    use super::*;
+    use crate::EntryMetadata;
+
+    fn file_changed_at(name: &str, changed_seconds: u64) -> DirectoryEntry {
+        DirectoryEntry::new(
+            PathBuf::from("/folder").join(name),
+            FileKind::File,
+            EntryMetadata {
+                // 修改时间和状态改变时间反着来：排序必须看对字段。
+                modified: Some(
+                    SystemTime::UNIX_EPOCH + Duration::from_secs(1000 - changed_seconds),
+                ),
+                changed: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(changed_seconds)),
+                ..EntryMetadata::default()
+            },
+            false,
+            false,
+            false,
+        )
+    }
+
+    #[test]
+    fn sorting_by_status_change_time_uses_ctime_not_the_modified_time() {
+        let mut entries = vec![
+            file_changed_at("b", 30),
+            file_changed_at("a", 10),
+            file_changed_at("c", 20),
+        ];
+        let options = ScanOptions {
+            sort_field: SortField::Changed,
+            ..ScanOptions::default()
+        };
+
+        sort_entries(&mut entries, &options);
+
+        let names: Vec<_> = entries
+            .iter()
+            .map(|entry| entry.name().to_owned())
+            .collect();
+        assert_eq!(names, ["a", "c", "b"]);
+    }
+
+    #[test]
+    fn only_name_and_kind_sort_without_reading_file_information() {
+        assert!(!SortField::Name.needs_filesystem_metadata());
+        assert!(!SortField::Kind.needs_filesystem_metadata());
+        for field in [SortField::Size, SortField::Modified, SortField::Changed] {
+            assert!(field.needs_filesystem_metadata(), "{field:?}");
+        }
+    }
+
+    /// 改修改时间本身就是一次状态改变：ctime 落在「现在」，和改成 2001 年的修改时间不是一回事。
+    #[test]
+    fn status_change_time_follows_metadata_changes_not_the_modified_time() {
+        let directory = tempfile::tempdir().expect("temp directory");
+        let path = directory.path().join("file");
+        std::fs::write(&path, b"x").expect("write file");
+        let long_ago = filetime::FileTime::from_unix_time(978_307_200, 0);
+        filetime::set_file_mtime(&path, long_ago).expect("set modified time");
+        let before = SystemTime::now() - Duration::from_secs(60);
+
+        let metadata = std::fs::metadata(&path).expect("metadata");
+        let changed = crate::status_changed(&metadata).expect("ctime");
+
+        assert_eq!(
+            metadata.modified().expect("modified"),
+            SystemTime::UNIX_EPOCH + Duration::from_secs(978_307_200)
+        );
+        assert!(changed > before, "{changed:?}");
+    }
 }

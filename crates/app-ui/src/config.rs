@@ -274,6 +274,7 @@ pub(crate) fn sort_field_from_config_value(value: &str) -> Option<SortField> {
     match value {
         "name" => Some(SortField::Name),
         "modified" => Some(SortField::Modified),
+        "changed" => Some(SortField::Changed),
         "size" => Some(SortField::Size),
         "kind" => Some(SortField::Kind),
         _ => None,
@@ -284,6 +285,7 @@ pub(crate) fn sort_field_config_value(field: SortField) -> &'static str {
     match field {
         SortField::Name => "name",
         SortField::Modified => "modified",
+        SortField::Changed => "changed",
         SortField::Size => "size",
         SortField::Kind => "kind",
     }

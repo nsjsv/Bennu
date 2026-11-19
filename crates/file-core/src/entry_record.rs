@@ -86,6 +86,7 @@ impl EntryRecord {
                     modified: metadata.modified,
                     accessed: metadata.accessed,
                     created: metadata.created,
+                    changed: metadata.changed,
                     readonly: metadata.readonly,
                     permissions_mode: metadata.permissions_mode,
                     user_id: None,
@@ -175,6 +176,7 @@ impl EntryRecord {
                 metadata.modified = filesystem.modified;
                 metadata.accessed = filesystem.accessed;
                 metadata.created = filesystem.created;
+                metadata.changed = filesystem.changed;
                 metadata.readonly = filesystem.readonly;
                 metadata.permissions_mode = filesystem.permissions_mode;
             }

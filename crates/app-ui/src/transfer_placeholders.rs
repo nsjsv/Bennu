@@ -127,6 +127,10 @@ pub(crate) fn compare_placeholder_with_entry(
         SortField::Modified => Some(placeholder.enqueued_at)
             .cmp(&entry.metadata().modified)
             .then_with(|| compare_names(&placeholder.name, entry.name())),
+        // 正在传进来的东西，修改和状态改变都发生在排队之后，都按排队时间算。
+        SortField::Changed => Some(placeholder.enqueued_at)
+            .cmp(&entry.changed())
+            .then_with(|| compare_names(&placeholder.name, entry.name())),
     };
     apply_sort_direction(field_ordering, sort.direction)
 }
@@ -153,7 +157,7 @@ fn compare_placeholder_with_placeholder(
         SortField::Kind => placeholder_kind_rank(left.is_directory)
             .cmp(&placeholder_kind_rank(right.is_directory))
             .then_with(|| compare_names(&left.name, OsStr::new(&right.name))),
-        SortField::Modified => left
+        SortField::Modified | SortField::Changed => left
             .enqueued_at
             .cmp(&right.enqueued_at)
             .then_with(|| compare_names(&left.name, OsStr::new(&right.name))),

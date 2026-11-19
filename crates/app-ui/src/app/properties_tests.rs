@@ -395,6 +395,7 @@ fn snapshot(path: PathBuf, details: FilePropertiesKindDetails) -> FileProperties
         created: None,
         modified: None,
         accessed: None,
+        changed: None,
         size_bytes: 0,
         disk_size_bytes: 0,
         details,
@@ -429,6 +430,7 @@ fn aggregate_snapshot(target_count: usize) -> FilePropertiesAggregateSnapshot {
         common_created: None,
         common_modified: None,
         common_accessed: None,
+        common_changed: None,
         permissions: Some(FilePropertiesPermissions::from_mode(0o644)),
         permission_baselines: Vec::new(),
     }

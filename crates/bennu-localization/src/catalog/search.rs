@@ -14,6 +14,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Accessed", "访问时间"),
     ("Modified", "修改时间"),
     ("Created", "创建时间"),
+    ("Status Changed", "状态改变时间"),
     ("Any time", "任意时间"),
     ("Past 7 days", "近 7 天"),
     ("Past 30 days", "近 30 天"),

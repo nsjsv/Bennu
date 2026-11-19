@@ -19,6 +19,8 @@ pub struct DirectoryFilesystemMetadata {
     pub modified: Option<SystemTime>,
     pub accessed: Option<SystemTime>,
     pub created: Option<SystemTime>,
+    /// 状态改变时间（ctime）：内容、权限、所有者、改名、硬链接数变了都会更新，不是创建时间。
+    pub changed: Option<SystemTime>,
     pub readonly: bool,
     pub permissions_mode: Option<u32>,
     pub user_id: Option<u32>,
@@ -206,6 +208,7 @@ impl DiscoveredDirectoryEntry {
                 modified,
                 accessed: None,
                 created: None,
+                changed: None,
                 readonly: true,
                 permissions_mode: None,
                 user_id: None,
@@ -604,12 +607,31 @@ fn directory_filesystem_metadata(
         modified: metadata.modified().ok(),
         accessed: metadata.accessed().ok(),
         created: metadata.created().ok(),
+        changed: status_changed(metadata),
         readonly: metadata.permissions().readonly(),
         permissions_mode: permissions_mode(metadata),
         user_id: user_id(metadata),
         group_id: group_id(metadata),
         is_broken_symlink,
     }
+}
+
+/// 标准库只给修改、访问、创建三个时间，ctime 要从 stat 的秒和纳秒拼。
+#[cfg(unix)]
+pub fn status_changed(metadata: &std::fs::Metadata) -> Option<SystemTime> {
+    let seconds = std::time::Duration::from_secs(metadata.ctime().unsigned_abs());
+    let whole_seconds = if metadata.ctime() >= 0 {
+        SystemTime::UNIX_EPOCH.checked_add(seconds)
+    } else {
+        SystemTime::UNIX_EPOCH.checked_sub(seconds)
+    }?;
+    let nanoseconds = u64::try_from(metadata.ctime_nsec()).ok()?;
+    whole_seconds.checked_add(std::time::Duration::from_nanos(nanoseconds))
+}
+
+#[cfg(not(unix))]
+pub fn status_changed(_metadata: &std::fs::Metadata) -> Option<SystemTime> {
+    None
 }
 
 #[cfg(unix)]

@@ -1,5 +1,5 @@
 use file_core::{
-    sort_entries, DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryEntry, FileKind, SortField,
+    sort_entries, DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryEntry, FileKind,
 };
 use iced::Task;
 use std::path::{Path, PathBuf};
@@ -723,7 +723,7 @@ pub(super) fn directory_order_phase_after_collection(
     options: &file_core::ScanOptions,
     entries: &[DirectoryEntry],
 ) -> DirectoryOrderPhase {
-    if matches!(options.sort_field, SortField::Size | SortField::Modified)
+    if options.sort_field.needs_filesystem_metadata()
         && entries.iter().any(|entry| {
             entry.metadata().filesystem_availability
                 == file_core::DirectoryMetadataAvailability::Pending
@@ -939,7 +939,7 @@ mod tests {
                 load_context: None,
                 load_cancel: None,
                 directory_order_phase: DirectoryOrderPhase::Ready {
-                    field: SortField::Name,
+                    field: file_core::SortField::Name,
                     direction: file_core::SortDirection::Ascending,
                 },
             },

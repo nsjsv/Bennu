@@ -82,6 +82,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     // 列表列
     ("Modified Time", "修改时间"),
     ("Accessed Time", "访问时间"),
+    ("Status Change Time", "状态改变时间"),
     ("Created Time", "创建时间"),
     ("Owner", "所有者"),
     ("Group", "群组"),

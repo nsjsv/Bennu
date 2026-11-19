@@ -736,6 +736,7 @@ fn list_entry_cell<'a>(
         }
         ListColumnKind::Accessed => text_cell(accessed_text(&metadata), geometry, column.width),
         ListColumnKind::Created => text_cell(created_text(&metadata), geometry, column.width),
+        ListColumnKind::Changed => text_cell(changed_text(metadata), geometry, column.width),
     }
 }
 
@@ -772,6 +773,9 @@ fn list_placeholder_entry_cell<'a>(
         }
         ListColumnKind::Created => {
             text_cell(created_text(&entry.metadata()), geometry, column.width)
+        }
+        ListColumnKind::Changed => {
+            text_cell(changed_text(&entry.metadata()), geometry, column.width)
         }
     }
 }
@@ -967,6 +971,13 @@ fn created_text(metadata: &EntryMetadata) -> String {
     timestamp_text(metadata.created)
 }
 
+fn changed_text(metadata: &EntryMetadata) -> String {
+    if metadata.filesystem_availability != DirectoryMetadataAvailability::Complete {
+        return "-".to_owned();
+    }
+    timestamp_text(metadata.changed)
+}
+
 fn timestamp_text(value: Option<std::time::SystemTime>) -> String {
     value
         .map(format_system_time)
@@ -1023,6 +1034,7 @@ mod tests {
         assert_eq!(permissions_text(&entry.metadata()), "-");
         assert_eq!(accessed_text(&entry.metadata()), "-");
         assert_eq!(created_text(&entry.metadata()), "-");
+        assert_eq!(changed_text(&entry.metadata()), "-");
     }
 
     #[test]

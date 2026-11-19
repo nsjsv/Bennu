@@ -50,7 +50,7 @@ async fn a_selected_entry_in_an_expanded_directory_demands_only_its_metadata() {
             load_context: None,
             load_cancel: None,
             directory_order_phase: DirectoryOrderPhase::Ready {
-                field: SortField::Name,
+                field: file_core::SortField::Name,
                 direction: file_core::SortDirection::Ascending,
             },
         },

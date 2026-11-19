@@ -333,3 +333,18 @@ fn a_family_without_a_regular_weight_is_still_used() {
         ["Weighted"]
     );
 }
+
+/// vendor 的 cryoglyph 着色器（字形边缘按 sRGB 混色换算覆盖率）能通过 WGSL 解析和校验：着色器平时
+/// 要到程序启动、显卡驱动层编译时才会报错。
+#[test]
+fn the_vendored_text_shader_is_valid_wgsl() {
+    let source = include_str!("../../../vendor/cryoglyph/src/shader.wgsl");
+    let module = naga::front::wgsl::parse_str(source).expect("shader parses");
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .expect("shader validates");
+    assert!(source.contains("fn blended_coverage("));
+}

@@ -30,3 +30,6 @@ toml = "1.1.2"
 
 [dev-dependencies]
 tempfile.workspace = true
+# 只给测试用：编译期查出 vendor 的 cryoglyph 着色器写错（WGSL 平时到运行时才由显卡驱动层编译）。
+# 版本与 wgpu 用的那份相同，不多下载、不进程序。
+naga = { version = "27", features = ["wgsl-in"] }

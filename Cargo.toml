@@ -106,9 +106,15 @@ panic = "abort"
 # 画 SVG 时又把每个字体文件解析一遍）。clippy.toml 禁了 `load_system_fonts`。测试在
 # bennu-theme 的 font_families_tests.rs、font_list_tests.rs。
 # 只 vendor 了 src，Cargo.toml 去掉了 vendor 里跑不了的 test/bench 目标。
+#
+# cryoglyph 一处补丁（src/shader.wgsl 的 `blended_coverage`）：显卡渲染时画布是 sRGB 格式，
+# 混色在线性空间，深色字边缘被冲淡，同一个字比桌面上少约三成墨（Noto Sans 13px 实测 117 对 162）；
+# 着色器把字形覆盖率换算成「在 sRGB 里混色」的深浅，浅色字照旧。软件渲染（tiny-skia）本来就在
+# sRGB 里混色，不受影响。着色器的校验测试在 bennu-theme 的 font_families_tests.rs。
 [patch.crates-io]
 cosmic-text = { path = "vendor/cosmic-text" }
 iced_graphics = { path = "vendor/iced_graphics" }
 iced_tiny_skia = { path = "vendor/iced_tiny_skia" }
 iced_wgpu = { path = "vendor/iced_wgpu" }
 iced_winit = { path = "vendor/iced_winit" }
+cryoglyph = { path = "vendor/cryoglyph" }

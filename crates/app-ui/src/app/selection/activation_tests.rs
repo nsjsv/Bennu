@@ -13,7 +13,7 @@ use crate::model::{
     ExpandedDirectoryLoadRequest, ExpandedDirectoryStatus, FileDragNativeDndState, FileDragPhase,
     Message,
 };
-use crate::shortcuts::FileSelectionDirection;
+use crate::shortcuts::{MoveStep, SelectionMove};
 
 fn test_entry(path: PathBuf, kind: FileKind) -> DirectoryEntry {
     DirectoryEntry::new(
@@ -447,7 +447,7 @@ fn right_arrow_enters_loaded_child_column_and_remembers_return_target() {
     browser.tab_mut().deepest_open_column_directory = Some(parent.clone());
 
     browser.select_path(return_child.clone());
-    drop(browser.move_file_selection(FileSelectionDirection::Left));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Left)));
 
     assert_eq!(browser.tab().selected, Some(parent.clone()));
     assert_eq!(
@@ -455,7 +455,7 @@ fn right_arrow_enters_loaded_child_column_and_remembers_return_target() {
         Some(parent.clone())
     );
 
-    drop(browser.move_file_selection(FileSelectionDirection::Right));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Right)));
 
     assert_eq!(browser.tab().selected, Some(return_child));
     assert_ne!(browser.tab().selected, Some(first_child));
@@ -479,7 +479,7 @@ fn vertical_arrows_open_directory_contents_without_entering_child_column() {
     );
     browser.select_path(first_parent);
 
-    drop(browser.move_file_selection(FileSelectionDirection::Down));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Down)));
 
     assert_eq!(browser.tab().selected, Some(second_parent.clone()));
     assert_eq!(
@@ -501,7 +501,7 @@ fn right_arrow_focuses_first_child_after_directory_loads() {
     browser.tab_mut().entries = vec![test_entry(parent.clone(), FileKind::Directory)].into();
     browser.select_path(parent.clone());
 
-    drop(browser.move_file_selection(FileSelectionDirection::Right));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Right)));
 
     assert_eq!(browser.tab().selected, Some(parent.clone()));
     assert!(browser.pending_keyboard_column_focus.is_some());
@@ -550,13 +550,13 @@ fn list_vertical_arrows_move_across_expanded_directory_levels() {
     );
     browser.select_path(parent.clone());
 
-    drop(browser.move_file_selection(FileSelectionDirection::Down));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Down)));
     assert_eq!(browser.tab().selected, Some(child.clone()));
 
-    drop(browser.move_file_selection(FileSelectionDirection::Down));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Down)));
     assert_eq!(browser.tab().selected, Some(sibling));
 
-    drop(browser.move_file_selection(FileSelectionDirection::Up));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Up)));
     assert_eq!(browser.tab().selected, Some(child));
 }
 
@@ -587,7 +587,7 @@ fn list_right_arrow_expands_then_focuses_first_child() {
     );
     browser.select_path(parent.clone());
 
-    drop(browser.move_file_selection(FileSelectionDirection::Right));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Right)));
 
     assert_eq!(browser.tab().selected, Some(parent.clone()));
     assert!(browser
@@ -596,7 +596,7 @@ fn list_right_arrow_expands_then_focuses_first_child() {
         .get(&parent)
         .is_some_and(|expanded| expanded.is_expanded));
 
-    drop(browser.move_file_selection(FileSelectionDirection::Right));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Right)));
 
     assert_eq!(browser.tab().selected, Some(child));
 }
@@ -619,7 +619,7 @@ fn list_left_arrow_collapses_then_focuses_visible_parent() {
     );
     browser.select_path(child.clone());
 
-    drop(browser.move_file_selection(FileSelectionDirection::Left));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Left)));
 
     assert_eq!(browser.tab().selected, Some(child.clone()));
     assert!(browser
@@ -638,7 +638,7 @@ fn list_left_arrow_collapses_then_focuses_visible_parent() {
         .get(&child)
         .is_some_and(|expanded| !expanded.is_expanded && !expanded.is_collapsing));
 
-    drop(browser.move_file_selection(FileSelectionDirection::Left));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Left)));
 
     assert_eq!(browser.tab().selected, Some(parent));
 }

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -32,9 +31,11 @@ mod drag_tests;
 mod entry_actions;
 mod file_drop;
 mod file_drop_target;
+mod keyboard_movement;
 mod keyboard_navigation;
 mod marquee;
 mod media_next;
+mod scope_selection;
 #[cfg(test)]
 mod summary_tests;
 // spring_open 的 tick 间隔常量由 app.rs 的 subscription 引用。
@@ -592,7 +593,7 @@ impl FileBrowser {
         });
     }
 
-    fn clear_file_selection(&mut self) {
+    pub(in crate::app) fn clear_file_selection(&mut self) {
         self.tab_mut().clear_selection();
         self.rename_input.clear();
     }
@@ -600,53 +601,6 @@ impl FileBrowser {
     fn clear_column_blank_selection_context(&mut self) {
         self.tab_mut().deepest_open_column_directory = None;
         self.clear_file_selection();
-    }
-
-    pub(super) fn select_all_in_file_selection_scope(&mut self) -> Task<Message> {
-        if !self.file_browser_content_shortcuts_enabled() {
-            return Task::none();
-        }
-        self.cancel_expansion_follow_plans();
-        let paths = self.select_all_selection_scope_paths();
-        let tab = self.tab_mut();
-        tab.selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
-        tab.selection_anchor = paths.first().cloned();
-        if let Some(path) = paths.first().cloned() {
-            self.focus_path(path);
-        } else {
-            self.tab_mut().selected = None;
-            self.rename_input.clear();
-        }
-        self.preview_engine.clear_preview();
-        self.context_menu = None;
-        self.schedule_selected_metadata_for_all_panes()
-    }
-
-    fn select_all_selection_scope_paths(&self) -> Vec<PathBuf> {
-        let tab = self.tab();
-        if tab.location == BrowserLocation::Trash {
-            return self.visible_entry_paths();
-        }
-
-        if tab.view_mode() == BrowserViewMode::Icons {
-            let directory = self
-                .icon_grid_expansion
-                .as_ref()
-                .map(|state| state.selection_directory())
-                .or(tab.current_directory());
-            return directory
-                .map(|directory| self.entry_paths_in_directory(directory))
-                .unwrap_or_default();
-        }
-
-        if tab.view_mode() == BrowserViewMode::Columns {
-            return self
-                .column_select_all_directory()
-                .map(|directory| self.entry_paths_in_directory(&directory))
-                .unwrap_or_default();
-        }
-
-        self.visible_entry_paths()
     }
 
     fn column_select_all_directory(&self) -> Option<PathBuf> {

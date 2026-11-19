@@ -52,9 +52,9 @@ impl FileBrowser {
         };
         match fixed_key(&press) {
             Some(FixedKey::Escape) => return self.handle_escape_key(status),
-            Some(FixedKey::Move(direction)) => {
+            Some(FixedKey::Move(movement)) => {
                 return self.route_file_content_key(
-                    FileContentKey::Move(direction),
+                    FileContentKey::Move(movement),
                     routing_context(
                         &press,
                         crate::shortcuts::DeclaredContext::FileBrowserContent,
@@ -134,7 +134,7 @@ impl FileBrowser {
     fn invoke_file_content_key(&mut self, content_key: FileContentKey) -> Task<Message> {
         match content_key {
             FileContentKey::Action(action) => self.invoke_shortcut(action),
-            FileContentKey::Move(direction) => self.move_file_selection(direction),
+            FileContentKey::Move(movement) => self.move_file_selection(movement),
         }
     }
 
@@ -220,6 +220,7 @@ impl FileBrowser {
             ShortcutAction::TerminalNewTab => self.add_terminal_tab(),
             ShortcutAction::TerminalCloseTab => self.close_active_terminal_tab_via_shortcut(),
             ShortcutAction::SelectAll => self.select_all_in_file_selection_scope(),
+            ShortcutAction::InvertSelection => self.invert_selection_in_file_selection_scope(),
             ShortcutAction::Copy => self.copy_selected(),
             ShortcutAction::DuplicateSelected => self.duplicate_selected(),
             ShortcutAction::NewFolderFromSelection => self.new_folder_from_selection(),

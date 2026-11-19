@@ -12,7 +12,7 @@ use crate::model::{
     DirectoryLoadRequest, PaneAddressEditingSession, SelectionMarquee, SelectionMarqueePhase,
     SelectionMarqueeScrollAnchor, SelectionMarqueeSource,
 };
-use crate::shortcuts::FileSelectionDirection;
+use crate::shortcuts::{MoveStep, SelectionMove};
 
 fn entry(path: &str, kind: FileKind) -> DirectoryEntry {
     DirectoryEntry::new(
@@ -586,7 +586,7 @@ fn icon_grid_keyboard_navigation_crosses_band_and_updates_panel_scope() {
     finish_open_animation(&mut browser);
     browser.select_path(root.clone());
 
-    drop(browser.move_file_selection(FileSelectionDirection::Down));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Down)));
 
     assert_eq!(browser.tab().selected, Some(child.clone()));
     assert_eq!(

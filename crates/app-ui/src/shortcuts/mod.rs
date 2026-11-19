@@ -5,7 +5,9 @@ mod keymap;
 mod overrides;
 
 pub(crate) use action::{DeclaredContext, ShortcutAction, ShortcutGroup};
-pub(crate) use fixed_keys::{fixed_key, is_reserved, FileSelectionDirection, FixedKey};
+pub(crate) use fixed_keys::{
+    fixed_key, is_reserved, FixedKey, MoveExtent, MoveStep, SelectionMove,
+};
 pub(crate) use key_press::{KeyPress, NamedKey, ShortcutKey};
 pub(crate) use keymap::{KeyArea, ShortcutConfig};
 
@@ -14,7 +16,7 @@ pub(crate) use keymap::{KeyArea, ShortcutConfig};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileContentKey {
     Action(ShortcutAction),
-    Move(FileSelectionDirection),
+    Move(SelectionMove),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

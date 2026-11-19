@@ -9,7 +9,7 @@ use crate::model::{
     BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ExpandedDirectory,
     ExpandedDirectoryStatus, HistoryEntry, ListDirectorySummary, SplitAxis,
 };
-use crate::shortcuts::FileSelectionDirection;
+use crate::shortcuts::{MoveStep, SelectionMove};
 use crate::thumbnail_cache::ColumnViewport;
 use file_operations::test_persistence::{attach_store, enqueue_persisted, queued_task_id};
 use file_operations::FileOperationOutcome;
@@ -873,7 +873,7 @@ fn successful_trash_focuses_next_entry_after_keyboard_selection() {
     .into();
 
     browser.select_path(first);
-    drop(browser.move_file_selection(FileSelectionDirection::Down));
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::Down)));
     assert_eq!(browser.tab().selected, Some(deleted.clone()));
 
     let task_id = queued_task_id(browser.operation_queue.enqueue(QueuedFileOperation::Trash {

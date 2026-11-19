@@ -316,3 +316,22 @@ fn clicking_a_header_resorts_all_results_without_touching_folder_sorting() {
         folder_sort
     );
 }
+
+#[test]
+fn keyboard_movement_works_in_search_results_too() {
+    use crate::shortcuts::{MoveStep, SelectionMove};
+
+    let mut fixture = searched_folder();
+    let browser = &mut fixture.browser;
+    browser.select_path(fixture.first.clone());
+
+    drop(browser.move_file_selection(SelectionMove::extend(MoveStep::Last)));
+    assert_eq!(browser.tab().selected.as_ref(), Some(&fixture.second));
+    assert_eq!(browser.tab().selected_paths.len(), 3);
+    assert!(browser.tab().selected_paths.contains(&fixture.folder));
+
+    drop(browser.move_file_selection(SelectionMove::cursor(MoveStep::First)));
+    assert_eq!(browser.tab().selected.as_ref(), Some(&fixture.first));
+    assert_eq!(browser.tab().selected_paths.len(), 1);
+    assert!(browser.tab().selected_paths.contains(&fixture.first));
+}

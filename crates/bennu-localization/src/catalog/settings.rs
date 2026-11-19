@@ -140,6 +140,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Add a Key", "加一个键"),
     ("Navigation", "导航"),
     ("Selection", "选择"),
+    ("Invert Selection", "反选"),
     ("Panels", "面板"),
     ("Focus Path", "聚焦路径栏"),
     ("Up Folder", "上级文件夹"),

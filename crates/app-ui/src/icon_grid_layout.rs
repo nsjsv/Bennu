@@ -262,6 +262,15 @@ pub(crate) struct IconGridVisibleEntry<'a> {
     pub(crate) entry: &'a DirectoryEntry,
 }
 
+/// 不按格子一步步走的键盘移动：翻一屏（带视口高度）、到第一项、到最后一项。
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum IconGridJump {
+    PageUp(f32),
+    PageDown(f32),
+    First,
+    Last,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct IconGridNavigationTarget<'a> {
     pub(crate) directory: Option<&'a Path>,
@@ -446,6 +455,38 @@ impl<'a> IconGridLayout<'a> {
             },
         };
 
+        Some(IconGridNavigationTarget {
+            directory: target.directory,
+            entry: target.entry,
+        })
+    }
+
+    /// 翻页落到同一列、大约一屏之外的那一行（少翻一行，上一屏的最后一行还在屏上）；
+    /// 已经没有更远的行就到第一项 / 最后一项。没有当前项时和方向键一样从头或从尾开始。
+    pub(crate) fn keyboard_jump_target(
+        &self,
+        current_path: Option<&Path>,
+        jump: IconGridJump,
+    ) -> Option<IconGridNavigationTarget<'a>> {
+        let entries = self.interactive_entry_geometry();
+        let first = *entries.first()?;
+        let last = *entries.last()?;
+        let current = current_path
+            .and_then(|path| entries.iter().position(|entry| entry.entry.path() == path));
+        let row_step = row_height(self.icon_edge);
+        let target = match (jump, current) {
+            (IconGridJump::First, _) | (IconGridJump::PageDown(_), None) => first,
+            (IconGridJump::Last, _) | (IconGridJump::PageUp(_), None) => last,
+            (IconGridJump::PageUp(viewport_height), Some(index)) => {
+                let distance = (viewport_height - row_step).max(row_step);
+                interaction_geometry::entry_one_page_away(&entries, index, -distance)
+                    .unwrap_or(first)
+            }
+            (IconGridJump::PageDown(viewport_height), Some(index)) => {
+                let distance = (viewport_height - row_step).max(row_step);
+                interaction_geometry::entry_one_page_away(&entries, index, distance).unwrap_or(last)
+            }
+        };
         Some(IconGridNavigationTarget {
             directory: target.directory,
             entry: target.entry,

@@ -469,7 +469,8 @@ impl FileBrowser {
         if self.address_editing.is_some() {
             return self.cancel_address_editing();
         }
-        self.dismiss_floating()
+        self.dismiss_floating_layer()
+            .unwrap_or_else(|| self.clear_selection_by_escape())
     }
 
     pub(super) fn handle_window_pointer_pressed(
@@ -544,61 +545,67 @@ impl FileBrowser {
     }
 
     pub(super) fn dismiss_floating(&mut self) -> Task<Message> {
+        self.dismiss_floating_layer().unwrap_or_else(Task::none)
+    }
+
+    /// 关掉最上面的一层（弹窗、菜单、拖拽、重命名、图标展开树）；什么都没关时返回 None，
+    /// Esc 据此往下一层走（清空选择）。点击外部也走这里，但不清空选择。
+    fn dismiss_floating_layer(&mut self) -> Option<Task<Message>> {
         if self.destructive_action_confirmation.is_some() {
             self.destructive_action_confirmation = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         // 接收确认 Modal 的 Escape/外部清理按拒绝收敛：服务侧挂起会话
         // 要及时释放，不能静默丢弃。
         if self.incoming_transfer.is_some() {
-            return self.reject_pending_incoming_transfer();
+            return Some(self.reject_pending_incoming_transfer());
         }
 
         // 收到的文字：Esc/外部点击关掉当前这条，下一条接着显示。
         if !self.incoming_messages.is_empty() {
             self.close_incoming_message();
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.file_drop_prompt.is_some() {
             self.file_drop_prompt = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.transfer_conflict.is_some() {
             self.transfer_conflict = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.archive_creation.is_some() {
             self.archive_creation = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.convert.is_some() {
             self.convert = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if let Some(checksum) = self.checksum.take() {
             crate::app::checksum::cancel_running_checksum(&checksum);
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.archive_extraction.is_some() {
             self.archive_extraction = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.archive_member_password.is_some() {
             self.archive_member_password = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.batch_rename.is_some() {
             self.batch_rename = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if let Some(state) = &mut self.advanced_new_folder {
@@ -608,17 +615,17 @@ impl FileBrowser {
             } else {
                 self.advanced_new_folder = None;
             }
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.network_connection_editor.is_some() {
             self.network_connection_editor = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self.open_with.is_some() {
             self.open_with = None;
-            return Task::none();
+            return Some(Task::none());
         }
 
         if self
@@ -626,7 +633,7 @@ impl FileBrowser {
             .popup_is_visible(&self.user_config.search_history)
         {
             self.search_history_interaction.dismiss_popup();
-            return Task::none();
+            return Some(Task::none());
         }
 
         let dismissed_existing_interaction = self.context_menu.is_some()
@@ -650,12 +657,22 @@ impl FileBrowser {
             self.cancel_address_editing(),
             self.commit_rename_if_active(),
         ]);
-        if !dismissed_existing_interaction {
-            if let Some(expansion_command) = self.escape_icon_grid_expansion() {
-                return Task::batch([dismiss_command, expansion_command]);
-            }
+        if dismissed_existing_interaction {
+            return Some(dismiss_command);
         }
-        dismiss_command
+        self.escape_icon_grid_expansion()
+            .map(|expansion_command| Task::batch([dismiss_command, expansion_command]))
+    }
+
+    /// Esc 的最后一层：没有别的东西可关时清空选择。弹窗、菜单开着时不会走到这里。
+    fn clear_selection_by_escape(&mut self) -> Task<Message> {
+        let tab = self.tab();
+        if tab.selected.is_none() && tab.selected_paths.is_empty() {
+            return Task::none();
+        }
+        self.clear_file_selection();
+        self.preview_engine.clear_preview();
+        Task::none()
     }
 
     pub(super) fn close_auxiliary_window(&mut self, window_id: window::Id) -> Task<Message> {

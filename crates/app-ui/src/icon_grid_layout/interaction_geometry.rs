@@ -282,6 +282,41 @@ pub(super) fn find_interactive_entry_at_point<'a>(
 }
 
 /// 上/下键的跨行落点:先找与目标行同 y 的候选,再取 x 距离最近者。
+/// 从当前项沿纵向走 `distance`（负数往上）后落到的行里离当前列最近的项：一屏之内最远的
+/// 那一行；行比一屏还高时退到紧挨着的那一行。那个方向上已经没有别的行时返回 None。
+pub(super) fn entry_one_page_away<'a>(
+    entries: &[IconGridEntryGeometry<'a>],
+    current_index: usize,
+    distance: f32,
+) -> Option<IconGridEntryGeometry<'a>> {
+    let current = entries[current_index];
+    let target_y = current.center_y + distance;
+    let moving_down = distance > 0.0;
+    // 往下时 y 越大越远，往上时 y 越小越远；统一换成“沿移动方向的距离”比较。
+    let along = |y: f32| if moving_down { y } else { -y };
+    let rows_beyond = || {
+        entries
+            .iter()
+            .map(|entry| entry.center_y)
+            .filter(|y| along(*y) > along(current.center_y) + f32::EPSILON)
+    };
+    let farthest_in_page = rows_beyond()
+        .filter(|y| along(*y) <= along(target_y))
+        .max_by(|left, right| along(*left).total_cmp(&along(*right)));
+    let nearest = rows_beyond().min_by(|left, right| along(*left).total_cmp(&along(*right)));
+    let target_row = farthest_in_page.or(nearest)?;
+    entries
+        .iter()
+        .filter(|entry| (entry.center_y - target_row).abs() <= f32::EPSILON)
+        .min_by(|left, right| {
+            (left.center_x - current.center_x)
+                .abs()
+                .total_cmp(&(right.center_x - current.center_x).abs())
+                .then_with(|| left.center_x.total_cmp(&right.center_x))
+        })
+        .copied()
+}
+
 pub(super) fn adjacent_vertical_entry<'a>(
     entries: &[IconGridEntryGeometry<'a>],
     current_index: usize,

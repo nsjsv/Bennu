@@ -28,6 +28,7 @@ pub(crate) enum ShortcutAction {
     Redo,
     FileProperties,
     SelectAll,
+    InvertSelection,
     Preview,
     ToggleRightPreviewPanel,
     ToggleTerminal,
@@ -68,7 +69,7 @@ pub(crate) enum DeclaredContext {
     FileBrowserContent,
 }
 
-const ALL_ACTIONS: [ShortcutAction; 22] = [
+const ALL_ACTIONS: [ShortcutAction; 23] = [
     ShortcutAction::NavigateBack,
     ShortcutAction::NavigateForward,
     ShortcutAction::NavigateUp,
@@ -86,6 +87,7 @@ const ALL_ACTIONS: [ShortcutAction; 22] = [
     ShortcutAction::Redo,
     ShortcutAction::FileProperties,
     ShortcutAction::SelectAll,
+    ShortcutAction::InvertSelection,
     ShortcutAction::Preview,
     ShortcutAction::ToggleRightPreviewPanel,
     ShortcutAction::ToggleTerminal,
@@ -122,6 +124,7 @@ impl ShortcutAction {
                 keys![KeyPress::alt_named(NamedKey::Enter), KeyPress::ctrl('I')]
             }
             Self::SelectAll => keys![KeyPress::ctrl('A')],
+            Self::InvertSelection => keys![KeyPress::ctrl_shift('A')],
             Self::Preview => keys![KeyPress::named(NamedKey::Space)],
             Self::ToggleRightPreviewPanel => keys![KeyPress::alt('P')],
             Self::ToggleTerminal => {
@@ -151,6 +154,7 @@ impl ShortcutAction {
             Self::Redo => tr!("Redo File Operation"),
             Self::FileProperties => tr!("Properties"),
             Self::SelectAll => tr!("Select All"),
+            Self::InvertSelection => tr!("Invert Selection"),
             Self::Preview => tr!("Preview"),
             Self::ToggleRightPreviewPanel => tr!("Toggle Preview Panel"),
             Self::ToggleTerminal => tr!("Toggle Terminal"),
@@ -177,7 +181,7 @@ impl ShortcutAction {
             | Self::Undo
             | Self::Redo
             | Self::FileProperties => ShortcutGroup::Files,
-            Self::SelectAll => ShortcutGroup::Selection,
+            Self::SelectAll | Self::InvertSelection => ShortcutGroup::Selection,
             Self::Preview | Self::ToggleRightPreviewPanel | Self::ToggleTerminal => {
                 ShortcutGroup::Panels
             }
@@ -228,6 +232,7 @@ impl ShortcutAction {
             Self::Redo => "redo",
             Self::FileProperties => "file_properties",
             Self::SelectAll => "select_all",
+            Self::InvertSelection => "invert_selection",
             Self::Preview => "preview",
             Self::ToggleRightPreviewPanel => "toggle_right_preview_panel",
             Self::ToggleTerminal => "toggle_terminal",

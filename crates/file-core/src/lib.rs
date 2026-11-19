@@ -26,6 +26,7 @@ pub mod media;
 pub mod mime;
 pub mod mount_table;
 pub mod ops;
+pub mod pinyin_initials;
 pub mod scan;
 mod seven_zip_job;
 pub mod seven_zip_password;
@@ -34,6 +35,7 @@ mod tar_job;
 pub mod text_encoding;
 pub mod transfer_conflict;
 pub mod trash_bin;
+pub mod type_ahead;
 pub mod volume;
 pub mod watch;
 

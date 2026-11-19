@@ -15,9 +15,6 @@ pub(crate) fn file_grouping_entry_visible(view_mode: BrowserViewMode) -> bool {
     matches!(view_mode, BrowserViewMode::List | BrowserViewMode::Icons)
 }
 
-#[path = "file_grouping/pinyin_initial_table.rs"]
-mod pinyin_initial_table;
-
 /// 大小分组的桶数上限；与访达一致，目录内文件再多也不超过 5 个大小段。
 pub(crate) const MAX_FILE_SIZE_GROUPS: usize = 5;
 
@@ -297,7 +294,7 @@ impl FileGroupKey {
 pub(crate) fn name_initial_group_key(name: &str) -> char {
     match name.chars().next() {
         Some(first) if first.is_ascii_alphabetic() => first.to_ascii_uppercase(),
-        Some(first) => pinyin_initial_table::gb2312_pinyin_initial(first)
+        Some(first) => file_core::pinyin_initials::pinyin_initial(first)
             .map(|initial| initial.to_ascii_uppercase())
             .unwrap_or('#'),
         None => '#',

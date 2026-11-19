@@ -2,12 +2,12 @@
 /// 表按 Unicode 码点升序，供二分查找；条目为（码点, 首字母）。
 /// 来源：GB2312 一级区（0xB0A1..=0xD7F9）按拼音分区的边界表，多音字取
 /// GB2312 排序采用的读音（如 乐 lè→l、长 cháng→c）；二级字库生僻字
-/// 不入表，由调用方兜底归 `#`。内置静态表而非引 pinyin 依赖：分组只需
-/// 首字母，为此引入整库不划算（见任务设计文档的权衡记录）。
+/// 不入表，由调用方兜底。内置静态表而非引 pinyin 依赖：按首字母分组和打字
+/// 跳转都只需首字母，为此引入整库不划算。
 /// rustfmt::skip：数据由脚本生成，每行 6 条的紧凑布局若被 rustfmt
 /// 展开成一行一条会把文件撑到 3700+ 行，破坏单文件行数约束。
 #[rustfmt::skip]
-pub(crate) static GB2312_PINYIN_INITIAL_TABLE: &[(u16, char)] = &[
+static GB2312_PINYIN_INITIAL_TABLE: &[(u16, char)] = &[
     (0x4e00, 'y'), (0x4e01, 'd'), (0x4e03, 'q'), (0x4e07, 'w'), (0x4e08, 'z'), (0x4e09, 's'),
     (0x4e0a, 's'), (0x4e0b, 'x'), (0x4e0d, 'b'), (0x4e0e, 'y'), (0x4e11, 'c'), (0x4e13, 'z'),
     (0x4e14, 'q'), (0x4e16, 's'), (0x4e18, 'q'), (0x4e19, 'b'), (0x4e1a, 'y'), (0x4e1b, 'c'),
@@ -637,7 +637,7 @@ pub(crate) static GB2312_PINYIN_INITIAL_TABLE: &[(u16, char)] = &[
 ];
 
 /// 查常用简体字的拼音首字母（小写）；表外字返回 None。
-pub(crate) fn gb2312_pinyin_initial(character: char) -> Option<char> {
+pub fn pinyin_initial(character: char) -> Option<char> {
     let code = u16::try_from(character as u32).ok()?;
     GB2312_PINYIN_INITIAL_TABLE
         .binary_search_by_key(&code, |entry| entry.0)

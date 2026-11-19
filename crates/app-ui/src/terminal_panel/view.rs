@@ -325,11 +325,17 @@ fn collapsed_strip(browser: &FileBrowser) -> Element<'_, Message> {
     ))
     .padding(4.0)
     .style(crate::appearance::transparent_button_style());
-    let content = row![pane_status_summary_strip(
+    let mut content = row![pane_status_summary_strip(
         browser.pane_status_strip_entries(),
         browser.options.include_hidden,
     )]
+    .spacing(18)
     .align_y(Vertical::Center);
+    if let Some(status) =
+        crate::view::keyboard_status::keyboard_status_label(browser, SUMMARY_TEXT_SIZE)
+    {
+        content = content.push(status);
+    }
     let content = content.push(space::Space::new().width(Length::Fill)).push(
         icon.width(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT))
             .height(Length::Fixed(BOTTOM_BAR_HEIGHT - DIVIDER_LINE_HEIGHT)),

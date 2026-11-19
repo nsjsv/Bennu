@@ -19,6 +19,7 @@ mod floating_panels;
 mod font_settings;
 mod incoming_message_panel;
 mod incoming_transfer_panel;
+pub(crate) mod keyboard_status;
 mod link_receive;
 mod local_send_address_form;
 mod local_send_devices;

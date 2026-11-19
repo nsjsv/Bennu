@@ -11,7 +11,7 @@ use crate::model::{
 use crate::shortcuts::{
     fixed_key, routing_context, CaptureRejection, CaptureSlot, FileBrowserShortcutOwnership,
     FileContentKey, FixedKey, KeyArea, KeyPress, ShortcutAction, ShortcutCaptureState,
-    ShortcutConfig, ShortcutRoutingContext,
+    ShortcutConfig, ShortcutRoutingContext, TypedLetter,
 };
 
 impl FileBrowser {
@@ -51,6 +51,16 @@ impl FileBrowser {
             return command;
         }
 
+        // 字母层：不带 Ctrl/Alt 的字符键（含别的布局的字母，它们进不了快捷键表）。
+        if let Some(letter) = TypedLetter::from_iced(&key, modifiers) {
+            return self.route_file_content_key(
+                FileContentKey::Letter(letter),
+                ShortcutRoutingContext::FileBrowserContent(
+                    FileBrowserShortcutOwnership::FocusedTextInputProbe,
+                ),
+                status,
+            );
+        }
         let Some(press) = KeyPress::from_iced(&key, modifiers) else {
             return Task::none();
         };
@@ -145,7 +155,11 @@ impl FileBrowser {
     fn invoke_file_content_key(&mut self, content_key: FileContentKey) -> Task<Message> {
         match content_key {
             FileContentKey::Action(action) => self.invoke_shortcut(action),
-            FileContentKey::Move(movement) => self.move_file_selection(movement),
+            FileContentKey::Move(movement) => {
+                self.type_ahead.clear();
+                self.move_file_selection(movement)
+            }
+            FileContentKey::Letter(letter) => self.jump_to_typed_name(letter.character),
         }
     }
 

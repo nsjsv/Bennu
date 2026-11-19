@@ -496,6 +496,8 @@ pub(crate) enum Message {
         status: event::Status,
     },
     FileContentKeyRouted(FileContentKey),
+    /// 打字跳转停了 1 秒：清掉缓冲（界面上那段字跟着消失）。
+    TypeAheadDeadlinePassed,
     ShortcutCaptureStarted(ShortcutAction, CaptureSlot),
     ShortcutCaptureCanceled,
     ShortcutCapturedKeyRemoved,

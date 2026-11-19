@@ -664,8 +664,13 @@ impl FileBrowser {
             .map(|expansion_command| Task::batch([dismiss_command, expansion_command]))
     }
 
-    /// Esc 的最后一层：没有别的东西可关时清空选择。弹窗、菜单开着时不会走到这里。
+    /// Esc 的最后几层：没有别的东西可关时，先清掉打字跳转的缓冲，再清空选择。弹窗、菜单
+    /// 开着时不会走到这里。
     fn clear_selection_by_escape(&mut self) -> Task<Message> {
+        if self.type_ahead.is_active(std::time::Instant::now()) {
+            self.type_ahead.clear();
+            return Task::none();
+        }
         let tab = self.tab();
         if tab.selected.is_none() && tab.selected_paths.is_empty() {
             return Task::none();

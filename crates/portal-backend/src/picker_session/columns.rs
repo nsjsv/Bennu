@@ -537,16 +537,17 @@ impl PickerSession {
 
     /// type-ahead 匹配：缓冲归 keyboard_nav（与列表共享），匹配范围
     /// 限定焦点栏。
-    pub(crate) fn columns_type_ahead_match(&mut self, needle: String) -> SessionEffect {
+    pub(crate) fn columns_type_ahead_match(
+        &mut self,
+        query: &file_core::type_ahead::TypeAheadQuery,
+    ) -> SessionEffect {
         let lane = self.columns.focused();
-        let matched = self.column_entries_iter(lane).position(|entry| {
-            entry
-                .name()
-                .to_string_lossy()
-                .to_lowercase()
-                .contains(&needle)
-        });
-        match matched {
+        let names = self
+            .column_entries_iter(lane)
+            .map(|entry| entry.name().to_string_lossy())
+            .collect::<Vec<_>>();
+        let current = self.columns.cursor(lane);
+        match file_core::type_ahead::find_match(&names, current, query) {
             Some(index) => self.columns_place_cursor(lane, index),
             None => SessionEffect::None,
         }

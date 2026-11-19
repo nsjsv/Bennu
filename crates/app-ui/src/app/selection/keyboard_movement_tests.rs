@@ -464,3 +464,144 @@ fn invert_selection_flips_the_select_all_scope() {
     drop(browser.invert_selection_in_file_selection_scope());
     assert_eq!(selected_indices(&browser), [1]);
 }
+
+fn named_entry(name: &str, kind: FileKind) -> DirectoryEntry {
+    DirectoryEntry::new(
+        PathBuf::from("/workspace").join(name),
+        kind,
+        EntryMetadata::default(),
+        false,
+        false,
+        false,
+    )
+}
+
+fn browser_with_names(view_mode: BrowserViewMode, names: &[&str]) -> FileBrowser {
+    let mut browser = browser_with_entries(view_mode, 0);
+    browser.tab_mut().entries = names
+        .iter()
+        .map(|name| named_entry(name, FileKind::File))
+        .collect::<Vec<_>>()
+        .into();
+    browser
+}
+
+fn selected_name(browser: &FileBrowser) -> Option<String> {
+    browser
+        .tab()
+        .selected
+        .as_ref()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+}
+
+fn type_text(browser: &mut FileBrowser, typed: &str) {
+    for character in typed.chars() {
+        drop(browser.jump_to_typed_name(character));
+    }
+}
+
+#[test]
+fn typing_jumps_to_the_first_name_starting_with_it() {
+    let mut browser = browser_with_names(
+        BrowserViewMode::List,
+        &["apple.txt", "notes.txt", "report.pdf", "readme.md"],
+    );
+    type_text(&mut browser, "re");
+    assert_eq!(selected_name(&browser).as_deref(), Some("report.pdf"));
+    type_text(&mut browser, "a");
+    assert_eq!(selected_name(&browser).as_deref(), Some("readme.md"));
+    assert_eq!(browser.type_ahead.typed(), "rea");
+
+    // 没有匹配就不动，缓冲留着（可能还没打完）。
+    type_text(&mut browser, "z");
+    assert_eq!(selected_name(&browser).as_deref(), Some("readme.md"));
+}
+
+#[test]
+fn typing_the_same_letter_again_cycles_through_its_names() {
+    let mut browser = browser_with_names(
+        BrowserViewMode::List,
+        &["apple.txt", "notes.txt", "april.txt", "avocado.txt"],
+    );
+    type_text(&mut browser, "a");
+    assert_eq!(selected_name(&browser).as_deref(), Some("apple.txt"));
+    type_text(&mut browser, "a");
+    assert_eq!(selected_name(&browser).as_deref(), Some("april.txt"));
+    type_text(&mut browser, "aa");
+    assert_eq!(selected_name(&browser).as_deref(), Some("apple.txt"));
+}
+
+#[test]
+fn typing_pinyin_initials_finds_chinese_names() {
+    let mut browser = browser_with_names(BrowserViewMode::Icons, &["文档", "下载", "音乐"]);
+    type_text(&mut browser, "xz");
+    assert_eq!(selected_name(&browser).as_deref(), Some("下载"));
+}
+
+#[test]
+fn typing_in_columns_stays_in_the_current_column() {
+    let mut browser = browser_with_entries(BrowserViewMode::Columns, 0);
+    let projects = PathBuf::from("/workspace/projects");
+    browser.tab_mut().entries = vec![
+        named_entry("projects", FileKind::Directory),
+        named_entry("zebra.txt", FileKind::File),
+    ]
+    .into();
+    browser.tab_mut().expanded_directories.insert(
+        projects.clone(),
+        expanded_directory(
+            vec![
+                DirectoryEntry::new(
+                    projects.join("alpha"),
+                    FileKind::File,
+                    EntryMetadata::default(),
+                    false,
+                    false,
+                    false,
+                ),
+                DirectoryEntry::new(
+                    projects.join("zulu"),
+                    FileKind::File,
+                    EntryMetadata::default(),
+                    false,
+                    false,
+                    false,
+                ),
+            ],
+            1.0,
+        ),
+    );
+    browser.tab_mut().deepest_open_column_directory = Some(projects.clone());
+    browser.select_path(projects.join("alpha"));
+    browser.focused_column_directory = Some(projects.clone());
+
+    type_text(&mut browser, "z");
+    assert_eq!(browser.tab().selected, Some(projects.join("zulu")));
+}
+
+#[test]
+fn escape_clears_what_was_typed_before_the_selection() {
+    let mut browser = browser_with_names(BrowserViewMode::List, &["apple.txt", "notes.txt"]);
+    type_text(&mut browser, "n");
+    assert_eq!(selected_name(&browser).as_deref(), Some("notes.txt"));
+
+    drop(browser.handle_escape_shortcut());
+    assert_eq!(browser.type_ahead.typed(), "");
+    assert_eq!(selected_name(&browser).as_deref(), Some("notes.txt"));
+
+    drop(browser.handle_escape_shortcut());
+    assert!(browser.tab().selected.is_none());
+}
+
+#[test]
+fn letters_captured_by_a_text_field_never_jump() {
+    let mut browser = browser_with_names(BrowserViewMode::List, &["apple.txt", "notes.txt"]);
+    drop(browser.handle_keyboard_key_pressed(
+        iced::keyboard::Key::Character("n".into()),
+        iced::keyboard::Modifiers::default(),
+        iced::event::Status::Captured,
+    ));
+    assert!(browser.tab().selected.is_none());
+    assert_eq!(browser.type_ahead.typed(), "");
+}

@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
+use file_core::type_ahead;
 use iced::Task;
 
 use super::super::{FileBrowser, PendingKeyboardColumnFocus};
@@ -136,6 +138,68 @@ impl FileBrowser {
             }
             // 扩选时不打开经过的目录的下一栏：选中的是一串项，没有哪一个是“当前打开的”。
             MoveExtent::FromAnchor => self.extend_selection_from_keyboard(target),
+        }
+    }
+
+    /// 打字跳转：在移动键走的同一串项里（列表的可见行、图标的格子、多栏的当前栏）找名字
+    /// 以所打内容开头的项，跳过去单选它。到截止时刻发一条消息清掉显示的缓冲。
+    pub(in crate::app) fn jump_to_typed_name(&mut self, typed: char) -> Task<Message> {
+        let query = self.type_ahead.push(typed, Instant::now());
+        let expire = Task::perform(
+            async { tokio::time::sleep(type_ahead::RESET_AFTER).await },
+            |()| Message::TypeAheadDeadlinePassed,
+        );
+        let paths = self.keyboard_move_sequence();
+        let names = paths
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .map(|name| name.to_string_lossy())
+                    .unwrap_or_default()
+            })
+            .collect::<Vec<_>>();
+        let current = self
+            .tab()
+            .selected
+            .as_ref()
+            .and_then(|selected| paths.iter().position(|path| path == selected));
+        let Some(index) = type_ahead::find_match(&names, current, &query) else {
+            return expire;
+        };
+        let target = paths[index].clone();
+        Task::batch([self.jump_keyboard_cursor_to(target), expire])
+    }
+
+    /// 移动键在当前视图里走的那一串项。
+    fn keyboard_move_sequence(&self) -> Vec<PathBuf> {
+        match self.tab().view_mode() {
+            BrowserViewMode::Columns => self
+                .keyboard_column_directory()
+                .map(|directory| self.entry_paths_in_directory(&directory))
+                .unwrap_or_default(),
+            BrowserViewMode::List | BrowserViewMode::Icons => self.visible_entry_paths(),
+        }
+    }
+
+    /// 光标直接落到某一项（不是一步步走过去），各视图的收尾和移动键一样。
+    fn jump_keyboard_cursor_to(&mut self, target: PathBuf) -> Task<Message> {
+        match self.tab().view_mode() {
+            BrowserViewMode::Columns => {
+                let scroll_task = self.select_path_from_keyboard(target.clone());
+                Task::batch([scroll_task, self.open_column_for_keyboard_selection(target)])
+            }
+            BrowserViewMode::Icons => {
+                let directory = self.entry_parent_directory(&target);
+                if let Some(state) = self.icon_grid_expansion.as_mut() {
+                    state.set_selection_directory(&directory);
+                }
+                let scroll_task = self.select_path_from_keyboard(target);
+                Task::batch([scroll_task, self.schedule_thumbnail_refresh()])
+            }
+            BrowserViewMode::List => {
+                let scroll_task = self.select_path_from_keyboard(target);
+                Task::batch([scroll_task, self.schedule_thumbnail_refresh()])
+            }
         }
     }
 

@@ -572,6 +572,10 @@ impl FileBrowser {
             Message::FileContentKeyRouted(content_key) => {
                 self.invoke_routed_file_content_key(content_key)
             }
+            Message::TypeAheadDeadlinePassed => {
+                self.type_ahead.expire(std::time::Instant::now());
+                Task::none()
+            }
             Message::ShortcutCaptureStarted(action, slot) => {
                 self.start_shortcut_capture(action, slot)
             }

@@ -11,12 +11,43 @@ pub(crate) use fixed_keys::{
 pub(crate) use key_press::{KeyPress, NamedKey, ShortcutKey};
 pub(crate) use keymap::{KeyArea, ShortcutConfig};
 
-/// 一次落到文件区的按键：可改键的命令，或固定的移动键。经文本焦点探测后以
-/// `Message::FileContentKeyRouted` 回到 update。
+/// 一次落到文件区的按键：可改键的命令、固定的移动键，或字母层的一个字符。经文本焦点探测
+/// 后以 `Message::FileContentKeyRouted` 回到 update。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FileContentKey {
     Action(ShortcutAction),
     Move(SelectionMove),
+    Letter(TypedLetter),
+}
+
+/// 字母层收到的字符：不带 Ctrl/Alt 的字符键。`character` 是键盘布局给的不带修饰的字符
+/// （Shift 另记），别的布局的字母也照样收。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TypedLetter {
+    pub(crate) character: char,
+    pub(crate) shift: bool,
+}
+
+impl TypedLetter {
+    pub(crate) fn from_iced(
+        key: &iced::keyboard::Key,
+        modifiers: iced::keyboard::Modifiers,
+    ) -> Option<Self> {
+        if modifiers.control() || modifiers.alt() || modifiers.logo() {
+            return None;
+        }
+        let iced::keyboard::Key::Character(value) = key.as_ref() else {
+            return None;
+        };
+        let character = value
+            .chars()
+            .next()
+            .filter(|character| !character.is_control())?;
+        Some(Self {
+            character,
+            shift: modifiers.shift(),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

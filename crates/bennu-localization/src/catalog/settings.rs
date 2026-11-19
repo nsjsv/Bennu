@@ -146,6 +146,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Home Folder", "主目录"),
     ("Show or Hide Hidden Files", "显示 / 隐藏隐藏文件"),
     ("Show or Hide Sidebar", "显示 / 隐藏侧栏"),
+    ("Jump to: %1", "跳转：%1"),
     ("Open in New Tab", "在新标签页打开"),
     ("New Tab", "新建标签页"),
     ("Close Tab", "关闭标签页"),

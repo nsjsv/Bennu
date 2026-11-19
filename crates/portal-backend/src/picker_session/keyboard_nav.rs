@@ -1,19 +1,19 @@
 //! 列表键盘导航：光标移动（↑/↓/Home/End/PageUp/PageDown）、type-ahead
-//! 子串跳转与滚动跟随。选中语义不另立规则——光标落行统一走
+//! 跳转与滚动跟随。选中语义不另立规则——光标落行统一走
 //! `click_entry(row, false, false)`，与鼠标单击同源（三模式种类门控、
 //! SaveFile 文件名同步都在那里维护）；本模块只拥有键盘特有的状态：
-//! 光标行、type-ahead 缓冲（1s 截止，惰性过期，不挂定时器）。
+//! 光标行、type-ahead 缓冲（缓冲和匹配规则与主程序同一份：
+//! `file_core::type_ahead`，惰性过期，不挂定时器）。
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use bennu_theme::icon_grid_geometry::IconGridDirection;
 use file_core::entry::FileKind;
+use file_core::type_ahead::{self, TypeAheadBuffer, TypeAheadQuery};
 
 use super::scrollbar::SessionScrollRegion;
 use super::{PickerKind, PickerSession, PickerViewMode, SessionEffect, SessionMessage};
 
-/// type-ahead 截止时长：约 1s 无后续输入即重置缓冲（资源管理器惯例）。
-const TYPE_AHEAD_RESET_AFTER: Duration = Duration::from_millis(1000);
 /// 视口缓存缺失（首帧探针未回）时的翻页步长回落值（行）。
 pub(super) const PAGE_FALLBACK_ROWS: isize = 10;
 
@@ -22,10 +22,7 @@ pub(super) const PAGE_FALLBACK_ROWS: isize = 10;
 pub(crate) struct KeyboardNavState {
     /// 键盘光标行；None = 本目录尚未开始键盘导航。
     cursor: Option<usize>,
-    /// type-ahead 缓冲（匹配时才小写化，这里保留原始输入）。
-    type_ahead: String,
-    /// 缓冲截止时刻；惰性过期——只在下一次输入/查询时检查。
-    type_ahead_deadline: Option<Instant>,
+    type_ahead: TypeAheadBuffer,
 }
 
 impl KeyboardNavState {
@@ -46,40 +43,17 @@ impl KeyboardNavState {
 
     /// 缓冲是否仍活跃（非空且未过截止）；过期缓冲对 Esc 路由不可见。
     fn is_type_ahead_active(&self) -> bool {
-        !self.type_ahead.is_empty()
-            && self
-                .type_ahead_deadline
-                .is_some_and(|deadline| deadline > Instant::now())
-    }
-
-    /// 追加一个字符；截止已过则先重置再追加（惰性过期，无需定时器）。
-    fn push_type_ahead(&mut self, ch: char, now: Instant) {
-        if self
-            .type_ahead_deadline
-            .is_none_or(|deadline| deadline <= now)
-        {
-            self.type_ahead.clear();
-        }
-        self.type_ahead.push(ch);
-        self.type_ahead_deadline = Some(now + TYPE_AHEAD_RESET_AFTER);
+        self.type_ahead.is_active(Instant::now())
     }
 
     pub(crate) fn clear_type_ahead(&mut self) {
         self.type_ahead.clear();
-        self.type_ahead_deadline = None;
     }
 
-    /// 当前缓冲的小写匹配串。
-    fn type_ahead_needle(&self) -> String {
-        self.type_ahead.to_lowercase()
-    }
-
-    /// 追加一个字符并返回当前缓冲的小写匹配串（列表与多栏 type-ahead
-    /// 共用的入口：缓冲归 keyboard_nav，匹配范围由调用方按焦点行集
-    /// 决定）。
-    pub(crate) fn advance_type_ahead(&mut self, ch: char) -> String {
-        self.push_type_ahead(ch, Instant::now());
-        self.type_ahead_needle()
+    /// 追加一个字符，返回这次要找什么（列表与多栏 type-ahead 共用的入口：缓冲归
+    /// keyboard_nav，匹配范围由调用方按焦点行集决定）。
+    pub(crate) fn advance_type_ahead(&mut self, ch: char) -> TypeAheadQuery {
+        self.type_ahead.push(ch, Instant::now())
     }
 }
 
@@ -117,21 +91,19 @@ impl PickerSession {
         self.move_list_cursor_by_rows(pages.saturating_mul(self.list_page_rows()))
     }
 
-    /// type-ahead 字符输入：累积收窄并跳首个匹配行；无匹配保持原位且
-    /// 不清缓冲（用户可能处在更长输入的中间态）。多栏下匹配焦点栏。
+    /// type-ahead 字符输入：从光标行起找名字以所打内容开头的行（同字母连打轮流跳）；
+    /// 无匹配保持原位且不清缓冲（用户可能处在更长输入的中间态）。多栏下匹配焦点栏。
     pub(crate) fn push_type_ahead_char(&mut self, ch: char) -> SessionEffect {
-        let needle = self.keyboard_nav.advance_type_ahead(ch);
+        let query = self.keyboard_nav.advance_type_ahead(ch);
         if self.view_mode() == PickerViewMode::Columns {
-            return self.columns_type_ahead_match(needle);
+            return self.columns_type_ahead_match(&query);
         }
-        let matched = self.rows.iter().position(|row| {
-            row.entry
-                .name()
-                .to_string_lossy()
-                .to_lowercase()
-                .contains(&needle)
-        });
-        match matched {
+        let names = self
+            .rows
+            .iter()
+            .map(|row| row.entry.name().to_string_lossy())
+            .collect::<Vec<_>>();
+        match type_ahead::find_match(&names, self.keyboard_nav.cursor, &query) {
             Some(index) => self.place_list_cursor(index),
             None => SessionEffect::None,
         }
@@ -280,36 +252,6 @@ impl PickerSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn type_ahead_expires_lazily_on_next_input() {
-        let mut state = KeyboardNavState::default();
-        let now = Instant::now();
-        state.push_type_ahead('a', now);
-        assert_eq!(state.type_ahead_needle(), "a");
-
-        // 截止已过：下一次输入先重置再追加，而不是续接旧缓冲。
-        let later = now + TYPE_AHEAD_RESET_AFTER + Duration::from_millis(1);
-        state.push_type_ahead('b', later);
-        assert_eq!(state.type_ahead_needle(), "b");
-    }
-
-    #[test]
-    fn type_ahead_is_active_respects_deadline() {
-        let mut state = KeyboardNavState::default();
-        assert!(!state.is_type_ahead_active());
-
-        state.push_type_ahead('a', Instant::now());
-        assert!(state.is_type_ahead_active());
-
-        // 过期后缓冲虽在，活跃判定为假：Esc 不再吞掉关窗。
-        state.type_ahead_deadline = Some(Instant::now() - Duration::from_millis(1));
-        assert!(!state.is_type_ahead_active());
-
-        state.clear_type_ahead();
-        assert!(!state.is_type_ahead_active());
-        assert_eq!(state.type_ahead_needle(), "");
-    }
 
     #[test]
     fn revalidate_cursor_clamps_and_clears() {

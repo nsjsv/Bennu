@@ -97,6 +97,15 @@ fn layers_step_away_from_the_window_in_order() {
                 && distance(roles.surface_dim) > 1.04,
             "{preset:?} {mode:?}: sidebar"
         );
+        // 自带配色的层次是这里算的，要主次一眼分得开：1.06 时白底内容区和侧栏几乎分不出
+        // （2026-11-18）。Matugen 的侧栏色来自外部配色文件，不归这里管。
+        if preset != ColorSchemePreset::Matugen {
+            assert!(
+                distance(roles.surface_dim) > 1.08,
+                "{preset:?} {mode:?}: sidebar {}",
+                distance(roles.surface_dim)
+            );
+        }
     }
 }
 

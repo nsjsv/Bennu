@@ -36,10 +36,12 @@ struct Layers {
     status_container: f32,
 }
 
-// 默认配色（白底 #0d0d0d 字）下：侧栏 #f9f9f9、卡片 #f4f4f4、悬停 #ececec、按下 #e3e3e3、
+// 默认配色（白底 #0d0d0d 字）下：侧栏 #f3f3f3、卡片 #f4f4f4、悬停 #ececec、按下 #e3e3e3、
 // 分隔线 #e5e5e5、次要文字 #5d5d5d。
+// 侧栏和内容区的对比度约 1.11，和深色下（#171717 / #212121）一样；0.02 时只有 1.06，白色内容区
+// 和侧栏几乎分不出主次（2026-11-18）。再深的话侧栏里的悬停（#ececec）就看不出来了。
 const LIGHT_LAYERS: Layers = Layers {
-    recessed: 0.02,
+    recessed: 0.035,
     low: 0.03,
     card: 0.04,
     hover: 0.07,

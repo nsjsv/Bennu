@@ -6,7 +6,8 @@ use bennu_theme::smooth_scroll::{SmoothScroll, SmoothScrollAxis};
 use iced::{mouse, Task};
 
 use super::FileBrowser;
-use crate::model::{Message, ScrollbarRegion};
+use crate::config::ViewDensityLevel;
+use crate::model::{BrowserViewMode, Message, ScrollbarRegion};
 
 impl FileBrowser {
     /// 浏览内容区的 Ctrl+滚轮：每个非零事件走一档密度，边界档位静默保持；立即走用户偏好保存队列。
@@ -21,20 +22,37 @@ impl FileBrowser {
         let Some(step) = view_density_step_from_wheel(delta) else {
             return Task::none();
         };
-        let current = match target {
-            ViewDensityTarget::Columns => self.user_config.columns_view_density,
-            ViewDensityTarget::List => self.user_config.list_view_density,
-            ViewDensityTarget::Icons => self.user_config.icons_view_density,
+        self.change_view_density(target, |current| current.step(step))
+    }
+
+    /// Ctrl+= / Ctrl+- / Ctrl+0：调活动标签页当前视图的档位，和 Ctrl+滚轮是同一组档位。
+    pub(super) fn change_active_view_density(
+        &mut self,
+        next: impl FnOnce(ViewDensityLevel) -> ViewDensityLevel,
+    ) -> Task<Message> {
+        let target = match self.tab().view_mode() {
+            BrowserViewMode::Columns => ViewDensityTarget::Columns,
+            BrowserViewMode::List => ViewDensityTarget::List,
+            BrowserViewMode::Icons => ViewDensityTarget::Icons,
         };
-        let next = current.step(step);
-        if next == current {
+        self.change_view_density(target, next)
+    }
+
+    fn change_view_density(
+        &mut self,
+        target: ViewDensityTarget,
+        next: impl FnOnce(ViewDensityLevel) -> ViewDensityLevel,
+    ) -> Task<Message> {
+        let density = match target {
+            ViewDensityTarget::Columns => &mut self.user_config.columns_view_density,
+            ViewDensityTarget::List => &mut self.user_config.list_view_density,
+            ViewDensityTarget::Icons => &mut self.user_config.icons_view_density,
+        };
+        let changed = next(*density);
+        if changed == *density {
             return Task::none();
         }
-        match target {
-            ViewDensityTarget::Columns => self.user_config.columns_view_density = next,
-            ViewDensityTarget::List => self.user_config.list_view_density = next,
-            ViewDensityTarget::Icons => self.user_config.icons_view_density = next,
-        }
+        *density = changed;
         // 换档改变可见范围，三种视图统一重新调度可见缩略图。
         Task::batch([
             self.persist_user_preferences_command(),

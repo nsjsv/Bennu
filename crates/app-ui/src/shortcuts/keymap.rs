@@ -55,7 +55,7 @@ impl ShortcutConfig {
     }
 
     pub(crate) fn keys(&self, action: ShortcutAction) -> &[KeyPress] {
-        &self.effective[action_index(action)]
+        &self.effective[action.index()]
     }
 
     pub(crate) fn is_customized(&self, action: ShortcutAction) -> bool {
@@ -97,13 +97,6 @@ impl ShortcutConfig {
         self.overrides.remove(&action);
         self.effective = effective_keys(&self.overrides);
     }
-}
-
-fn action_index(action: ShortcutAction) -> usize {
-    ShortcutAction::all()
-        .iter()
-        .position(|candidate| *candidate == action)
-        .expect("every action is listed in ShortcutAction::all")
 }
 
 /// 改过的动作用用户的键；没改过的用默认键，但用户已经拿去给别的动作（作用域重叠）的键

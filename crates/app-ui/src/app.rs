@@ -68,6 +68,7 @@ mod search_paths;
 mod selection;
 mod session_persistence;
 mod session_restore;
+mod shortcut_commands;
 mod shortcuts;
 mod sidebar_bookmarks;
 mod sidebar_devices;

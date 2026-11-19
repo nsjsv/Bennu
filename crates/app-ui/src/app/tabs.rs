@@ -14,6 +14,8 @@ mod animation;
 pub(crate) use animation::{TabAnimationState, TabBarReveal};
 use animation::{TAB_REORDER_HORIZONTAL_PADDING, TAB_REORDER_MIN_SLOT_WIDTH, TAB_REORDER_SPACING};
 mod folder_middle_click_split;
+mod keyboard_tabs;
+pub(super) use keyboard_tabs::TabDirection;
 #[cfg(test)]
 mod view_mode_follow_tests;
 #[cfg(test)]
@@ -260,17 +262,22 @@ impl FileBrowser {
         let Some(entered_index) = tabs.iter().position(|tab| tab.id == entered_tab_id) else {
             return Task::none();
         };
+        self.move_tab_within_pane(dragged_index, entered_index)
+    }
 
-        let shifted_tab_ids = self.shifted_tab_ids_for_reorder(dragged_index, entered_index);
-        let shift_offset = if dragged_index < entered_index {
+    /// 把活动窗格第 `from` 个标签页挪到第 `to` 个，中间的标签页带动画让位。拖动重排和
+    /// 键盘左移右移共用。
+    fn move_tab_within_pane(&mut self, from: usize, to: usize) -> Task<Message> {
+        let shifted_tab_ids = self.shifted_tab_ids_for_reorder(from, to);
+        let shift_offset = if from < to {
             self.tab_reorder_slot_width()
         } else {
             -self.tab_reorder_slot_width()
         };
 
         let tabs = &mut self.pane_mut().tabs;
-        let dragged_tab = tabs.remove(dragged_index);
-        tabs.insert(entered_index, dragged_tab);
+        let moved_tab = tabs.remove(from);
+        tabs.insert(to, moved_tab);
         self.start_tab_reorder_animations(shifted_tab_ids, shift_offset);
         // 标签顺序属于会话模型；重排落点必须标记保存，否则重启后顺序回退。
         self.request_browser_session_save()

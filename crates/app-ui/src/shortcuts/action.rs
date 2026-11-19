@@ -1,37 +1,53 @@
 use super::key_press::{KeyPress, NamedKey};
 
-/// 默认键表：常量函数的调用结果不会自动提升成 `'static`，放进常量项。
-macro_rules! keys {
-    ($($key:expr),* $(,)?) => {{
-        const KEYS: &[KeyPress] = &[$($key),*];
-        KEYS
-    }};
-}
-
 /// 能在设置里改键的命令。移动键、Esc、Alt+数字是固定键（`fixed_keys`），字母层另算。
+/// 变体顺序就是 `ACTIONS` 的行序（设置页和一览按它排），两者靠测试对齐。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ShortcutAction {
     NavigateBack,
     NavigateForward,
     NavigateUp,
+    NavigateHome,
     FocusPathInput,
+    Search,
     Refresh,
+    ToggleHiddenFiles,
     OpenSelected,
+    OpenInNewTab,
     RenameSelected,
+    NewFolder,
+    NewFile,
+    NewFolderFromSelection,
     Copy,
     Cut,
     Paste,
     DuplicateSelected,
-    NewFolderFromSelection,
+    CopyPath,
+    CreateSymlink,
     Delete,
+    DeletePermanently,
     Undo,
     Redo,
     FileProperties,
+    AddToFavorites,
     SelectAll,
     InvertSelection,
+    NewTab,
+    NextTab,
+    PreviousTab,
+    MoveTabLeft,
+    MoveTabRight,
+    ColumnsView,
+    ListView,
+    IconsView,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
     Preview,
     ToggleRightPreviewPanel,
     ToggleTerminal,
+    OpenExternalTerminal,
+    OpenSettings,
     TerminalNewTab,
     TerminalCloseTab,
 }
@@ -42,6 +58,8 @@ pub(crate) enum ShortcutGroup {
     Navigation,
     Files,
     Selection,
+    TabsAndWindows,
+    View,
     Panels,
     Terminal,
 }
@@ -61,191 +79,539 @@ impl ShortcutScope {
     }
 }
 
-/// 输入框被别的控件捕获时还执行不执行：`Application` 照样执行（导航、面板），
-/// `FileBrowserContent` 让给控件，并且要先确认没有文本框焦点。编辑键另有规则，见 `routing`。
+/// 输入框被别的控件捕获时还执行不执行：`Application` 照样执行（导航、标签页、视图、面板），
+/// `FileBrowserContent` 让给控件，并且要先确认没有文本框焦点。编辑键另有规则，见 `routing_context`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeclaredContext {
     Application,
     FileBrowserContent,
 }
 
-const ALL_ACTIONS: [ShortcutAction; 23] = [
-    ShortcutAction::NavigateBack,
-    ShortcutAction::NavigateForward,
-    ShortcutAction::NavigateUp,
-    ShortcutAction::FocusPathInput,
-    ShortcutAction::Refresh,
-    ShortcutAction::OpenSelected,
-    ShortcutAction::RenameSelected,
-    ShortcutAction::Copy,
-    ShortcutAction::Cut,
-    ShortcutAction::Paste,
-    ShortcutAction::DuplicateSelected,
-    ShortcutAction::NewFolderFromSelection,
-    ShortcutAction::Delete,
-    ShortcutAction::Undo,
-    ShortcutAction::Redo,
-    ShortcutAction::FileProperties,
-    ShortcutAction::SelectAll,
-    ShortcutAction::InvertSelection,
-    ShortcutAction::Preview,
-    ShortcutAction::ToggleRightPreviewPanel,
-    ShortcutAction::ToggleTerminal,
-    ShortcutAction::TerminalNewTab,
-    ShortcutAction::TerminalCloseTab,
+struct ActionSpec {
+    action: ShortcutAction,
+    /// 存储里的名字；改名要在 `overrides` 的旧数据迁移里留旧名。
+    config_key: &'static str,
+    label: fn() -> String,
+    group: ShortcutGroup,
+    scope: ShortcutScope,
+    context: DeclaredContext,
+    keys: &'static [KeyPress],
+}
+
+use DeclaredContext::{Application as App, FileBrowserContent as Content};
+use ShortcutGroup as G;
+use ShortcutScope::FileBrowser as Browser;
+
+const fn ctrl_named(key: NamedKey) -> KeyPress {
+    KeyPress {
+        control: true,
+        ..KeyPress::named(key)
+    }
+}
+
+const fn ctrl_shift_named(key: NamedKey) -> KeyPress {
+    KeyPress {
+        control: true,
+        shift: true,
+        ..KeyPress::named(key)
+    }
+}
+
+const fn shift_named(key: NamedKey) -> KeyPress {
+    KeyPress {
+        shift: true,
+        ..KeyPress::named(key)
+    }
+}
+
+const fn ctrl_alt(character: char) -> KeyPress {
+    KeyPress {
+        alt: true,
+        ..KeyPress::ctrl(character)
+    }
+}
+
+const ACTIONS: &[ActionSpec] = &[
+    ActionSpec {
+        action: ShortcutAction::NavigateBack,
+        config_key: "navigate_back",
+        label: || tr!("Back"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::alt_named(NamedKey::ArrowLeft)],
+    },
+    ActionSpec {
+        action: ShortcutAction::NavigateForward,
+        config_key: "navigate_forward",
+        label: || tr!("Forward"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::alt_named(NamedKey::ArrowRight)],
+    },
+    ActionSpec {
+        action: ShortcutAction::NavigateUp,
+        config_key: "navigate_up",
+        label: || tr!("Up Folder"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[
+            KeyPress::alt_named(NamedKey::ArrowUp),
+            KeyPress::named(NamedKey::Backspace),
+        ],
+    },
+    ActionSpec {
+        action: ShortcutAction::NavigateHome,
+        config_key: "navigate_home",
+        label: || tr!("Home Folder"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::alt_named(NamedKey::Home)],
+    },
+    ActionSpec {
+        action: ShortcutAction::FocusPathInput,
+        config_key: "focus_path_input",
+        label: || tr!("Focus Path"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('L')],
+    },
+    ActionSpec {
+        action: ShortcutAction::Search,
+        config_key: "search",
+        label: || tr!("Search"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('F')],
+    },
+    ActionSpec {
+        action: ShortcutAction::Refresh,
+        config_key: "refresh",
+        label: || tr!("Refresh"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::named(NamedKey::Function(5)), KeyPress::ctrl('R')],
+    },
+    ActionSpec {
+        action: ShortcutAction::ToggleHiddenFiles,
+        config_key: "toggle_hidden_files",
+        label: || tr!("Show or Hide Hidden Files"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('H')],
+    },
+    ActionSpec {
+        action: ShortcutAction::OpenSelected,
+        config_key: "open_selected",
+        label: || tr!("Open"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::named(NamedKey::Enter)],
+    },
+    ActionSpec {
+        action: ShortcutAction::OpenInNewTab,
+        config_key: "open_in_new_tab",
+        label: || tr!("Open in New Tab"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[ctrl_named(NamedKey::Enter)],
+    },
+    ActionSpec {
+        action: ShortcutAction::RenameSelected,
+        config_key: "rename_selected",
+        label: || tr!("Rename"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::named(NamedKey::Function(2))],
+    },
+    ActionSpec {
+        action: ShortcutAction::NewFolder,
+        config_key: "new_folder",
+        label: || tr!("New Folder"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl_shift('N')],
+    },
+    ActionSpec {
+        action: ShortcutAction::NewFile,
+        config_key: "new_file",
+        label: || tr!("New File"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[ctrl_alt('N')],
+    },
+    ActionSpec {
+        action: ShortcutAction::NewFolderFromSelection,
+        config_key: "new_folder_from_selection",
+        label: || tr!("New Folder with Selection"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('G')],
+    },
+    ActionSpec {
+        action: ShortcutAction::Copy,
+        config_key: "copy",
+        label: || tr!("Copy"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('C'), KeyPress::named(NamedKey::Copy)],
+    },
+    ActionSpec {
+        action: ShortcutAction::Cut,
+        config_key: "cut",
+        label: || tr!("Cut"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('X'), KeyPress::named(NamedKey::Cut)],
+    },
+    ActionSpec {
+        action: ShortcutAction::Paste,
+        config_key: "paste",
+        label: || tr!("Paste"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('V'), KeyPress::named(NamedKey::Paste)],
+    },
+    ActionSpec {
+        action: ShortcutAction::DuplicateSelected,
+        config_key: "duplicate_selected",
+        label: || tr!("Duplicate"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('D')],
+    },
+    ActionSpec {
+        action: ShortcutAction::CopyPath,
+        config_key: "copy_path",
+        label: || tr!("Copy Path"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[ctrl_alt('C')],
+    },
+    ActionSpec {
+        action: ShortcutAction::CreateSymlink,
+        config_key: "create_symlink",
+        label: || tr!("Create Symbolic Link"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('M')],
+    },
+    ActionSpec {
+        action: ShortcutAction::Delete,
+        config_key: "delete",
+        label: || tr!("Move to Trash"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::named(NamedKey::Delete)],
+    },
+    ActionSpec {
+        action: ShortcutAction::DeletePermanently,
+        config_key: "delete_permanently",
+        label: || tr!("Delete Permanently"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[shift_named(NamedKey::Delete)],
+    },
+    ActionSpec {
+        action: ShortcutAction::Undo,
+        config_key: "undo",
+        label: || tr!("Undo File Operation"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('Z')],
+    },
+    ActionSpec {
+        action: ShortcutAction::Redo,
+        config_key: "redo",
+        label: || tr!("Redo File Operation"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl_shift('Z'), KeyPress::ctrl('Y')],
+    },
+    ActionSpec {
+        action: ShortcutAction::FileProperties,
+        config_key: "file_properties",
+        label: || tr!("Properties"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::alt_named(NamedKey::Enter), KeyPress::ctrl('I')],
+    },
+    ActionSpec {
+        action: ShortcutAction::AddToFavorites,
+        config_key: "add_to_favorites",
+        label: || tr!("Add to Favorites"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('B')],
+    },
+    ActionSpec {
+        action: ShortcutAction::SelectAll,
+        config_key: "select_all",
+        label: || tr!("Select All"),
+        group: G::Selection,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl('A')],
+    },
+    ActionSpec {
+        action: ShortcutAction::InvertSelection,
+        config_key: "invert_selection",
+        label: || tr!("Invert Selection"),
+        group: G::Selection,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::ctrl_shift('A')],
+    },
+    ActionSpec {
+        action: ShortcutAction::NewTab,
+        config_key: "new_tab",
+        label: || tr!("New Tab"),
+        group: G::TabsAndWindows,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('T')],
+    },
+    ActionSpec {
+        action: ShortcutAction::NextTab,
+        config_key: "next_tab",
+        label: || tr!("Next Tab"),
+        group: G::TabsAndWindows,
+        scope: Browser,
+        context: App,
+        keys: &[ctrl_named(NamedKey::Tab), ctrl_named(NamedKey::PageDown)],
+    },
+    ActionSpec {
+        action: ShortcutAction::PreviousTab,
+        config_key: "previous_tab",
+        label: || tr!("Previous Tab"),
+        group: G::TabsAndWindows,
+        scope: Browser,
+        context: App,
+        keys: &[
+            ctrl_shift_named(NamedKey::Tab),
+            ctrl_named(NamedKey::PageUp),
+        ],
+    },
+    ActionSpec {
+        action: ShortcutAction::MoveTabLeft,
+        config_key: "move_tab_left",
+        label: || tr!("Move Tab Left"),
+        group: G::TabsAndWindows,
+        scope: Browser,
+        context: App,
+        keys: &[ctrl_shift_named(NamedKey::PageUp)],
+    },
+    ActionSpec {
+        action: ShortcutAction::MoveTabRight,
+        config_key: "move_tab_right",
+        label: || tr!("Move Tab Right"),
+        group: G::TabsAndWindows,
+        scope: Browser,
+        context: App,
+        keys: &[ctrl_shift_named(NamedKey::PageDown)],
+    },
+    ActionSpec {
+        action: ShortcutAction::ColumnsView,
+        config_key: "columns_view",
+        label: || tr!("Columns View"),
+        group: G::View,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('1')],
+    },
+    ActionSpec {
+        action: ShortcutAction::ListView,
+        config_key: "list_view",
+        label: || tr!("List View"),
+        group: G::View,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('2')],
+    },
+    ActionSpec {
+        action: ShortcutAction::IconsView,
+        config_key: "icons_view",
+        label: || tr!("Icons View"),
+        group: G::View,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('3')],
+    },
+    ActionSpec {
+        action: ShortcutAction::ZoomIn,
+        config_key: "zoom_in",
+        label: || tr!("Zoom In"),
+        group: G::View,
+        scope: Browser,
+        context: App,
+        // 主键盘上的 + 是 Shift+=（iced 送来的是不带修饰的 =），小键盘的 + 直接是 +。
+        keys: &[
+            KeyPress::ctrl('='),
+            KeyPress::ctrl_shift('='),
+            KeyPress::ctrl('+'),
+        ],
+    },
+    ActionSpec {
+        action: ShortcutAction::ZoomOut,
+        config_key: "zoom_out",
+        label: || tr!("Zoom Out"),
+        group: G::View,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('-')],
+    },
+    ActionSpec {
+        action: ShortcutAction::ZoomReset,
+        config_key: "zoom_reset",
+        label: || tr!("Default Size"),
+        group: G::View,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl('0')],
+    },
+    ActionSpec {
+        action: ShortcutAction::Preview,
+        config_key: "preview",
+        label: || tr!("Preview"),
+        group: G::Panels,
+        scope: Browser,
+        context: Content,
+        keys: &[KeyPress::named(NamedKey::Space)],
+    },
+    ActionSpec {
+        action: ShortcutAction::ToggleRightPreviewPanel,
+        config_key: "toggle_right_preview_panel",
+        label: || tr!("Toggle Preview Panel"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::alt('P')],
+    },
+    ActionSpec {
+        action: ShortcutAction::ToggleTerminal,
+        config_key: "toggle_terminal",
+        label: || tr!("Toggle Terminal"),
+        group: G::Panels,
+        scope: ShortcutScope::Everywhere,
+        context: App,
+        keys: &[KeyPress::ctrl('`'), KeyPress::named(NamedKey::Function(4))],
+    },
+    ActionSpec {
+        action: ShortcutAction::OpenExternalTerminal,
+        config_key: "open_external_terminal",
+        label: || tr!("Open Terminal Here"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[shift_named(NamedKey::Function(4))],
+    },
+    ActionSpec {
+        action: ShortcutAction::OpenSettings,
+        config_key: "open_settings",
+        label: || tr!("Settings"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::ctrl(',')],
+    },
+    ActionSpec {
+        action: ShortcutAction::TerminalNewTab,
+        config_key: "terminal_new_tab",
+        label: || tr!("New Terminal Tab"),
+        group: G::Terminal,
+        scope: ShortcutScope::Terminal,
+        context: App,
+        keys: &[KeyPress::ctrl_shift('T')],
+    },
+    ActionSpec {
+        action: ShortcutAction::TerminalCloseTab,
+        config_key: "terminal_close_tab",
+        label: || tr!("Close Terminal Tab"),
+        group: G::Terminal,
+        scope: ShortcutScope::Terminal,
+        context: App,
+        keys: &[KeyPress::ctrl_shift('W')],
+    },
 ];
+
+const ALL_ACTIONS: [ShortcutAction; ACTIONS.len()] = {
+    let mut actions = [ShortcutAction::NavigateBack; ACTIONS.len()];
+    let mut index = 0;
+    while index < ACTIONS.len() {
+        actions[index] = ACTIONS[index].action;
+        index += 1;
+    }
+    actions
+};
 
 impl ShortcutAction {
     pub(crate) fn all() -> &'static [Self] {
         &ALL_ACTIONS
     }
 
+    /// 在 `all()` 里的位置；变体顺序与 `ACTIONS` 行序一致（`variants_follow_the_table_order`）。
+    pub(crate) fn index(self) -> usize {
+        self as usize
+    }
+
+    fn spec(self) -> &'static ActionSpec {
+        &ACTIONS[self.index()]
+    }
+
     pub(crate) fn default_keys(self) -> &'static [KeyPress] {
-        match self {
-            Self::NavigateBack => keys![KeyPress::alt_named(NamedKey::ArrowLeft)],
-            Self::NavigateForward => keys![KeyPress::alt_named(NamedKey::ArrowRight)],
-            Self::NavigateUp => keys![
-                KeyPress::alt_named(NamedKey::ArrowUp),
-                KeyPress::named(NamedKey::Backspace),
-            ],
-            Self::FocusPathInput => keys![KeyPress::ctrl('L')],
-            Self::Refresh => keys![KeyPress::named(NamedKey::Function(5)), KeyPress::ctrl('R')],
-            Self::OpenSelected => keys![KeyPress::named(NamedKey::Enter)],
-            Self::RenameSelected => keys![KeyPress::named(NamedKey::Function(2))],
-            Self::Copy => keys![KeyPress::ctrl('C'), KeyPress::named(NamedKey::Copy)],
-            Self::Cut => keys![KeyPress::ctrl('X'), KeyPress::named(NamedKey::Cut)],
-            Self::Paste => keys![KeyPress::ctrl('V'), KeyPress::named(NamedKey::Paste)],
-            Self::DuplicateSelected => keys![KeyPress::ctrl('D')],
-            Self::NewFolderFromSelection => keys![KeyPress::ctrl('G')],
-            Self::Delete => keys![KeyPress::named(NamedKey::Delete)],
-            Self::Undo => keys![KeyPress::ctrl('Z')],
-            Self::Redo => keys![KeyPress::ctrl_shift('Z'), KeyPress::ctrl('Y')],
-            Self::FileProperties => {
-                keys![KeyPress::alt_named(NamedKey::Enter), KeyPress::ctrl('I')]
-            }
-            Self::SelectAll => keys![KeyPress::ctrl('A')],
-            Self::InvertSelection => keys![KeyPress::ctrl_shift('A')],
-            Self::Preview => keys![KeyPress::named(NamedKey::Space)],
-            Self::ToggleRightPreviewPanel => keys![KeyPress::alt('P')],
-            Self::ToggleTerminal => {
-                keys![KeyPress::ctrl('`'), KeyPress::named(NamedKey::Function(4))]
-            }
-            Self::TerminalNewTab => keys![KeyPress::ctrl_shift('T')],
-            Self::TerminalCloseTab => keys![KeyPress::ctrl_shift('W')],
-        }
+        self.spec().keys
     }
 
     pub(crate) fn label(self) -> String {
-        match self {
-            Self::NavigateBack => tr!("Back"),
-            Self::NavigateForward => tr!("Forward"),
-            Self::NavigateUp => tr!("Up Folder"),
-            Self::FocusPathInput => tr!("Focus Path"),
-            Self::Refresh => tr!("Refresh"),
-            Self::OpenSelected => tr!("Open"),
-            Self::RenameSelected => tr!("Rename"),
-            Self::Copy => tr!("Copy"),
-            Self::Cut => tr!("Cut"),
-            Self::Paste => tr!("Paste"),
-            Self::DuplicateSelected => tr!("Duplicate"),
-            Self::NewFolderFromSelection => tr!("New Folder with Selection"),
-            Self::Delete => tr!("Move to Trash"),
-            Self::Undo => tr!("Undo File Operation"),
-            Self::Redo => tr!("Redo File Operation"),
-            Self::FileProperties => tr!("Properties"),
-            Self::SelectAll => tr!("Select All"),
-            Self::InvertSelection => tr!("Invert Selection"),
-            Self::Preview => tr!("Preview"),
-            Self::ToggleRightPreviewPanel => tr!("Toggle Preview Panel"),
-            Self::ToggleTerminal => tr!("Toggle Terminal"),
-            Self::TerminalNewTab => tr!("New Terminal Tab"),
-            Self::TerminalCloseTab => tr!("Close Terminal Tab"),
-        }
+        (self.spec().label)()
     }
 
     pub(crate) fn group(self) -> ShortcutGroup {
-        match self {
-            Self::NavigateBack
-            | Self::NavigateForward
-            | Self::NavigateUp
-            | Self::FocusPathInput
-            | Self::Refresh => ShortcutGroup::Navigation,
-            Self::OpenSelected
-            | Self::RenameSelected
-            | Self::Copy
-            | Self::Cut
-            | Self::Paste
-            | Self::DuplicateSelected
-            | Self::NewFolderFromSelection
-            | Self::Delete
-            | Self::Undo
-            | Self::Redo
-            | Self::FileProperties => ShortcutGroup::Files,
-            Self::SelectAll | Self::InvertSelection => ShortcutGroup::Selection,
-            Self::Preview | Self::ToggleRightPreviewPanel | Self::ToggleTerminal => {
-                ShortcutGroup::Panels
-            }
-            Self::TerminalNewTab | Self::TerminalCloseTab => ShortcutGroup::Terminal,
-        }
+        self.spec().group
     }
 
     pub(crate) fn scope(self) -> ShortcutScope {
-        match self {
-            Self::ToggleTerminal => ShortcutScope::Everywhere,
-            Self::TerminalNewTab | Self::TerminalCloseTab => ShortcutScope::Terminal,
-            _ => ShortcutScope::FileBrowser,
-        }
+        self.spec().scope
     }
 
     pub(crate) fn declared_context(self) -> DeclaredContext {
-        match self {
-            Self::NavigateBack
-            | Self::NavigateForward
-            | Self::NavigateUp
-            | Self::FocusPathInput
-            | Self::Refresh
-            | Self::ToggleRightPreviewPanel
-            | Self::ToggleTerminal
-            | Self::TerminalNewTab
-            | Self::TerminalCloseTab => DeclaredContext::Application,
-            _ => DeclaredContext::FileBrowserContent,
-        }
+        self.spec().context
     }
 
-    /// 存储里的名字；改名要同时在 `overrides::LEGACY_DEFAULTS` 里留旧名。
     pub(crate) fn config_key(self) -> &'static str {
-        match self {
-            Self::NavigateBack => "navigate_back",
-            Self::NavigateForward => "navigate_forward",
-            Self::NavigateUp => "navigate_up",
-            Self::FocusPathInput => "focus_path_input",
-            Self::Refresh => "refresh",
-            Self::OpenSelected => "open_selected",
-            Self::RenameSelected => "rename_selected",
-            Self::Copy => "copy",
-            Self::Cut => "cut",
-            Self::Paste => "paste",
-            Self::DuplicateSelected => "duplicate_selected",
-            Self::NewFolderFromSelection => "new_folder_from_selection",
-            Self::Delete => "delete",
-            Self::Undo => "undo",
-            Self::Redo => "redo",
-            Self::FileProperties => "file_properties",
-            Self::SelectAll => "select_all",
-            Self::InvertSelection => "invert_selection",
-            Self::Preview => "preview",
-            Self::ToggleRightPreviewPanel => "toggle_right_preview_panel",
-            Self::ToggleTerminal => "toggle_terminal",
-            Self::TerminalNewTab => "terminal_new_tab",
-            Self::TerminalCloseTab => "terminal_close_tab",
-        }
+        self.spec().config_key
     }
 
     pub(crate) fn from_config_key(key: &str) -> Option<Self> {
-        Self::all()
+        ACTIONS
             .iter()
-            .copied()
-            .find(|action| action.config_key() == key)
+            .find(|spec| spec.config_key == key)
+            .map(|spec| spec.action)
     }
 }
 
@@ -255,8 +621,41 @@ impl ShortcutGroup {
             Self::Navigation => tr!("Navigation"),
             Self::Files => tr!("Files"),
             Self::Selection => tr!("Selection"),
+            Self::TabsAndWindows => tr!("Tabs and Windows"),
+            Self::View => tr!("View"),
             Self::Panels => tr!("Panels"),
             Self::Terminal => tr!("Terminal"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn variants_follow_the_table_order() {
+        for (index, spec) in ACTIONS.iter().enumerate() {
+            assert_eq!(spec.action as usize, index, "{:?}", spec.action);
+        }
+    }
+
+    #[test]
+    fn config_keys_are_unique() {
+        for (index, spec) in ACTIONS.iter().enumerate() {
+            assert!(
+                ACTIONS[index + 1..]
+                    .iter()
+                    .all(|other| other.config_key != spec.config_key),
+                "{}",
+                spec.config_key
+            );
+        }
+    }
+
+    #[test]
+    fn groups_are_contiguous_in_table_order() {
+        let groups = ACTIONS.iter().map(|spec| spec.group).collect::<Vec<_>>();
+        assert!(groups.windows(2).all(|pair| pair[0] <= pair[1]));
     }
 }

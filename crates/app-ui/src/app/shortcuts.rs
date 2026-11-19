@@ -1,9 +1,11 @@
 use iced::keyboard::{self, key};
 use iced::{event, Task};
 
+use super::tabs::TabDirection;
 use super::text_input_shortcuts;
 use super::FileBrowser;
-use crate::model::{AdvancedNewFolderMessage, Message, PathSuggestionDirection};
+use crate::config::{ViewDensityLevel, ViewDensityStep};
+use crate::model::{AdvancedNewFolderMessage, BrowserViewMode, Message, PathSuggestionDirection};
 use crate::shortcuts::{
     fixed_key, routing_context, CaptureRejection, CaptureSlot, FileBrowserShortcutOwnership,
     FileContentKey, FixedKey, KeyArea, KeyPress, ShortcutAction, ShortcutCaptureState,
@@ -52,6 +54,10 @@ impl FileBrowser {
         };
         match fixed_key(&press) {
             Some(FixedKey::Escape) => return self.handle_escape_key(status),
+            Some(FixedKey::TabNumber(number)) if self.application_shortcuts_enabled() => {
+                return self.select_tab_by_number(number);
+            }
+            Some(FixedKey::TabNumber(_)) => return Task::none(),
             Some(FixedKey::Move(movement)) => {
                 return self.route_file_content_key(
                     FileContentKey::Move(movement),
@@ -100,7 +106,10 @@ impl FileBrowser {
         status: event::Status,
     ) -> Task<Message> {
         match (context, status) {
-            (ShortcutRoutingContext::Application, _) => self.invoke_file_content_key(content_key),
+            (ShortcutRoutingContext::Application, _) if self.application_shortcuts_enabled() => {
+                self.invoke_file_content_key(content_key)
+            }
+            (ShortcutRoutingContext::Application, _) => Task::none(),
             (ShortcutRoutingContext::FileBrowserContent(_), event::Status::Captured) => {
                 Task::none()
             }
@@ -170,16 +179,33 @@ impl FileBrowser {
         }
     }
 
+    /// 主窗口上必须先处理完的对话框（确认、冲突、解压、批量重命名……）开着。
+    pub(crate) fn main_window_dialog_is_open(&self) -> bool {
+        self.destructive_action_confirmation.is_some()
+            || self.incoming_transfer.is_some()
+            || !self.incoming_messages.is_empty()
+            || self.file_drop_prompt.is_some()
+            || self.transfer_conflict.is_some()
+            || self.archive_creation.is_some()
+            || self.convert.is_some()
+            || self.checksum.is_some()
+            || self.archive_extraction.is_some()
+            || self.archive_member_password.is_some()
+            || self.batch_rename.is_some()
+            || self.advanced_new_folder.is_some()
+            || self.network_connection_editor.is_some()
+            || self.open_with.is_some()
+    }
+
+    /// 应用级快捷键（导航、标签页、视图、面板）只作用于主窗口：焦点在设置、属性等辅助窗口
+    /// 或主窗口开着对话框时不执行。
+    fn application_shortcuts_enabled(&self) -> bool {
+        self.focused_window == self.main_window && !self.main_window_dialog_is_open()
+    }
+
     pub(super) fn file_browser_content_shortcuts_enabled(&self) -> bool {
-        self.destructive_action_confirmation.is_none()
-            && self.file_drop_prompt.is_none()
-            && self.transfer_conflict.is_none()
+        !self.main_window_dialog_is_open()
             && self.context_menu.is_none()
-            && self.open_with.is_none()
-            && self.archive_creation.is_none()
-            && self.archive_extraction.is_none()
-            && self.batch_rename.is_none()
-            && self.network_connection_editor.is_none()
             && self.settings_window != Some(self.focused_window)
             && self.properties_window != Some(self.focused_window)
             && self.preview_engine.preview_window != Some(self.focused_window)
@@ -229,6 +255,41 @@ impl FileBrowser {
             ShortcutAction::Delete => self.trash_selected(),
             ShortcutAction::Undo => self.undo_file_operation(),
             ShortcutAction::Redo => self.redo_file_operation(),
+            ShortcutAction::NavigateHome => self.navigate_home(),
+            ShortcutAction::Search => self.focus_search_input(),
+            ShortcutAction::ToggleHiddenFiles => self.toggle_show_hidden_files(),
+            ShortcutAction::OpenInNewTab => self.open_selected_in_new_tab(),
+            ShortcutAction::NewFolder => self.create_folder_from_keyboard(),
+            ShortcutAction::NewFile => self.create_file_from_keyboard(),
+            ShortcutAction::CopyPath => self.copy_selected_path_text(),
+            ShortcutAction::CreateSymlink => self.create_symlinks_for_selection(),
+            ShortcutAction::DeletePermanently => self.delete_selected_permanently(),
+            ShortcutAction::AddToFavorites => self.add_keyboard_target_to_favorites(),
+            ShortcutAction::NewTab => self.open_new_tab_here(),
+            ShortcutAction::NextTab => self.select_neighbor_tab(TabDirection::Right),
+            ShortcutAction::PreviousTab => self.select_neighbor_tab(TabDirection::Left),
+            ShortcutAction::MoveTabLeft => self.move_active_tab(TabDirection::Left),
+            ShortcutAction::MoveTabRight => self.move_active_tab(TabDirection::Right),
+            ShortcutAction::ColumnsView => {
+                self.select_browser_view_mode(self.active_pane_id(), BrowserViewMode::Columns)
+            }
+            ShortcutAction::ListView => {
+                self.select_browser_view_mode(self.active_pane_id(), BrowserViewMode::List)
+            }
+            ShortcutAction::IconsView => {
+                self.select_browser_view_mode(self.active_pane_id(), BrowserViewMode::Icons)
+            }
+            ShortcutAction::ZoomIn => {
+                self.change_active_view_density(|density| density.step(ViewDensityStep::Increase))
+            }
+            ShortcutAction::ZoomOut => {
+                self.change_active_view_density(|density| density.step(ViewDensityStep::Decrease))
+            }
+            ShortcutAction::ZoomReset => {
+                self.change_active_view_density(|_| ViewDensityLevel::DEFAULT)
+            }
+            ShortcutAction::OpenExternalTerminal => self.open_external_terminal_from_keyboard(),
+            ShortcutAction::OpenSettings => self.open_settings(),
         }
     }
 

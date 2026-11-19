@@ -47,10 +47,16 @@ impl SelectionMove {
 pub(crate) enum FixedKey {
     Escape,
     Move(SelectionMove),
+    /// Alt+1…9：第几个标签页（9 是最后一个）。
+    TabNumber(u8),
 }
 
-/// 移动键不加修饰是移光标，加 Shift 是扩选；带 Ctrl/Alt 的不归这里。
+/// 移动键不加修饰是移光标，加 Shift 是扩选；带 Ctrl/Alt 的不归这里（Alt+数字除外）。
 pub(crate) fn fixed_key(press: &KeyPress) -> Option<FixedKey> {
+    if let ShortcutKey::Character(digit @ '1'..='9') = press.key {
+        return (press.alt && !press.control && !press.shift)
+            .then(|| FixedKey::TabNumber(digit as u8 - b'0'));
+    }
     if press.control || press.alt {
         return None;
     }

@@ -79,7 +79,7 @@ impl FileBrowser {
     /// 把 parent 等于该目录的选中项整批移入;跨栏选中项留在原地。
     pub(in crate::app) fn new_folder_from_selection(&mut self) -> Task<Message> {
         self.context_menu = None;
-        let Some(directory) = self.gather_target_directory() else {
+        let Some(directory) = self.keyboard_target_directory() else {
             return Task::none();
         };
         let sources = gather_sources_in_directory(&self.selected_paths_for_operation(), &directory);
@@ -115,9 +115,10 @@ impl FileBrowser {
         }
     }
 
-    /// 与 keyboard_paste_directory 同源的「活动栏」语义:多栏取聚焦已渲染栏,
-    /// 列表/图标视图就是当前目录。
-    fn gather_target_directory(&self) -> Option<PathBuf> {
+    /// 键盘命令（用选中项新建、新建文件夹 / 文件、在此处打开终端）作用的目录:与
+    /// keyboard_paste_directory 同源的「活动栏」语义,多栏取聚焦已渲染栏,列表/图标视图
+    /// 就是当前目录。
+    pub(in crate::app) fn keyboard_target_directory(&self) -> Option<PathBuf> {
         let current_directory = self.tab().current_directory()?;
         if self.tab().view_mode() != BrowserViewMode::Columns {
             return Some(current_directory.to_path_buf());

@@ -304,6 +304,7 @@ impl FileBrowser {
                 self.change_active_view_density(|_| ViewDensityLevel::DEFAULT)
             }
             ShortcutAction::OpenExternalTerminal => self.open_external_terminal_from_keyboard(),
+            ShortcutAction::ToggleSidebar => self.toggle_sidebar(),
             ShortcutAction::OpenSettings => self.open_settings(),
         }
     }

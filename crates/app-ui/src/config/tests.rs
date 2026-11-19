@@ -251,6 +251,7 @@ fn user_preferences_round_trip_through_sqlite() {
         ShortcutAction::FocusPathInput,
         vec![KeyPress::from_config_value("Ctrl+Alt+L").unwrap()],
     );
+    config.sidebar_visible = false;
 
     save_user_preferences(
         &store,
@@ -268,6 +269,7 @@ fn user_preferences_round_trip_through_sqlite() {
     );
     assert_eq!(loaded.recovery, None);
     let loaded = loaded.config;
+    assert!(!loaded.sidebar_visible);
 
     assert_eq!(
         loaded.rendering_gpu_preference,

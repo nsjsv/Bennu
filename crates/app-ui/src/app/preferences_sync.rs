@@ -153,7 +153,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         // 这个窗口刚改、还没存完的。
         browser.user_config.terminal_shell = "fish".to_owned();
-        let live_sidebar_width = browser.sidebar_width;
+        let live_sidebar_width = browser.sidebar_width_when_shown;
         // 另一个窗口存下的。
         let mut stored = config::default_user_config().user_preferences();
         stored.color_scheme = ColorSchemePreset::Catppuccin;
@@ -170,7 +170,7 @@ mod tests {
         assert_eq!(browser.transfer_port_input, "50000");
         // 窗口自己的状态：记进设置给新窗口用，这个窗口正在用的不动。
         assert_eq!(browser.user_config.sidebar_width, live_sidebar_width + 40.0);
-        assert_eq!(browser.sidebar_width, live_sidebar_width);
+        assert_eq!(browser.sidebar_width_when_shown, live_sidebar_width);
         assert_eq!(browser.user_preferences_seen, stored);
     }
 

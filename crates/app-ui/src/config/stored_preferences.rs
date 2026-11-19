@@ -95,6 +95,8 @@ pub(crate) struct StoredUserPreferences {
     /// 带侧栏的窗口里侧栏的样子：`embedded`（贴边平铺）/ `floating`（圆角卡片）。
     #[serde(default = "default_sidebar_style")]
     pub sidebar_style: String,
+    #[serde(default = "default_sidebar_visible")]
+    pub sidebar_visible: bool,
     #[serde(default)]
     pub search_history: Vec<String>,
     /// 最近一次搜索使用的范围;None = 旧版本数据或从未搜索，读取端按
@@ -230,6 +232,7 @@ impl Default for StoredUserPreferences {
             file_grouping: None,
             window_controls: default_stored_window_controls(),
             sidebar_style: default_sidebar_style(),
+            sidebar_visible: default_sidebar_visible(),
             search_history: Vec::new(),
             last_search_scope: None,
             theme_mode: default_theme_mode(),
@@ -350,6 +353,10 @@ fn default_visible_column_count() -> u32 {
 
 fn default_sidebar_style() -> String {
     "embedded".to_owned()
+}
+
+fn default_sidebar_visible() -> bool {
+    true
 }
 
 fn default_stored_window_controls() -> Vec<StoredWindowControlPlacement> {

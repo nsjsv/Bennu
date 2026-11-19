@@ -214,7 +214,7 @@ fn icon_grid_keyboard_navigation_uses_current_column_count() {
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.main_window_width = 500.0;
-    browser.sidebar_width = 0.0;
+    browser.sidebar_width_when_shown = 0.0;
     browser.tab_mut().entries = (0..8).map(entry).collect::<Vec<_>>().into();
     browser.select_path(browser.tab().entries[1].path().to_path_buf());
 
@@ -237,7 +237,7 @@ fn icon_grid_keyboard_navigation_clamps_in_incomplete_last_row() {
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.main_window_width = 500.0;
-    browser.sidebar_width = 0.0;
+    browser.sidebar_width_when_shown = 0.0;
     browser.tab_mut().entries = (0..8).map(entry).collect::<Vec<_>>().into();
     browser.select_path(browser.tab().entries[5].path().to_path_buf());
 
@@ -406,7 +406,7 @@ fn column_extension_does_not_open_the_directories_it_passes() {
 fn icon_grid_page_keys_move_by_whole_rows_and_stop_at_the_ends() {
     let mut browser = browser_with_entries(BrowserViewMode::Icons, 20);
     browser.main_window_width = 500.0;
-    browser.sidebar_width = 0.0;
+    browser.sidebar_width_when_shown = 0.0;
     let row_height = crate::icon_grid_geometry::row_height(browser.user_config.icons_icon_edge());
     browser.icon_grid_viewports.insert(
         crate::model::BrowserPaneId::PRIMARY,

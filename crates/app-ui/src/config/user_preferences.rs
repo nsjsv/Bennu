@@ -69,6 +69,7 @@ pub(crate) struct UserPreferences {
     pub(crate) visible_column_count: usize,
     pub(crate) window_controls: WindowControlsConfig,
     pub(crate) sidebar_style: SidebarStyle,
+    pub(crate) sidebar_visible: bool,
     pub(crate) columns_view_density: ViewDensityLevel,
     pub(crate) list_view_density: ViewDensityLevel,
     pub(crate) icons_view_density: ViewDensityLevel,
@@ -129,6 +130,7 @@ impl UserPreferences {
             visible_column_count: normalize_visible_column_count(config.visible_column_count),
             window_controls: config.window_controls.clone(),
             sidebar_style: config.sidebar_style,
+            sidebar_visible: config.sidebar_visible,
             columns_view_density: config.columns_view_density,
             list_view_density: config.list_view_density,
             icons_view_density: config.icons_view_density,
@@ -184,6 +186,7 @@ impl UserPreferences {
         config.visible_column_count = normalize_visible_column_count(self.visible_column_count);
         config.window_controls = self.window_controls.clone();
         config.sidebar_style = self.sidebar_style;
+        config.sidebar_visible = self.sidebar_visible;
         config.columns_view_density = self.columns_view_density;
         config.list_view_density = self.list_view_density;
         config.icons_view_density = self.icons_view_density;
@@ -275,6 +278,7 @@ impl UserPreferences {
             normalize_visible_column_count(self.visible_column_count) as u32;
         stored.window_controls = stored_window_controls(&self.window_controls);
         stored.sidebar_style = self.sidebar_style.config_value().to_owned();
+        stored.sidebar_visible = self.sidebar_visible;
         stored.columns_view_density = Some(self.columns_view_density.index());
         stored.list_view_density = Some(self.list_view_density.index());
         stored.icons_view_density = Some(self.icons_view_density.index());
@@ -470,6 +474,7 @@ impl UserPreferences {
             ),
             window_controls,
             sidebar_style,
+            sidebar_visible: stored.sidebar_visible,
             columns_view_density,
             list_view_density,
             icons_view_density,

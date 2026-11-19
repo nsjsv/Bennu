@@ -95,7 +95,7 @@ impl FileBrowser {
 
     /// 与 `pane_id_at_position` 同源的纯布局推导,给出单个窗格的屏幕矩形。
     pub(crate) fn pane_bounds(&self, pane_id: super::BrowserPaneId) -> Option<Rectangle> {
-        let x = self.sidebar_width;
+        let x = self.sidebar_layout_width();
         let width = self.split_content_width();
         let y = self.main_panes_area_top();
         let height = (self.main_window_height - y).max(1.0);
@@ -207,7 +207,7 @@ mod tests {
         });
 
         browser.update_file_drag_edge_scroll(Point::new(
-            browser.sidebar_width + 20.0,
+            browser.sidebar_width_when_shown + 20.0,
             browser.main_panes_area_top() + 5.0,
         ));
 
@@ -253,7 +253,7 @@ mod tests {
         });
 
         browser.update_file_drag_edge_scroll(Point::new(
-            browser.sidebar_width + 20.0,
+            browser.sidebar_width_when_shown + 20.0,
             browser.main_panes_area_top() + 5.0,
         ));
 

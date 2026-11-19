@@ -241,7 +241,7 @@ mod tests {
     fn column_browser_content_width_excludes_sidebar_and_open_preview_panel() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
         browser.main_window_width = 1_200.0;
-        browser.sidebar_width = 180.0;
+        browser.sidebar_width_when_shown = 180.0;
         let divider_width =
             COLUMN_RESIZE_DIVIDER_WIDTH * (browser.user_config.visible_column_count - 1) as f32;
 

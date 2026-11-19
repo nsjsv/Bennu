@@ -240,7 +240,9 @@ pub(crate) struct FileBrowser {
     pub(crate) sidebar_bookmark_drop_slot: Option<SidebarBookmarkDropSlot>,
     pub(crate) sidebar_bookmark_drag: Option<SidebarBookmarkDragState>,
     pub(crate) sidebar_bookmark_motion: HashMap<PathBuf, SidebarBookmarkMotionState>,
-    pub(crate) sidebar_width: f32,
+    /// 侧栏显示时的宽度（用户拖出来的，存盘的也是它）。布局和命中区域一律用
+    /// `sidebar_layout_width()`：侧栏隐藏时那里是 0。
+    pub(crate) sidebar_width_when_shown: f32,
     sidebar_resize_drag: Option<SidebarResizeDrag>,
     pub(crate) right_preview_panel_open: bool,
     pub(crate) right_preview_panel_width: f32,
@@ -656,7 +658,7 @@ impl FileBrowser {
             sidebar_bookmark_drop_slot: None,
             sidebar_bookmark_drag: None,
             sidebar_bookmark_motion: HashMap::new(),
-            sidebar_width: user_config.sidebar_width,
+            sidebar_width_when_shown: user_config.sidebar_width,
             sidebar_resize_drag: None,
             right_preview_panel_open: user_config.right_preview_panel_open,
             right_preview_panel_width: config::normalize_right_preview_panel_width(

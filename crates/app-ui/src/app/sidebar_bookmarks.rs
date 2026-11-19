@@ -235,7 +235,7 @@ impl FileBrowser {
             .unwrap_or(drag.source_index);
         let projected_index =
             projected_sidebar_bookmark_index(drag.source_index, delta_y, favorites.len());
-        let cursor_inside_sidebar_x = (0.0..=self.sidebar_width).contains(&position.x);
+        let cursor_inside_sidebar_x = (0.0..=self.sidebar_layout_width()).contains(&position.x);
         let should_activate = matches!(drag.phase, FileDragPhase::WaitingForMovement { .. })
             && delta_x * delta_x + delta_y * delta_y
                 >= POINTER_DRAG_ACTIVATION_DISTANCE * POINTER_DRAG_ACTIVATION_DISTANCE;

@@ -978,7 +978,7 @@ fn cursor_leaving_hands_drag_to_native_session() {
     let mut browser = active_drag_browser(origin);
     drop(browser.update_file_drag(Point::new(104.0, 100.0)));
     let top_edge = Point::new(
-        browser.sidebar_width + 20.0,
+        browser.sidebar_width_when_shown + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
     browser.update_file_drag_edge_scroll(top_edge);

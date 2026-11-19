@@ -774,7 +774,7 @@ fn internal_native_drag_moves_drive_edge_scroll_plan() {
 
     // 内部原生拖放没有指针移动事件,边缘自动滚由 Moved 事件重算。
     let edge_position = Point::new(
-        browser.sidebar_width + 20.0,
+        browser.sidebar_width_when_shown + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
     drop(
@@ -802,7 +802,7 @@ fn external_native_drag_hover_does_not_plan_edge_scroll() {
     ));
 
     let edge_position = Point::new(
-        browser.sidebar_width + 20.0,
+        browser.sidebar_width_when_shown + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
     drop(
@@ -934,7 +934,7 @@ fn edge_scroll_advance_plans_scroll_refresh() {
     // Moved 事件压在浏览区边缘生成滚动计划,帧循环推进时同帧发起
     // 布局刷新。
     let edge_position = Point::new(
-        browser.sidebar_width + 20.0,
+        browser.sidebar_width_when_shown + 20.0,
         browser.main_panes_area_top() + 5.0,
     );
     drop(

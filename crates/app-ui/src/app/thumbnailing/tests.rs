@@ -246,7 +246,7 @@ fn icon_grid_schedules_only_shared_visible_range_at_dynamic_edge() {
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.main_window_width = 500.0;
-    browser.sidebar_width = 0.0;
+    browser.sidebar_width_when_shown = 0.0;
     browser.tab_mut().entries = (0..100)
         .map(|index| image_entry(&format!("/workspace/{index}.png")))
         .collect::<Vec<_>>()

@@ -154,11 +154,11 @@ impl FileBrowser {
 
     /// 内容栏宽度：侧栏右边整段（工具栏、窗格、预览面板、终端抽屉都在这一栏里）。
     pub(crate) fn main_content_width(&self) -> f32 {
-        self.main_window_width - self.sidebar_width
+        self.main_window_width - self.sidebar_layout_width()
     }
 
     pub(super) fn pane_id_at_position(&self, position: Point) -> Option<BrowserPaneId> {
-        let sidebar_width = self.sidebar_width;
+        let sidebar_width = self.sidebar_layout_width();
         let content_width = self.split_content_width();
         let panes_top = self.main_panes_area_top();
         let content_height = (self.main_window_height - panes_top).max(1.0);
@@ -336,7 +336,7 @@ impl FileBrowser {
         if content_width <= SPLIT_TARGET_MIN_CONTENT_WIDTH || self.main_window_height <= 1.0 {
             return None;
         }
-        let sidebar_width = self.sidebar_width;
+        let sidebar_width = self.sidebar_layout_width();
         if position.x < sidebar_width || position.y < 0.0 {
             return None;
         }
@@ -371,7 +371,7 @@ impl FileBrowser {
         let content_width = self.split_content_width();
         let panes_top = self.main_panes_area_top();
         let content_height = (self.main_window_height - panes_top).max(1.0);
-        let sidebar_width = self.sidebar_width;
+        let sidebar_width = self.sidebar_layout_width();
         let half_width = content_width / 2.0;
         let half_height = content_height / 2.0;
 
@@ -548,7 +548,7 @@ mod tests {
         // #2：网格列数按窗格宽度排；面板开着却没扣掉，最右边几列就排到面板底下被盖住。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.main_window_width = 1_200.0;
-        browser.sidebar_width = 180.0;
+        browser.sidebar_width_when_shown = 180.0;
         assert_eq!(browser.pane_content_width(), 1_020.0);
 
         browser.right_preview_panel_open = true;
@@ -573,7 +573,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.main_window_width = 1_000.0;
         browser.main_window_height = 800.0;
-        browser.sidebar_width = 200.0;
+        browser.sidebar_width_when_shown = 200.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis: SplitAxis::Horizontal,
             first: BrowserPaneId::PRIMARY,
@@ -601,7 +601,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.main_window_width = 1_000.0;
         browser.main_window_height = 800.0;
-        browser.sidebar_width = 200.0;
+        browser.sidebar_width_when_shown = 200.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis: SplitAxis::Vertical,
             first: BrowserPaneId::PRIMARY,

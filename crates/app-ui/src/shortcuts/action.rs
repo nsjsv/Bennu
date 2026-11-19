@@ -56,6 +56,7 @@ pub(crate) enum ShortcutAction {
     ToggleRightPreviewPanel,
     ToggleTerminal,
     OpenExternalTerminal,
+    ToggleSidebar,
     OpenSettings,
     TerminalNewTab,
     TerminalCloseTab,
@@ -620,6 +621,15 @@ const ACTIONS: &[ActionSpec] = &[
         scope: Browser,
         context: App,
         keys: &[shift_named(NamedKey::Function(4))],
+    },
+    ActionSpec {
+        action: ShortcutAction::ToggleSidebar,
+        config_key: "toggle_sidebar",
+        label: || tr!("Show or Hide Sidebar"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::named(NamedKey::Function(9))],
     },
     ActionSpec {
         action: ShortcutAction::OpenSettings,

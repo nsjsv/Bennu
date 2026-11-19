@@ -107,7 +107,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config);
         browser.main_window_width = 1_000.0;
         browser.main_window_height = 800.0;
-        browser.sidebar_width = 200.0;
+        browser.sidebar_width_when_shown = 200.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis,
             first: BrowserPaneId::PRIMARY,

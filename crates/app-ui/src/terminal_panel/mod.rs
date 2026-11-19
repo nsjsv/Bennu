@@ -633,7 +633,7 @@ mod tests {
         // 抽屉在侧栏右边的内容栏里：只减左右留白，不再另减一次侧栏（2026-11-10 多减过）。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         browser.main_window_width = 1_000.0;
-        browser.sidebar_width = 200.0;
+        browser.sidebar_width_when_shown = 200.0;
         let inner_width = 800.0 - PANEL_HORIZONTAL_PADDING * 2.0;
         assert_eq!(browser.terminal_panel_inner_width(), inner_width);
         assert_eq!(

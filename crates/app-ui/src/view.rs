@@ -110,7 +110,7 @@ use archive_creation::archive_creation_panel;
 use archive_extraction::archive_extraction_panel;
 use archive_member_password::archive_member_password_panel;
 use batch_rename::batch_rename_panel;
-use bennu_preview::window_shell::{split_window, HeaderBar, SplitPane};
+use bennu_preview::window_shell::{single_window, split_window, HeaderBar, SplitPane};
 pub(super) use bennu_theme::icons::{icon_tone_style, themed_icon, IconTone};
 use bennu_theme::typography::CAPTION_SIZE;
 use checksum::checksum_panel;
@@ -239,20 +239,31 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
 
     let shell = window_shell(browser, browser.main_window_id());
     let toolbar_height = main_toolbar_height(browser.main_content_width());
-    let content = split_window(
-        SplitPane {
-            header: HeaderBar::new()
+    let content = if browser.sidebar_visible() {
+        split_window(
+            SplitPane {
+                header: HeaderBar::new()
+                    .end(sidebar_settings_button())
+                    .height(toolbar_height),
+                body: sidebar_body(browser),
+            },
+            SplitPane {
+                header: main_toolbar(browser).height(toolbar_height),
+                body: content_body.into(),
+            },
+            browser.sidebar_layout_width(),
+            &shell,
+        )
+    } else {
+        // 侧栏藏起来后，它顶栏上的设置按钮挪到主工具栏末尾，窗口按钮两侧都进主工具栏。
+        single_window(
+            main_toolbar(browser)
                 .end(sidebar_settings_button())
                 .height(toolbar_height),
-            body: sidebar_body(browser),
-        },
-        SplitPane {
-            header: main_toolbar(browser).height(toolbar_height),
-            body: content_body.into(),
-        },
-        browser.sidebar_width,
-        &shell,
-    );
+            content_body,
+            &shell,
+        )
+    };
 
     let mut floating = Vec::new();
     let mut floating_input = BrowserFloatingInput::Plain;
@@ -472,7 +483,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 .spacing(NOTIFICATION_STACK_SPACING)
                 .into(),
             placement: FloatingPlacement::At(iced::Point::new(
-                browser.sidebar_width + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
+                browser.sidebar_layout_width() + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
                 ERROR_NOTIFICATION_FLOAT_Y,
             )),
             captures_pointer: true,
@@ -489,7 +500,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.operation_progress_animation_frame,
             ),
             placement: FloatingPlacement::BottomLeft {
-                left: browser.sidebar_width + 12.0,
+                left: browser.sidebar_layout_width() + 12.0,
                 bottom: OPERATION_QUEUE_PANEL_BOTTOM,
             },
             captures_pointer: true,
@@ -501,13 +512,24 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         &browser.transfer_tasks,
         browser.operation_progress_animation_frame,
     ) {
-        floating.push(FloatingContent {
-            element: indicator,
-            placement: FloatingPlacement::BottomRightInArea {
-                area_width: browser.sidebar_width,
+        // 平时在侧栏右下角；侧栏藏起来时放到内容区左下角、底栏（或展开的终端）上面，
+        // 不压住底栏的统计和终端按钮。
+        let placement = if browser.sidebar_visible() {
+            FloatingPlacement::BottomRightInArea {
+                area_width: browser.sidebar_layout_width(),
                 right: OPERATION_QUEUE_INDICATOR_RIGHT,
                 bottom: OPERATION_QUEUE_INDICATOR_BOTTOM,
-            },
+            }
+        } else {
+            FloatingPlacement::BottomLeft {
+                left: OPERATION_QUEUE_INDICATOR_RIGHT,
+                bottom: crate::terminal_panel::view::terminal_panel_area_height(browser)
+                    + OPERATION_QUEUE_INDICATOR_BOTTOM,
+            }
+        };
+        floating.push(FloatingContent {
+            element: indicator,
+            placement,
             captures_pointer: true,
         });
     }

@@ -236,15 +236,15 @@ mod tests {
     fn capture_replaces_or_adds_without_duplicates() {
         let config = ShortcutConfig::default();
         let redo = ShortcutAction::Redo;
-        let f9 = KeyPress::named(NamedKey::Function(9));
+        let f12 = KeyPress::named(NamedKey::Function(12));
 
         assert_eq!(
-            config.keys_after_capture(redo, CaptureSlot::Replace(1), f9),
-            Ok(vec![KeyPress::ctrl_shift('Z'), f9])
+            config.keys_after_capture(redo, CaptureSlot::Replace(1), f12),
+            Ok(vec![KeyPress::ctrl_shift('Z'), f12])
         );
         assert_eq!(
-            config.keys_after_capture(redo, CaptureSlot::Add, f9),
-            Ok(vec![KeyPress::ctrl_shift('Z'), KeyPress::ctrl('Y'), f9])
+            config.keys_after_capture(redo, CaptureSlot::Add, f12),
+            Ok(vec![KeyPress::ctrl_shift('Z'), KeyPress::ctrl('Y'), f12])
         );
         assert_eq!(
             config.keys_after_capture(redo, CaptureSlot::Replace(1), KeyPress::ctrl_shift('Z')),

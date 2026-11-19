@@ -91,6 +91,12 @@ pub struct ShapeBuffer {
     /// Buffer for holding unicode text.
     harfrust_buffer: Option<harfrust::UnicodeBuffer>,
 
+    /// Bennu 补丁：排版语言，取字体系统的 locale。harfrust 不像 HarfBuzz 那样拿系统 locale 当
+    /// 默认语言（`guess_segment_properties` 里只留了个 TODO），不设的话字体的 `locl` 永远不起作用：
+    /// 同一款中日韩字体按语言切换的地区字形用不上，只装了思源黑体全家族（默认日文写法）的系统上，
+    /// 中文界面的汉字就是日文写法。
+    pub(crate) language: Option<harfrust::Language>,
+
     /// Temporary buffers for scripts.
     scripts: Vec<Script>,
 
@@ -144,6 +150,9 @@ fn shape_fallback(
         buffer.push_str(&run.replace('\t', " "));
     } else {
         buffer.push_str(run);
+    }
+    if let Some(language) = &scratch.language {
+        buffer.set_language(language.clone());
     }
     buffer.guess_segment_properties();
 

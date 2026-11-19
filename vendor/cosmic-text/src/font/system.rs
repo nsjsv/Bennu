@@ -207,6 +207,8 @@ impl FontSystem {
             .collect();
 
         let fallbacks = Fallbacks::new(&impl_fallback, &[], &locale);
+        let mut shape_buffer = ShapeBuffer::default();
+        shape_buffer.language = locale.parse().ok();
 
         Self {
             locale,
@@ -219,7 +221,7 @@ impl FontSystem {
             monospace_fallbacks_buffer: BTreeSet::default(),
             #[cfg(feature = "shape-run-cache")]
             shape_run_cache: crate::ShapeRunCache::default(),
-            shape_buffer: ShapeBuffer::default(),
+            shape_buffer,
             dyn_fallback: Box::new(impl_fallback),
             fallbacks,
         }

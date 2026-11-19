@@ -19,6 +19,52 @@ fn rejects_empty_output() {
     assert_eq!(parse_fontconfig_family(b"   \n"), None);
 }
 
+/// sans-serif 先配了一款西文字体时，fontconfig 排在头一个的没有汉字；汉字要用排在后面、真正支持
+/// 简中的那几款，按 fontconfig 的先后，日文宋体这种不支持简中的不算。
+#[test]
+fn han_candidates_are_the_sorted_families_that_support_the_language() {
+    let sorted = "Noto Sans\u{1f}aa|af|en|fr\u{1e}\
+WenQuanYi Micro Hei\u{1f}en|ja|zh-cn|zh-tw\u{1e}\
+Source Han Serif JP\u{1f}en|ja\u{1e}\
+WenQuanYi Micro Hei\u{1f}en|zh-cn\u{1e}\
+Noto Serif CJK SC\u{1f}ja|ko|zh-cn\u{1e}\
+Broken\u{1e}";
+
+    assert_eq!(
+        families_supporting(sorted.as_bytes(), "zh-cn"),
+        ["WenQuanYi Micro Hei", "Noto Serif CJK SC"]
+    );
+    assert_eq!(
+        families_supporting(sorted.as_bytes(), "ja"),
+        [
+            "WenQuanYi Micro Hei",
+            "Source Han Serif JP",
+            "Noto Serif CJK SC"
+        ]
+    );
+    // zh-cn 只能整项相等，zh-cn 的前缀 zh 不算。
+    assert!(families_supporting(sorted.as_bytes(), "zh").is_empty());
+}
+
+/// 系统挑出的几款都排在 Noto CJK 前面，换成对应地区的版本后重复的只留一个。
+#[test]
+fn every_han_candidate_goes_before_noto() {
+    let database = database_with_families(&["Sarasa UI J", "Sarasa UI SC"]);
+    let fallback = CjkFallback::new(
+        HanRegion::Simplified,
+        &[
+            "WenQuanYi Micro Hei".to_owned(),
+            "Sarasa UI J".to_owned(),
+            "Sarasa UI SC".to_owned(),
+        ],
+        |family, region| regional_variant(&database, family, region),
+    );
+    assert_eq!(
+        fallback.script_fallback(Script::Han, "zh-CN"),
+        ["WenQuanYi Micro Hei", "Sarasa UI SC", "Noto Sans CJK SC"]
+    );
+}
+
 /// 界面语言决定汉字按哪个地区的写法；带地区的日文、韩文也要认出来（cosmic-text 只认光秃秃的 ja、ko）。
 #[test]
 fn the_interface_language_picks_the_han_region() {
@@ -44,11 +90,7 @@ fn the_interface_language_picks_the_han_region() {
 #[test]
 fn cjk_scripts_fall_back_to_the_system_choice_then_noto() {
     let same = |family: &str, _region: HanRegion| family.to_owned();
-    let fallback = CjkFallback::new(
-        HanRegion::Taiwan,
-        Some("WenQuanYi Zen Hei".to_owned()),
-        same,
-    );
+    let fallback = CjkFallback::new(HanRegion::Taiwan, &["WenQuanYi Zen Hei".to_owned()], same);
     assert_eq!(
         fallback.script_fallback(Script::Han, "zh-TW"),
         ["WenQuanYi Zen Hei", "Noto Sans CJK TC"]
@@ -66,7 +108,7 @@ fn cjk_scripts_fall_back_to_the_system_choice_then_noto() {
         PlatformFallback.script_fallback(Script::Arabic, "zh-TW")
     );
 
-    let without_system = CjkFallback::new(HanRegion::Simplified, None, same);
+    let without_system = CjkFallback::new(HanRegion::Simplified, &[], same);
     assert_eq!(
         without_system.script_fallback(Script::Han, "zh-CN"),
         ["Noto Sans CJK SC"]
@@ -76,7 +118,7 @@ fn cjk_scripts_fall_back_to_the_system_choice_then_noto() {
     let database = database_with_families(&["Noto Sans CJK KR", "Noto Sans CJK SC"]);
     let korean = CjkFallback::new(
         HanRegion::Simplified,
-        Some("Noto Sans CJK KR".to_owned()),
+        &["Noto Sans CJK KR".to_owned()],
         |family, region| regional_variant(&database, family, region),
     );
     assert_eq!(

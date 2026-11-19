@@ -26,12 +26,26 @@ pub fn adopt_font_families(interface: &str, monospace: &str) {
     // 三个查询并行跑，启动只等最慢的那个。
     // 拉丁字母的字体按英文问：中文环境下 fontconfig 给 sans-serif 的是中文字体（没配置过时
     // 常是韩文版 Noto CJK），西文也会用它；汉字另走 `CjkFallback`。
-    let sans = spawn_fontconfig_query("sans-serif:lang=en");
-    let mono = spawn_fontconfig_query("monospace:lang=en");
-    let han = spawn_fontconfig_query(&format!("sans-serif:lang={}", region.fontconfig_language()));
-    let sans = sans.and_then(finish_fontconfig_query);
-    let mono = mono.and_then(finish_fontconfig_query);
-    let han = han.and_then(finish_fontconfig_query);
+    let family = |pattern| spawn_fontconfig(&["-f", "%{family[0]}", pattern]);
+    let sans = family("sans-serif:lang=en");
+    let mono = family("monospace:lang=en");
+    let language = region.fontconfig_language();
+    let han = spawn_fontconfig(&[
+        "-s",
+        "-f",
+        "%{family[0]}\u{1f}%{lang}\u{1e}",
+        &format!("sans-serif:lang={language}"),
+    ]);
+    let sans = sans
+        .and_then(finish_fontconfig_query)
+        .and_then(|stdout| parse_fontconfig_family(&stdout));
+    let mono = mono
+        .and_then(finish_fontconfig_query)
+        .and_then(|stdout| parse_fontconfig_family(&stdout));
+    let han = han
+        .and_then(finish_fontconfig_query)
+        .map(|stdout| families_supporting(&stdout, language))
+        .unwrap_or_default();
 
     let mut font_system = font_system();
     let raw = font_system.raw();
@@ -44,7 +58,7 @@ pub fn adopt_font_families(interface: &str, monospace: &str) {
         |family: Option<String>| family.map(|family| regional_variant(&database, &family, region));
     let sans = chosen_or_system(&database, interface, system(sans));
     let mono = chosen_or_system(&database, monospace, system(mono));
-    let fallback = CjkFallback::new(region, han, |family, region| {
+    let fallback = CjkFallback::new(region, &han, |family, region| {
         regional_variant(&database, family, region)
     });
     if let Some(family) = sans {
@@ -187,8 +201,8 @@ fn regional_variant(database: &fontdb::Database, family: &str, region: HanRegion
         .unwrap_or_else(|| family.to_owned())
 }
 
-/// 汉字、注音、假名、谚文的回退：先用 fontconfig 给界面语言挑的字体（换成对应地区的版本），
-/// 再找对应写法的 Noto CJK，其余文字照 cosmic-text 的列表。
+/// 汉字、注音、假名、谚文的回退：先用 fontconfig 给界面语言排好的、支持这门语言的字体（换成
+/// 对应地区的版本），再找对应写法的 Noto CJK，其余文字照 cosmic-text 的列表。
 ///
 /// cosmic-text 只认得 Noto CJK；系统没装时按字体加载顺序挑第一个有这个字的，会在中文界面挑到
 /// 日文宋体，一个词里还会因为缺字混进第二种字体。
@@ -203,13 +217,16 @@ impl CjkFallback {
     /// 换成某个地区的版本（`regional_variant`）。
     fn new(
         region: HanRegion,
-        system: Option<String>,
+        system: &[String],
         variant: impl Fn(&str, HanRegion) -> String,
     ) -> Self {
         let list = |region: HanRegion| -> &'static [&'static str] {
             let mut families: Vec<&'static str> = Vec::new();
-            if let Some(system) = &system {
-                families.push(Box::leak(variant(system, region).into_boxed_str()));
+            for family in system {
+                let family = variant(family, region);
+                if !families.contains(&family.as_str()) {
+                    families.push(Box::leak(family.into_boxed_str()));
+                }
             }
             if !families.contains(&region.noto_family()) {
                 families.push(region.noto_family());
@@ -313,18 +330,18 @@ fn latin_advances<const N: usize>(
         .flatten()
 }
 
-fn spawn_fontconfig_query(pattern: &str) -> Option<Child> {
+fn spawn_fontconfig(args: &[&str]) -> Option<Child> {
     Command::new("fc-match")
-        .args(["-f", "%{family[0]}", pattern])
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .inspect_err(|error| tracing::warn!(%error, pattern, "fc-match could not start"))
+        .inspect_err(|error| tracing::warn!(%error, ?args, "fc-match could not start"))
         .ok()
 }
 
-fn finish_fontconfig_query(mut child: Child) -> Option<String> {
+fn finish_fontconfig_query(mut child: Child) -> Option<Vec<u8>> {
     let deadline = Instant::now() + FONTCONFIG_QUERY_TIMEOUT;
     loop {
         match child.try_wait() {
@@ -338,8 +355,28 @@ fn finish_fontconfig_query(mut child: Child) -> Option<String> {
             }
         }
     }
-    let output = child.wait_with_output().ok()?;
-    parse_fontconfig_family(&output.stdout)
+    Some(child.wait_with_output().ok()?.stdout)
+}
+
+/// `fc-match -s` 排好的候选（每条「家族 US 支持的语言 RS」，语言用 `|` 隔开）里支持 `language`
+/// 的家族，按 fontconfig 的先后、去重。只取第一个不行：常见的配置让 sans-serif 先用一款西文字体、
+/// 再接中文字体，fontconfig 的头一个答案就没有汉字，汉字回退整个落空，排版库按字重挑随便哪个
+/// 有这个字的字体——常规字挑到黑体，粗体挑到只有宋体才有的 Bold（论坛 17520 #10）。
+fn families_supporting(stdout: &[u8], language: &str) -> Vec<String> {
+    let mut families: Vec<String> = Vec::new();
+    for record in String::from_utf8_lossy(stdout).split('\u{1e}') {
+        let Some((family, languages)) = record.split_once('\u{1f}') else {
+            continue;
+        };
+        let family = family.trim();
+        if !family.is_empty()
+            && languages.split('|').any(|supported| supported == language)
+            && !families.iter().any(|known| known == family)
+        {
+            families.push(family.to_owned());
+        }
+    }
+    families
 }
 
 fn parse_fontconfig_family(stdout: &[u8]) -> Option<String> {

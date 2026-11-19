@@ -646,6 +646,7 @@ fn main() {
 
     let fonts = theme::read_stored_fonts(&theme::state_database_path());
     bennu_theme::font_families::adopt_font_families(&fonts.interface_font, &fonts.monospace_font);
+    let interface_scale = fonts.interface_scale();
     let result = iced::daemon(boot, update, view_picker)
         .title(daemon_title)
         .settings(iced::Settings {
@@ -654,6 +655,7 @@ fn main() {
         })
         .subscription(subscriptions::subscription)
         .theme(|daemon: &PickerDaemon, _| daemon.look.theme.clone())
+        .scale_factor(move |_, _| interface_scale)
         .run();
     if let Err(error) = result {
         tracing::error!("选择窗口运行失败: {error}");

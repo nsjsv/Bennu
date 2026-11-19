@@ -51,6 +51,9 @@ pub(crate) struct StoredUserPreferences {
     pub interface_font: Option<String>,
     #[serde(default)]
     pub monospace_font: Option<String>,
+    /// 正文字号（像素）；None 为旧版本数据，用默认字号。文件选择对话框也读这个键。
+    #[serde(default)]
+    pub interface_text_size: Option<u16>,
     pub file_operation_verification: String,
     pub browser_view_mode: String,
     /// 旧版本用边长而不是档位保存图标大小。只读：`icons_view_density` 缺失时
@@ -201,6 +204,7 @@ impl Default for StoredUserPreferences {
             terminal_shell: None,
             interface_font: None,
             monospace_font: None,
+            interface_text_size: None,
             file_operation_verification: "basic_metadata".to_owned(),
             browser_view_mode: "columns".to_owned(),
             icon_grid_size: None,

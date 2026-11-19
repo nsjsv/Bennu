@@ -23,3 +23,42 @@ pub const BOLD: Font = Font {
     weight: Weight::Bold,
     ..Font::DEFAULT
 };
+
+/// 设置里能选的正文字号（像素）。默认就是 [`BODY_SIZE`]。
+pub const TEXT_SIZE_CHOICES: [u16; 6] = [12, 13, 14, 15, 16, 18];
+pub const DEFAULT_TEXT_SIZE: u16 = 13;
+
+/// 选了别的正文字号时整个界面的缩放：字、行高、间距、图标按同一比例变。界面里列表行、侧栏行、
+/// 菜单项的高度都是写死的，只放大字会被行裁掉；整体缩放和浏览器缩放一样，不会裁。
+pub fn interface_scale(text_size: u16) -> f32 {
+    f32::from(text_size) / BODY_SIZE
+}
+
+/// 存下来的字号换成能选的那几档里最接近的一档（手改过、或以后换了档位）。
+pub fn nearest_text_size(stored: u16) -> u16 {
+    TEXT_SIZE_CHOICES
+        .into_iter()
+        .min_by_key(|choice| choice.abs_diff(stored))
+        .unwrap_or(DEFAULT_TEXT_SIZE)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_default_text_size_keeps_the_interface_unscaled() {
+        assert_eq!(f32::from(DEFAULT_TEXT_SIZE), BODY_SIZE);
+        assert!(TEXT_SIZE_CHOICES.contains(&DEFAULT_TEXT_SIZE));
+        assert_eq!(interface_scale(DEFAULT_TEXT_SIZE), 1.0);
+        assert_eq!(interface_scale(18), 18.0 / 13.0);
+    }
+
+    #[test]
+    fn a_stored_size_snaps_to_the_nearest_choice() {
+        assert_eq!(nearest_text_size(13), 13);
+        assert_eq!(nearest_text_size(17), 16);
+        assert_eq!(nearest_text_size(40), 18);
+        assert_eq!(nearest_text_size(0), 12);
+    }
+}

@@ -56,6 +56,19 @@ impl FileBrowser {
         self.restart_notice_visible = true;
         self.persist_user_preferences_command()
     }
+
+    /// 正文字号换算出的界面缩放，所有窗口一样；iced 每帧按它排版，所以选了马上生效。
+    pub(crate) fn interface_scale(&self) -> f32 {
+        bennu_theme::typography::interface_scale(self.user_config.interface_text_size)
+    }
+
+    pub(super) fn select_text_size(&mut self, text_size: u16) -> Task<Message> {
+        if self.user_config.interface_text_size == text_size {
+            return Task::none();
+        }
+        self.user_config.interface_text_size = text_size;
+        self.persist_user_preferences_command()
+    }
 }
 
 #[cfg(test)]

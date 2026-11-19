@@ -52,3 +52,55 @@ fn chosen_fonts_survive_the_settings_document() {
     assert_eq!(read.preferences.interface_font, "Fira Sans");
     assert_eq!(read.preferences.monospace_font, "Fira Mono");
 }
+
+/// 选了正文字号马上生效（不提示重启），记进设置文档、读回来不变；旧文档没有这个键用默认字号。
+#[test]
+fn choosing_a_text_size_scales_the_interface_at_once_and_is_saved() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    assert_eq!(browser.interface_scale(), 1.0);
+
+    drop(browser.select_text_size(18));
+
+    assert_eq!(browser.interface_scale(), 18.0 / 13.0);
+    assert!(!browser.restart_notice_visible);
+    let stored = browser.user_config.user_preferences().to_stored();
+    let read = config::UserPreferences::from_stored(stored, &config::default_user_config());
+    assert_eq!(read.preferences.interface_text_size, 18);
+
+    let mut old_document = config::default_user_config().user_preferences().to_stored();
+    old_document.interface_text_size = None;
+    let read = config::UserPreferences::from_stored(old_document, &config::default_user_config());
+    assert_eq!(
+        read.preferences.interface_text_size,
+        bennu_theme::typography::DEFAULT_TEXT_SIZE
+    );
+}
+
+/// 合成器报的拖放位置是窗口表面坐标；界面放大后要换成布局坐标，落点才对得上量出来的位置。
+#[test]
+fn native_drop_positions_follow_the_interface_scale() {
+    use desktop_linux::{
+        WaylandDndDropOrigin, WaylandDndDropPosition, WaylandFileDropTargetEvent,
+        WaylandFileDropTargetSessionId,
+    };
+
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    drop(browser.select_text_size(18));
+
+    drop(
+        browser.accept_wayland_target_event(WaylandFileDropTargetEvent::Entered {
+            target_session_id: WaylandFileDropTargetSessionId::unique(),
+            origin: WaylandDndDropOrigin::External,
+            position: WaylandDndDropPosition { x: 180.0, y: 90.0 },
+        }),
+    );
+
+    let position = browser
+        .file_drop_session
+        .as_ref()
+        .and_then(|session| session.position)
+        .expect("drop position");
+    let scale = 18.0 / 13.0;
+    assert!((position.x - 180.0 / scale).abs() < 0.001, "{position:?}");
+    assert!((position.y - 90.0 / scale).abs() < 0.001, "{position:?}");
+}

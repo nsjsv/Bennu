@@ -63,6 +63,7 @@ pub(crate) struct UserPreferences {
     pub(crate) terminal_shell: String,
     pub(crate) interface_font: String,
     pub(crate) monospace_font: String,
+    pub(crate) interface_text_size: u16,
     pub(crate) file_operation_verification: FileOperationVerification,
     pub(crate) browser_view_mode: BrowserViewMode,
     pub(crate) visible_column_count: usize,
@@ -122,6 +123,7 @@ impl UserPreferences {
             terminal_shell: config.terminal_shell.clone(),
             interface_font: config.interface_font.clone(),
             monospace_font: config.monospace_font.clone(),
+            interface_text_size: config.interface_text_size,
             file_operation_verification: config.file_operation_verification,
             browser_view_mode: config.browser_view_mode,
             visible_column_count: normalize_visible_column_count(config.visible_column_count),
@@ -176,6 +178,7 @@ impl UserPreferences {
         config.terminal_shell = self.terminal_shell.clone();
         config.interface_font = self.interface_font.clone();
         config.monospace_font = self.monospace_font.clone();
+        config.interface_text_size = self.interface_text_size;
         config.file_operation_verification = self.file_operation_verification;
         config.browser_view_mode = self.browser_view_mode;
         config.visible_column_count = normalize_visible_column_count(self.visible_column_count);
@@ -263,6 +266,7 @@ impl UserPreferences {
         stored.terminal_shell = Some(self.terminal_shell.clone());
         stored.interface_font = Some(self.interface_font.clone());
         stored.monospace_font = Some(self.monospace_font.clone());
+        stored.interface_text_size = Some(self.interface_text_size);
         stored.file_operation_verification =
             file_operation_verification_config_value(self.file_operation_verification).to_owned();
         stored.browser_view_mode =
@@ -446,6 +450,10 @@ impl UserPreferences {
                 .monospace_font
                 .clone()
                 .unwrap_or(default_preferences.monospace_font.clone()),
+            interface_text_size: stored.interface_text_size.map_or(
+                default_preferences.interface_text_size,
+                bennu_theme::typography::nearest_text_size,
+            ),
             file_operation_verification: unrecognized.value_or_default(
                 "file_operation_verification",
                 file_operation_verification_from_config_value(&stored.file_operation_verification),

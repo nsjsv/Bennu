@@ -63,6 +63,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Interface font", "界面字体"),
     ("Monospace font", "等宽字体"),
     ("Code previews and the terminal", "代码预览和终端"),
+    ("Text size", "界面字号"),
+    ("Icons and spacing scale with the text", "图标和间距跟着一起变"),
     // 文件
     ("File display", "文件显示"),
     ("Show Hidden Files", "显示隐藏文件"),

@@ -14,6 +14,9 @@ impl FileBrowser {
         scale_factor: f32,
         scale_generation: u64,
     ) -> Task<Message> {
+        // 布局里一个单位占多少客户区像素：窗口缩放（iced 的 `Rescaled` 只报这个）再乘界面
+        // 按正文字号的缩放。
+        let scale_factor = scale_factor * self.interface_scale();
         match event {
             X11FileDropTargetEvent::Entered {
                 target_session_id,

@@ -59,6 +59,7 @@ pub(crate) fn run(
     )
     .subscription(FileBrowser::subscription)
     .theme(FileBrowser::theme)
+    .scale_factor(|browser, _window| browser.interface_scale())
     .title(FileBrowser::title)
     .settings(iced::Settings {
         default_text_size: bennu_theme::typography::BODY_SIZE.into(),

@@ -355,6 +355,8 @@ pub(crate) struct UserConfig {
     pub(crate) interface_font: String,
     /// 等宽字体家族(代码预览、终端);空串 = 跟随系统。启动时生效。
     pub(crate) monospace_font: String,
+    /// 正文字号（`typography::TEXT_SIZE_CHOICES` 里的一档）；整个界面按它等比缩放，马上生效。
+    pub(crate) interface_text_size: u16,
     pub(crate) rendering_gpu_preference: RenderingGpuPreference,
     pub(crate) search_content_indexing_enabled: bool,
     pub(crate) search_max_extract_bytes: u64,
@@ -500,6 +502,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         terminal_shell: String::new(),
         interface_font: String::new(),
         monospace_font: String::new(),
+        interface_text_size: bennu_theme::typography::DEFAULT_TEXT_SIZE,
         rendering_gpu_preference: DEFAULT_RENDERING_GPU_PREFERENCE,
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,
@@ -557,6 +560,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         terminal_shell: String::new(),
         interface_font: String::new(),
         monospace_font: String::new(),
+        interface_text_size: bennu_theme::typography::DEFAULT_TEXT_SIZE,
         rendering_gpu_preference: DEFAULT_RENDERING_GPU_PREFERENCE,
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,

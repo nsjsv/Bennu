@@ -176,13 +176,26 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
     })
 }
 
-/// 主程序设置里选的界面、等宽字体，空串 = 跟随系统。
+/// 主程序设置里选的界面、等宽字体（空串 = 跟随系统）和正文字号（没存过 = 默认字号）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(crate) struct StoredFonts {
     #[serde(default)]
     pub(crate) interface_font: String,
     #[serde(default)]
     pub(crate) monospace_font: String,
+    #[serde(default)]
+    pub(crate) interface_text_size: Option<u16>,
+}
+
+impl StoredFonts {
+    /// 和主程序同一个换算：整个窗口按正文字号等比缩放。
+    pub(crate) fn interface_scale(&self) -> f32 {
+        use bennu_theme::typography::{interface_scale, nearest_text_size, DEFAULT_TEXT_SIZE};
+        interface_scale(
+            self.interface_text_size
+                .map_or(DEFAULT_TEXT_SIZE, nearest_text_size),
+        )
+    }
 }
 
 /// 进程启动时读一次：字体要在第一次排版前定下，之后改了要等这个进程重启。
@@ -232,6 +245,20 @@ mod tests {
         let fonts = read_stored_fonts(&database);
         assert_eq!(fonts.interface_font, "Fira Sans");
         assert_eq!(fonts.monospace_font, "");
+        // 旧文档没有字号：默认字号，不缩放。
+        assert_eq!(fonts.interface_scale(), 1.0);
+    }
+
+    #[test]
+    fn the_stored_text_size_scales_the_picker_like_the_application() {
+        let fonts = |size| StoredFonts {
+            interface_text_size: Some(size),
+            ..StoredFonts::default()
+        };
+        assert_eq!(fonts(13).interface_scale(), 1.0);
+        assert_eq!(fonts(18).interface_scale(), 18.0 / 13.0);
+        // 不在可选档位里的值按最接近的一档。
+        assert_eq!(fonts(17).interface_scale(), 16.0 / 13.0);
     }
 
     const GENERATED: &str = include_str!("../../bennu-theme/test-data/matugen.toml");

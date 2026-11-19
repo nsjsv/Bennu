@@ -124,7 +124,7 @@ impl FileBrowser {
             WaylandDndDropOrigin::External => {
                 return self.begin_native_external_file_drop_session(
                     identity,
-                    Point::new(position.x as f32, position.y as f32),
+                    self.wayland_drop_point(position),
                 );
             }
             WaylandDndDropOrigin::Internal(source_session_id) => {
@@ -152,7 +152,7 @@ impl FileBrowser {
             origin,
             phase: FileDropSessionPhase::Hovering,
             layout: FileDropLayoutState::Pending(request),
-            position: Some(Point::new(position.x as f32, position.y as f32)),
+            position: Some(self.wayland_drop_point(position)),
             hovered_target: None,
             tab_hover: None,
             hover_generation: 0,
@@ -171,7 +171,7 @@ impl FileBrowser {
     ) -> Task<Message> {
         self.move_native_file_drop_session(
             FileDropSessionIdentity::Wayland(target_session_id),
-            Point::new(position.x as f32, position.y as f32),
+            self.wayland_drop_point(position),
         )
     }
 
@@ -189,8 +189,14 @@ impl FileBrowser {
     ) -> Task<Message> {
         self.drop_native_file_drop_session(
             FileDropSessionIdentity::Wayland(target_session_id),
-            wayland_drop_position(position),
+            position.map(|position| self.wayland_drop_point(position)),
         )
+    }
+
+    /// 合成器报的是窗口表面坐标；界面按正文字号缩放后，布局坐标是它再除以缩放。
+    fn wayland_drop_point(&self, position: WaylandDndDropPosition) -> Point {
+        let scale = self.interface_scale();
+        Point::new(position.x as f32 / scale, position.y as f32 / scale)
     }
 
     fn finish_wayland_file_drag_source(
@@ -234,8 +240,4 @@ fn file_drop_origin_matches_wayland(
         }
         _ => false,
     }
-}
-
-fn wayland_drop_position(position: Option<WaylandDndDropPosition>) -> Option<Point> {
-    position.map(|position| Point::new(position.x as f32, position.y as f32))
 }

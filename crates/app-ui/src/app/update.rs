@@ -938,6 +938,7 @@ impl FileBrowser {
             Message::RestartNoticeDismissed => self.dismiss_restart_notice(),
             Message::InstalledFontsRead(fonts) => self.accept_installed_fonts(fonts),
             Message::FontSelected(role, family) => self.select_font(role, family),
+            Message::TextSizeSelected(text_size) => self.select_text_size(text_size),
             Message::ViewDensityWheel(region, delta) => {
                 self.handle_view_density_wheel(region, delta)
             }

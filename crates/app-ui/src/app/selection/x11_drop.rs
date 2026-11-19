@@ -377,3 +377,28 @@ fn position(scale_generation: u64, client_x: i16, client_y: i16) -> X11DndDropPo
         scale_generation,
     }
 }
+
+/// X11 报的是客户区物理像素：除以窗口缩放、再除以按正文字号的界面缩放，才是布局坐标。
+#[test]
+fn x11_drop_positions_follow_window_and_interface_scale() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    drop(browser.select_text_size(18));
+    let id = X11FileDropTargetSessionId::unique();
+
+    begin_session(&mut browser, id, position(1, 360, 180), 2.0, 1);
+
+    let drop_position = browser
+        .file_drop_session
+        .as_ref()
+        .and_then(|session| session.position)
+        .expect("drop position");
+    let units = 2.0 * 18.0 / 13.0;
+    assert!(
+        (drop_position.x - 360.0 / units).abs() < 0.001,
+        "{drop_position:?}"
+    );
+    assert!(
+        (drop_position.y - 180.0 / units).abs() < 0.001,
+        "{drop_position:?}"
+    );
+}

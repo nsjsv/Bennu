@@ -12,9 +12,8 @@ use crate::formatting::format_middle_ellipsized_text;
 use crate::formatting::item_count_label;
 use crate::model::{
     ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt,
-    FileGroupingMode, FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences,
-    Message, ScrollbarRegion, SidebarBookmarkContextMenuState, TrashContextMenuState,
-    TrashMenuItem,
+    FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences, Message,
+    ScrollbarRegion, SidebarBookmarkContextMenuState, TrashContextMenuState, TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
@@ -22,11 +21,11 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
-use super::context_menu_submenu::{
-    CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING, CONTEXT_MENU_PADDING,
-};
 use super::dialog::{self, Dialog};
-use super::file_context_menu::file_context_menu_panel;
+use super::file_context_menu::{
+    file_context_menu_panel, CONTEXT_MENU_ITEM_HEIGHT, CONTEXT_MENU_ITEM_SPACING,
+    CONTEXT_MENU_PADDING,
+};
 use super::network_connections::network_connection_context_menu_panel;
 use super::option_controls::action_choice_row;
 use super::{themed_icon, IconTone, MENU_ICON_SIZE};
@@ -242,18 +241,17 @@ pub(super) struct ContextMenuPanels<'a> {
 pub(super) fn context_menu_panel<'a>(
     menu: &'a ContextMenuState,
     keyboard_modifiers: iced::keyboard::Modifiers,
-    context_menus: &'a ContextMenuPreferences,
-    list_view_preferences: &'a ListViewPreferences,
-    file_grouping: FileGroupingMode,
+    config: &'a crate::config::UserConfig,
 ) -> ContextMenuPanels<'a> {
+    let context_menus = &config.context_menus;
+    let list_view_preferences = &config.list_view_preferences;
     match menu {
         ContextMenuState::Trash(menu) => ContextMenuPanels {
             root: trash_context_menu_panel(menu, context_menus),
             submenu: None,
         },
         ContextMenuState::FileArea(menu) => {
-            let (root, submenu) =
-                file_context_menu_panel(menu, context_menus, keyboard_modifiers, file_grouping);
+            let (root, submenu) = file_context_menu_panel(menu, keyboard_modifiers, config);
             ContextMenuPanels { root, submenu }
         }
         ContextMenuState::ListColumns(menu) => ContextMenuPanels {

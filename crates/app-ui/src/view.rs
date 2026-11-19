@@ -10,7 +10,6 @@ mod batch_rename;
 mod checksum;
 mod color_scheme_picker;
 mod context_menu_settings;
-mod context_menu_submenu;
 mod convert;
 mod dialog;
 mod file_context_menu;
@@ -394,9 +393,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         let panels = context_menu_panel(
             context_menu,
             browser.keyboard_modifiers,
-            &browser.user_config().context_menus,
-            &browser.user_config().list_view_preferences,
-            browser.user_config().file_grouping,
+            browser.user_config(),
         );
         // 主菜单只按自身尺寸做 At 钳制,子菜单展开收起永不挤动它;
         // 子菜单后 push,翻转重叠时绘制在主菜单之上且事件先达。

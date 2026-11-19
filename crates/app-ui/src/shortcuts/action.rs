@@ -31,6 +31,7 @@ pub(crate) enum ShortcutAction {
     Redo,
     FileProperties,
     AddToFavorites,
+    OpenContextMenu,
     SelectAll,
     InvertSelection,
     NewTab,
@@ -389,6 +390,18 @@ const ACTIONS: &[ActionSpec] = &[
         scope: Browser,
         context: Content,
         keys: &[KeyPress::ctrl('B')],
+    },
+    ActionSpec {
+        action: ShortcutAction::OpenContextMenu,
+        config_key: "open_context_menu",
+        label: || tr!("Open the Context Menu"),
+        group: G::Files,
+        scope: Browser,
+        context: Content,
+        keys: &[
+            shift_named(NamedKey::Function(10)),
+            KeyPress::named(NamedKey::ContextMenu),
+        ],
     },
     ActionSpec {
         action: ShortcutAction::SelectAll,

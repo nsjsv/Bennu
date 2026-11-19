@@ -514,6 +514,9 @@ impl FileBrowser {
                     Task::none()
                 }
             }
+            Message::KeyboardContextMenuAnchorMeasured(bounds) => {
+                self.open_context_menu_at_measured_selection(&bounds)
+            }
             Message::ColumnEntryBoundsMeasured(bounds, viewports) => {
                 let drag_icon_preload = self.refresh_file_drag_preview_layout(&bounds);
                 self.note_file_drag_viewport(&bounds, &viewports);

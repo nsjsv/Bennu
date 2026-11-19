@@ -48,6 +48,8 @@ pub(crate) enum FileDragHitTestMarker {
 
 pub(crate) enum FileDragHitTestBoundsRequest {
     SelectionMarquee,
+    /// 键盘打开右键菜单：量出选中项在屏幕上的位置，菜单贴着它出来。
+    KeyboardContextMenu,
     Breadcrumbs(u64),
     FileDropLayout(FileDropLayoutRequest),
 }
@@ -277,6 +279,9 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
                 self.entries.clone(),
                 self.scrollable_viewports.clone(),
             ),
+            FileDragHitTestBoundsRequest::KeyboardContextMenu => {
+                Message::KeyboardContextMenuAnchorMeasured(self.entries.clone())
+            }
             FileDragHitTestBoundsRequest::Breadcrumbs(generation) => {
                 Message::BreadcrumbDropTargetBoundsMeasured(generation, self.breadcrumb_targets())
             }

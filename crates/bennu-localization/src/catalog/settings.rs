@@ -153,6 +153,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Vim Commands", "vim 命令"),
     ("-- Select --", "-- 选择 --"),
     ("Keyboard Shortcuts", "快捷键一览"),
+    ("Open the Context Menu", "打开右键菜单"),
     ("Moving and Selecting", "移动和选择"),
     ("Move the cursor", "移动光标"),
     ("First / last item", "第一项 / 最后一项"),

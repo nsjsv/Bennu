@@ -224,6 +224,17 @@ pub fn context_menu_item_button_style() -> fn(&Theme, button::Status) -> button:
     context_menu_item_button_style_for_status
 }
 
+/// 键盘停在这一行：和鼠标悬停画得一样（按下时照常显示按下）。
+pub fn context_menu_highlighted_item_button_style() -> fn(&Theme, button::Status) -> button::Style {
+    |theme, status| {
+        let status = match status {
+            button::Status::Pressed => button::Status::Pressed,
+            _ => button::Status::Hovered,
+        };
+        context_menu_item_button_style_for_status(theme, status)
+    }
+}
+
 fn context_menu_item_button_style_for_status(
     theme: &Theme,
     status: button::Status,

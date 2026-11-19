@@ -485,6 +485,7 @@ pub(crate) enum Message {
     ColumnBrowserCursorEntered(BrowserPaneId),
     ColumnBrowserCursorExited(BrowserPaneId),
     ColumnEntryBoundsMeasured(Vec<ColumnEntryBounds>, Vec<iced::Rectangle>),
+    KeyboardContextMenuAnchorMeasured(Vec<ColumnEntryBounds>),
     BreadcrumbDropTargetBoundsMeasured(u64, Vec<BreadcrumbDropTargetBounds>),
     FileDropLayoutMeasured(FileDropLayoutRequest, FileDragHitTestBounds),
     PaneCursorEntered(BrowserPaneId),
@@ -1003,6 +1004,15 @@ pub(crate) struct FileContextMenuState {
     pub(crate) selection_archives: Vec<PathBuf>,
     /// 菜单发起位置在压缩包内部（含包根）：条目菜单切换为只读子集。
     pub(crate) inside_archive: bool,
+    /// 键盘在菜单里停在哪；鼠标移进菜单行就清掉，两种高亮不同时出现。
+    pub(crate) keyboard_highlight: Option<MenuHighlight>,
+}
+
+/// 键盘在菜单里的位置：第几行，展开了子菜单时还有子菜单里的第几项。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MenuHighlight {
+    pub(crate) row: usize,
+    pub(crate) member: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

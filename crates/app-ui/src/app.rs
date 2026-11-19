@@ -13,6 +13,7 @@ pub(crate) mod checksum;
 mod column_resize;
 mod column_scroll;
 mod config_persistence;
+mod context_menu_keys;
 mod context_menu_settings;
 pub(crate) mod convert;
 mod desktop_activation;

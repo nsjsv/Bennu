@@ -35,6 +35,7 @@ mod column_entry_bounds;
 mod command_line;
 mod commands;
 mod config;
+mod context_menu_rows;
 mod directory_summary;
 mod file_drag_hit_test_bounds;
 mod file_drag_hit_test_marker;

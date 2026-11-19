@@ -41,6 +41,9 @@ impl FileBrowser {
         if self.shortcut_help_open {
             return self.shortcut_help_key(&key, modifiers);
         }
+        if let Some(task) = self.file_context_menu_key(&key, modifiers) {
+            return task;
+        }
 
         // 高级新建文件夹弹窗:Ctrl+Enter 快捷创建,优先于内容快捷键路由;
         // 编辑器把 Ctrl+Enter 当换行捕获,但事件仍会到达全局路由层。
@@ -336,6 +339,7 @@ impl FileBrowser {
             ShortcutAction::ToggleSidebar => self.toggle_sidebar(),
             ShortcutAction::OpenSettings => self.open_settings(),
             ShortcutAction::ShowShortcuts => self.toggle_shortcut_help(),
+            ShortcutAction::OpenContextMenu => self.open_context_menu_from_keyboard(),
         }
     }
 

@@ -16,12 +16,16 @@ impl FileBrowser {
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
-        self.open_trash_context_menu(None);
+        self.open_trash_context_menu(None, self.cursor_or_origin());
         rename_command
     }
 
     /// 配置后没有可见项时不进入菜单状态，与界面的面板选择同一谓词。
-    pub(super) fn open_trash_context_menu(&mut self, target: Option<PathBuf>) {
+    pub(super) fn open_trash_context_menu(
+        &mut self,
+        target: Option<PathBuf>,
+        position: iced::Point,
+    ) {
         if self
             .user_config
             .context_menus
@@ -32,7 +36,7 @@ impl FileBrowser {
         }
         self.context_menu = Some(ContextMenuState::Trash(TrashContextMenuState {
             target,
-            position: self.cursor_or_origin(),
+            position,
         }));
     }
 

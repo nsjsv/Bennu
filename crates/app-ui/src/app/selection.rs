@@ -416,6 +416,15 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_entry_right_clicked(&mut self, path: PathBuf) -> Task<Message> {
+        self.open_entry_context_menu(path, self.cursor_or_origin())
+    }
+
+    /// 条目菜单：右键点在条目上，或键盘对选中项打开（`position` 是菜单左上角）。
+    pub(in crate::app) fn open_entry_context_menu(
+        &mut self,
+        path: PathBuf,
+        position: iced::Point,
+    ) -> Task<Message> {
         if self.tab().view_mode() == BrowserViewMode::Columns {
             self.record_pointer_clicked_column(self.entry_parent_directory(&path));
         }
@@ -430,7 +439,7 @@ impl FileBrowser {
         let can_batch_rename = self.batch_rename_available_for_selection();
         let can_create_symlink = self.selection_all_paths_local();
         if self.tab().location == BrowserLocation::Trash {
-            self.open_trash_context_menu(Some(path));
+            self.open_trash_context_menu(Some(path), position);
         } else if self.file_area_menu_is_visible(true, target_kind, can_batch_rename) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
                 place: self.file_menu_place(),
@@ -440,13 +449,14 @@ impl FileBrowser {
                 can_batch_rename,
                 can_create_symlink,
                 delete_action,
-                position: self.cursor_or_origin(),
+                position,
                 expansion: FileContextMenuExpansion::None,
                 // 分组方式入口只属于空白菜单,条目菜单一律不带。
                 grouping_entry_visible: false,
                 // 解压菜单的消费数据:选中集合里的归档与「是否在包内」。
                 selection_archives: self.archive_selection_paths(),
                 inside_archive: self.current_directory_is_inside_archive(),
+                keyboard_highlight: None,
             }));
         }
         Task::batch([
@@ -465,6 +475,15 @@ impl FileBrowser {
     }
 
     pub(super) fn handle_blank_area_right_clicked(&mut self, directory: PathBuf) -> Task<Message> {
+        self.open_blank_context_menu(directory, self.cursor_or_origin())
+    }
+
+    /// 空白处菜单：右键点在空白处，或键盘在没有选中项时打开。
+    pub(in crate::app) fn open_blank_context_menu(
+        &mut self,
+        directory: PathBuf,
+        position: iced::Point,
+    ) -> Task<Message> {
         let expansion_command = if self.tab().view_mode() == BrowserViewMode::Icons
             && self.tab().current_directory() == Some(directory.as_path())
         {
@@ -488,13 +507,14 @@ impl FileBrowser {
                 can_batch_rename: false,
                 can_create_symlink: false,
                 delete_action: FileDeleteAction::MoveToTrash,
-                position: self.cursor_or_origin(),
+                position,
                 expansion: FileContextMenuExpansion::None,
                 // 按打开菜单那一刻的视图模式定死入口可见性,后续视图
                 // 切换不会让已打开的菜单中途长出入口。
                 grouping_entry_visible: file_grouping_entry_visible(self.tab().view_mode()),
                 selection_archives: Vec::new(),
                 inside_archive: self.current_directory_is_inside_archive(),
+                keyboard_highlight: None,
             }));
         }
         Task::batch([expansion_command, rename_command])
@@ -550,8 +570,10 @@ impl FileBrowser {
         &mut self,
         expansion: FileContextMenuExpansion,
     ) -> Task<Message> {
+        // 只有鼠标发这条消息（悬停、点没有自己动作的组行）：鼠标接手，键盘高亮让开。
         if let Some(ContextMenuState::FileArea(menu)) = &mut self.context_menu {
             menu.expansion = expansion;
+            menu.keyboard_highlight = None;
         }
         Task::none()
     }

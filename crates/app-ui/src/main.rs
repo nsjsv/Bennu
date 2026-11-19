@@ -65,6 +65,7 @@ mod sidebar_devices;
 mod startup_probe_cache;
 mod startup_rendering;
 mod startup_trace;
+mod terminal_detach;
 mod terminal_panel;
 // 纯搬移：文本预览模型已下沉 bennu-preview，re-export 维持
 // crate::text_preview::* 既有调用路径（model.rs 的 Message 变体、
@@ -104,7 +105,13 @@ fn main() -> std::process::ExitCode {
     };
 
     let (application_launch_request, activation_service) = match action {
-        command_line::CommandLineAction::Launch(request) => (Some(request), false),
+        command_line::CommandLineAction::Launch(request) => {
+            if let Err(error) = terminal_detach::detach_from_launching_terminal() {
+                eprintln!("bennu: could not detach from the terminal: {error}");
+                return std::process::ExitCode::FAILURE;
+            }
+            (Some(request), false)
+        }
         command_line::CommandLineAction::ActivationService => (None, true),
         command_line::CommandLineAction::RendererProbe => {
             return match startup_rendering::run_renderer_probe_process() {

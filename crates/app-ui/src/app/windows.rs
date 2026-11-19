@@ -551,6 +551,11 @@ impl FileBrowser {
     /// 关掉最上面的一层（弹窗、菜单、拖拽、重命名、图标展开树）；什么都没关时返回 None，
     /// Esc 据此往下一层走（清空选择）。点击外部也走这里，但不清空选择。
     fn dismiss_floating_layer(&mut self) -> Option<Task<Message>> {
+        if self.shortcut_help_open {
+            self.shortcut_help_open = false;
+            return Some(Task::none());
+        }
+
         if self.destructive_action_confirmation.is_some() {
             self.destructive_action_confirmation = None;
             return Some(Task::none());

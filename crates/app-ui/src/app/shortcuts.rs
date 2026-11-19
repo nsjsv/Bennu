@@ -38,6 +38,10 @@ impl FileBrowser {
             return task;
         }
 
+        if self.shortcut_help_open {
+            return self.shortcut_help_key(&key, modifiers);
+        }
+
         // 高级新建文件夹弹窗:Ctrl+Enter 快捷创建,优先于内容快捷键路由;
         // 编辑器把 Ctrl+Enter 当换行捕获,但事件仍会到达全局路由层。
         if self.advanced_new_folder.is_some()
@@ -221,6 +225,7 @@ impl FileBrowser {
             || self.advanced_new_folder.is_some()
             || self.network_connection_editor.is_some()
             || self.open_with.is_some()
+            || self.shortcut_help_open
     }
 
     /// 应用级快捷键（导航、标签页、视图、面板）只作用于主窗口：焦点在设置、属性等辅助窗口
@@ -330,6 +335,7 @@ impl FileBrowser {
             ShortcutAction::OpenExternalTerminal => self.open_external_terminal_from_keyboard(),
             ShortcutAction::ToggleSidebar => self.toggle_sidebar(),
             ShortcutAction::OpenSettings => self.open_settings(),
+            ShortcutAction::ShowShortcuts => self.toggle_shortcut_help(),
         }
     }
 

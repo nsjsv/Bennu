@@ -69,6 +69,7 @@ mod selection;
 mod session_persistence;
 mod session_restore;
 mod shortcut_commands;
+mod shortcut_help;
 mod shortcuts;
 mod sidebar_bookmarks;
 mod sidebar_devices;
@@ -438,6 +439,8 @@ pub(crate) struct FileBrowser {
     pub(crate) type_ahead: file_core::type_ahead::TypeAheadBuffer,
     /// vim 模式下字母层的状态（待定的第一个键、范围选择、`/` 跳转）。
     pub(crate) vim: crate::shortcuts::VimState,
+    /// F1 快捷键一览开着。
+    pub(crate) shortcut_help_open: bool,
     /// 本窗口最近关掉的标签页（快照，后关的在最后），Ctrl+Shift+T 依次恢复。只在内存里。
     closed_tabs: Vec<crate::model::BrowserTabSession>,
     next_pane_id: u64,
@@ -820,6 +823,7 @@ impl FileBrowser {
             next_tab_id: 1,
             type_ahead: file_core::type_ahead::TypeAheadBuffer::default(),
             vim: crate::shortcuts::VimState::default(),
+            shortcut_help_open: false,
             closed_tabs: Vec::new(),
             next_pane_id: 1,
             next_icon_grid_expansion_session_id: 1,

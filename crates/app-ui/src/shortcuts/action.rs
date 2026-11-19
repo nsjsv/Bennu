@@ -58,6 +58,7 @@ pub(crate) enum ShortcutAction {
     OpenExternalTerminal,
     ToggleSidebar,
     OpenSettings,
+    ShowShortcuts,
     TerminalNewTab,
     TerminalCloseTab,
 }
@@ -639,6 +640,18 @@ const ACTIONS: &[ActionSpec] = &[
         scope: Browser,
         context: App,
         keys: &[KeyPress::ctrl(',')],
+    },
+    ActionSpec {
+        action: ShortcutAction::ShowShortcuts,
+        config_key: "show_shortcuts",
+        label: || tr!("Keyboard Shortcuts"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[
+            KeyPress::named(NamedKey::Function(1)),
+            KeyPress::ctrl_shift('/'),
+        ],
     },
     ActionSpec {
         action: ShortcutAction::TerminalNewTab,

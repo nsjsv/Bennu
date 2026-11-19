@@ -1,5 +1,6 @@
 mod action;
 mod fixed_keys;
+mod help_sheet;
 mod key_press;
 mod keymap;
 mod letter_layer;
@@ -9,6 +10,7 @@ pub(crate) use action::{DeclaredContext, ShortcutAction, ShortcutGroup};
 pub(crate) use fixed_keys::{
     fixed_key, is_reserved, FixedKey, MoveExtent, MoveStep, SelectionMove,
 };
+pub(crate) use help_sheet::{shortcut_help_sections, HelpSection};
 pub(crate) use key_press::{KeyPress, NamedKey, ShortcutKey};
 pub(crate) use keymap::{KeyArea, ShortcutConfig};
 pub(crate) use letter_layer::{LetterMode, VimCommand, VimFeed, VimState};

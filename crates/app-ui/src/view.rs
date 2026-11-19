@@ -40,6 +40,7 @@ mod search_panel;
 mod search_settings;
 mod settings_group;
 mod settings_window;
+mod shortcut_help;
 mod shortcut_settings;
 mod sidebar_panel;
 mod tab_bar;
@@ -487,6 +488,16 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
                 browser.sidebar_layout_width() + ERROR_NOTIFICATION_CONTENT_OFFSET_X,
                 ERROR_NOTIFICATION_FLOAT_Y,
             )),
+            captures_pointer: true,
+        });
+    }
+
+    if browser.shortcut_help_open {
+        floating_input =
+            floating_input.with_additional_panel(BrowserFloatingInput::DismissibleBlocking);
+        floating.push(FloatingContent {
+            element: shortcut_help::shortcut_help_panel(browser),
+            placement: FloatingPlacement::Center,
             captures_pointer: true,
         });
     }

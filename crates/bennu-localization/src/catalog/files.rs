@@ -103,6 +103,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Send to Phone", "发送到手机"),
     ("Empty Trash", "清空回收站"),
     ("Open Containing Folder", "打开所在目录"),
+    ("Add to Favorites", "加入收藏夹"),
     ("Remove from Favorites", "从收藏夹移除"),
     ("File entry menu", "文件条目菜单"),
     ("Blank area menu", "空白处菜单"),

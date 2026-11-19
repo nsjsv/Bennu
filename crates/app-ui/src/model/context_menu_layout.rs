@@ -4,7 +4,7 @@
 //! ContextMenuState 构造边界的空菜单判定、设置页展示与编辑都从这里取数据。
 
 use super::context_menu_items::*;
-use crate::model::{FileMenuPlace, ListColumnKind, SearchEntryTypePreset};
+use crate::model::{FileMenuPlace, FileMenuTargetKind, ListColumnKind, SearchEntryTypePreset};
 use crate::network_connections::SidebarNetworkConnectionAction;
 use crate::sidebar_devices::SidebarDeviceAction;
 use bennu_theme::icons::IconSymbol;
@@ -237,14 +237,15 @@ impl ContextMenuPreferences {
     pub(crate) fn file_entry_menu_entries(
         &self,
         place: FileMenuPlace,
-        target_is_directory: bool,
+        target_kind: FileMenuTargetKind,
         can_batch_rename: bool,
         can_create_symlink: bool,
     ) -> Vec<FileEntryMenuEntry> {
         let eligible = |entry: &ContextMenuEntry<FileAreaMenuItem>| {
             entry.visible
                 && match entry.item {
-                    FileAreaMenuItem::FileChecksum => !target_is_directory,
+                    FileAreaMenuItem::FileChecksum => target_kind == FileMenuTargetKind::File,
+                    FileAreaMenuItem::AddToFavorites => target_kind == FileMenuTargetKind::Folder,
                     FileAreaMenuItem::BatchRename => can_batch_rename,
                     FileAreaMenuItem::CreateSymlink => can_create_symlink,
                     FileAreaMenuItem::OpenContainingFolder => place == FileMenuPlace::SearchResults,

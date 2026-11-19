@@ -2,11 +2,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use file_core::FileKind;
-use iced::{Point, Task};
+use iced::{Point, Rectangle, Task};
 
 use super::{FileBrowser, POINTER_DRAG_ACTIVATION_DISTANCE};
 use crate::animation::elapsed_fraction as sidebar_bookmark_animation_progress;
-use crate::config::FavoriteTransferDevice;
 use crate::model::{
     ContextMenuState, FileDragPhase, FileDropTarget, Message, NavigationMode,
     SidebarBookmarkContextMenuState, SidebarBookmarkDragState, SidebarBookmarkDropSlot,
@@ -18,38 +17,7 @@ use bennu_theme::animation::ease_out_cubic as sidebar_bookmark_ease_out_cubic;
 #[cfg(test)]
 mod tests;
 
-use crate::view::{
-    SIDEBAR_LIST_PADDING_TOP, SIDEBAR_ROW_HEIGHT as SIDEBAR_LOCATION_ROW_HEIGHT,
-    SIDEBAR_ROW_SPACING, SIDEBAR_SECTION_LABEL_HEIGHT,
-};
-
-/// 侧栏收藏夹上面那几行固定条目，按显示顺序。界面按它画，收藏夹拖放落点按它的
-/// 行数算——两处共用这一份，加一个固定入口不会再让落点错位（LocalSend 入口曾被漏算）。
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum SidebarFixedEntry<'a> {
-    Location(&'a SidebarLocation),
-    Trash,
-    LocalSend,
-    /// LocalSend 下面一台收藏的设备。
-    LocalSendDevice(&'a FavoriteTransferDevice),
-}
-
-impl FileBrowser {
-    pub(crate) fn sidebar_fixed_entries(&self) -> Vec<SidebarFixedEntry<'_>> {
-        self.sidebar_locations
-            .iter()
-            .filter(|location| !location.kind.is_user_favorite())
-            .map(SidebarFixedEntry::Location)
-            .chain([SidebarFixedEntry::Trash, SidebarFixedEntry::LocalSend])
-            .chain(
-                self.user_config
-                    .transfer_favorite_devices
-                    .iter()
-                    .map(SidebarFixedEntry::LocalSendDevice),
-            )
-            .collect()
-    }
-}
+use crate::view::{SIDEBAR_ROW_HEIGHT as SIDEBAR_LOCATION_ROW_HEIGHT, SIDEBAR_ROW_SPACING};
 
 const SIDEBAR_BOOKMARK_INSERT_EDGE_HEIGHT: f32 = 8.0;
 const SIDEBAR_BOOKMARK_MOTION_DURATION: Duration = Duration::from_millis(150);
@@ -95,38 +63,36 @@ impl FileBrowser {
         Task::none()
     }
 
+    /// 正在拖一个能成为新收藏的文件夹：收藏区这时才接插入落点，末尾多出一条空白带。
     pub(crate) fn can_drop_sidebar_bookmark(&self) -> bool {
-        let Some(file_drag) = &self.file_drag else {
-            return false;
-        };
-        file_drag.is_dragging()
-            && file_drag.sources.len() == 1
-            && self.entry_kind(&file_drag.sources[0]) == Some(FileKind::Directory)
+        self.file_drag
+            .as_ref()
+            .is_some_and(|file_drag| file_drag.is_dragging() && file_drag.bookmark_source.is_some())
     }
 
-    pub(super) fn update_sidebar_bookmark_drop_slot(&mut self, position: Point) -> Task<Message> {
-        if !self.can_drop_sidebar_bookmark() {
-            return self.clear_sidebar_bookmark_drop_slot();
+    /// 拖动开始时定下：只拖了一个还没收藏的文件夹，这次拖动才能在收藏区插成新收藏。
+    /// 已收藏的拖过来，收藏行只当目录，不出插入线。
+    pub(super) fn new_favorite_from_drag(&self, sources: &[PathBuf]) -> Option<PathBuf> {
+        match sources {
+            [source]
+                if self.entry_kind(source) == Some(FileKind::Directory)
+                    && !self.sidebar_favorite_exists(source) =>
+            {
+                Some(source.clone())
+            }
+            _ => None,
         }
+    }
 
-        match self.sidebar_bookmark_pointer_target(position.y) {
-            SidebarBookmarkPointerTarget::Insert(slot) => {
-                self.hovered_sidebar = None;
-                self.cursor_paste_directory = None;
-                self.sidebar_bookmark_drop_slot = Some(slot);
-                self.set_file_drop_target(Some(FileDropTarget::SidebarBookmarkSlot(slot)));
-            }
-            SidebarBookmarkPointerTarget::Directory(path) => {
-                self.sidebar_bookmark_drop_slot = None;
-                self.hovered_sidebar = Some(path.clone());
-                self.set_file_drag_target(path);
-            }
-            SidebarBookmarkPointerTarget::None => {
-                self.sidebar_bookmark_drop_slot = None;
-                self.clear_file_drag_target();
-            }
+    /// 应用内拖放（X11、原生拖放没起来）在侧栏上移动。原生拖放期间侧栏收不到指针移动，
+    /// 所以这里只服务应用内拖放：和原生拖放一样，拿拖动开始时量好的布局和窗口坐标算落点。
+    pub(super) fn follow_in_app_drag_over_sidebar(&mut self) -> Task<Message> {
+        let position = self.cursor_position.get();
+        if let Some(session) = &mut self.file_drop_session {
+            session.position = position;
         }
-        Task::none()
+        self.cursor_paste_directory = None;
+        self.refresh_hovered_target_from_ready_layout()
     }
 
     pub(super) fn clear_sidebar_bookmark_drop_slot(&mut self) -> Task<Message> {
@@ -135,7 +101,14 @@ impl FileBrowser {
         Task::none()
     }
 
-    pub(super) fn insert_sidebar_bookmark_from_drag(
+    /// 右键「加入收藏夹」：加到最后。
+    pub(super) fn add_sidebar_bookmark(&mut self, path: PathBuf) -> Task<Message> {
+        self.context_menu = None;
+        let index = self.sidebar_favorite_locations().len();
+        self.insert_sidebar_bookmark(SidebarBookmarkDropSlot::Insert { index }, path)
+    }
+
+    pub(super) fn insert_sidebar_bookmark(
         &mut self,
         slot: SidebarBookmarkDropSlot,
         source: PathBuf,
@@ -452,104 +425,33 @@ impl FileBrowser {
         }
     }
 
-    fn sidebar_favorite_exists(&self, path: &PathBuf) -> bool {
+    pub(super) fn sidebar_favorite_exists(&self, path: &Path) -> bool {
         self.sidebar_locations
             .iter()
-            .any(|location| location.kind.is_user_favorite() && location.path == *path)
-    }
-
-    fn sidebar_bookmark_pointer_target(&self, position_y: f32) -> SidebarBookmarkPointerTarget {
-        let favorites = self.sidebar_favorite_locations();
-        let first_row_top = self.sidebar_favorite_first_row_top();
-        sidebar_bookmark_pointer_target(position_y, first_row_top, &favorites)
-    }
-
-    /// 列表从侧栏顶栏下沿开始：固定条目 → “收藏夹”标题 → 第一个收藏。
-    fn sidebar_favorite_first_row_top(&self) -> f32 {
-        SIDEBAR_LIST_PADDING_TOP
-            + self.sidebar_fixed_entries().len() as f32 * sidebar_bookmark_motion_stride()
-            + SIDEBAR_SECTION_LABEL_HEIGHT
-            + SIDEBAR_ROW_SPACING
+            .any(|location| location.kind.is_user_favorite() && location.path == path)
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum SidebarBookmarkPointerTarget {
-    Insert(SidebarBookmarkDropSlot),
-    Directory(PathBuf),
-    None,
-}
-
-fn sidebar_bookmark_pointer_target(
+/// 拖新收藏时收藏区里的落点。按顺序走收藏行：行顶往下 8px 以内插到这一行前，行底往上
+/// 8px 以内留给下一行去算（插到它前面），中间是放进这个目录；走完还没落下就是加到最后。
+/// 这样区里每一点都有归属：标题落在第一行之前，行间缝落在下一行之前，末尾空白带落在最后，
+/// 没有收藏时整区就是加进去。插入线就画在缝上，对着线松手一定插得进去。
+/// 8px 是行高 32 的四分之一，和地方面板常见的插入指示条一样高。
+pub(in crate::app) fn favorite_drop_target<'a>(
+    rows: impl IntoIterator<Item = (&'a Path, Rectangle)>,
     position_y: f32,
-    first_row_top: f32,
-    favorites: &[SidebarLocation],
-) -> SidebarBookmarkPointerTarget {
-    if favorites.is_empty() {
-        return if position_y >= first_row_top - SIDEBAR_ROW_SPACING {
-            SidebarBookmarkPointerTarget::Insert(SidebarBookmarkDropSlot::Insert { index: 0 })
-        } else {
-            SidebarBookmarkPointerTarget::None
-        };
-    }
-
-    for (index, location) in favorites.iter().enumerate() {
-        let row_top = first_row_top + index as f32 * sidebar_bookmark_motion_stride();
-        let row_bottom = row_top + SIDEBAR_LOCATION_ROW_HEIGHT;
-        let row_area_top = row_top - SIDEBAR_ROW_SPACING / 2.0;
-        let row_area_bottom = row_bottom + SIDEBAR_ROW_SPACING / 2.0;
-        if position_y < row_area_top || position_y > row_area_bottom {
-            continue;
+) -> FileDropTarget {
+    let mut row_count = 0;
+    for (index, (directory, bounds)) in rows.into_iter().enumerate() {
+        if position_y < bounds.y + SIDEBAR_BOOKMARK_INSERT_EDGE_HEIGHT {
+            return FileDropTarget::SidebarBookmarkSlot(SidebarBookmarkDropSlot::Insert { index });
         }
-
-        return match sidebar_bookmark_row_pointer_target(position_y, row_top, row_bottom - row_top)
-        {
-            SidebarBookmarkRowPointerTarget::InsertBefore => {
-                SidebarBookmarkPointerTarget::Insert(SidebarBookmarkDropSlot::Insert { index })
-            }
-            SidebarBookmarkRowPointerTarget::Directory => {
-                SidebarBookmarkPointerTarget::Directory(location.path.clone())
-            }
-            SidebarBookmarkRowPointerTarget::InsertAfter => {
-                SidebarBookmarkPointerTarget::Insert(SidebarBookmarkDropSlot::Insert {
-                    index: index + 1,
-                })
-            }
-        };
+        if position_y <= bounds.y + bounds.height - SIDEBAR_BOOKMARK_INSERT_EDGE_HEIGHT {
+            return FileDropTarget::Directory(directory.to_path_buf());
+        }
+        row_count = index + 1;
     }
-
-    let last_row_bottom = first_row_top
-        + favorites.len().saturating_sub(1) as f32 * sidebar_bookmark_motion_stride()
-        + SIDEBAR_LOCATION_ROW_HEIGHT;
-    if position_y > last_row_bottom {
-        SidebarBookmarkPointerTarget::Insert(SidebarBookmarkDropSlot::Insert {
-            index: favorites.len(),
-        })
-    } else {
-        SidebarBookmarkPointerTarget::None
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::app) enum SidebarBookmarkRowPointerTarget {
-    InsertBefore,
-    Directory,
-    InsertAfter,
-}
-
-pub(in crate::app) fn sidebar_bookmark_row_pointer_target(
-    position_y: f32,
-    row_top: f32,
-    row_height: f32,
-) -> SidebarBookmarkRowPointerTarget {
-    let edge_height = SIDEBAR_BOOKMARK_INSERT_EDGE_HEIGHT.min(row_height / 2.0);
-    if position_y <= row_top + edge_height {
-        SidebarBookmarkRowPointerTarget::InsertBefore
-    } else if position_y >= row_top + row_height - edge_height {
-        SidebarBookmarkRowPointerTarget::InsertAfter
-    } else {
-        SidebarBookmarkRowPointerTarget::Directory
-    }
+    FileDropTarget::SidebarBookmarkSlot(SidebarBookmarkDropSlot::Insert { index: row_count })
 }
 
 fn shifted_sidebar_bookmark_paths(

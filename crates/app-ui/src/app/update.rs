@@ -460,9 +460,7 @@ impl FileBrowser {
                 Task::none()
             }
             Message::SidebarHoverCleared(path) => self.handle_sidebar_hover_cleared(path),
-            Message::SidebarPointerMoved(position) => {
-                self.update_sidebar_bookmark_drop_slot(position)
-            }
+            Message::SidebarPointerMoved => self.follow_in_app_drag_over_sidebar(),
             Message::SidebarPointerExited => self.clear_sidebar_bookmark_drop_slot(),
             Message::SidebarBookmarkPressed(path) => self.start_sidebar_bookmark_drag(path),
             Message::SidebarBookmarkRightClicked(path) => {
@@ -470,6 +468,7 @@ impl FileBrowser {
             }
             Message::SidebarBookmarkEntered(path) => self.handle_sidebar_bookmark_entered(path),
             Message::SidebarBookmarkReleased => self.finish_sidebar_bookmark_drag(),
+            Message::SidebarBookmarkAddRequested(path) => self.add_sidebar_bookmark(path),
             Message::SidebarBookmarkDeleteRequested(path) => self.delete_sidebar_bookmark(path),
             Message::SidebarResizeStarted => self.start_sidebar_resize_drag(),
             Message::RightPreviewPanelResizeStarted => self.start_right_preview_panel_resize_drag(),

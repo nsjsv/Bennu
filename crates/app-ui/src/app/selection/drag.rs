@@ -214,9 +214,7 @@ impl FileBrowser {
         let source_pane_id = self.active_pane_id();
         let source_tab_id = self.active_tab_id();
         let sources = self.selected_paths_for_operation();
-        let bookmark_source = (sources.len() == 1
-            && self.entry_kind(&sources[0]) == Some(file_core::FileKind::Directory))
-        .then(|| sources[0].clone());
+        let bookmark_source = self.new_favorite_from_drag(&sources);
         self.next_file_drag_gesture_id = self.next_file_drag_gesture_id.wrapping_add(1);
         self.file_drag = (!sources.is_empty()).then_some(FileDragState {
             gesture_id: FileDragGestureId(self.next_file_drag_gesture_id),

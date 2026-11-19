@@ -12,7 +12,7 @@ use crate::model::{
     file_grouping_entry_visible, pane_entry, BrowserLocation, BrowserPaneId, BrowserViewMode,
     ContextMenuState, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
     FileDragSpringSource, FileDragStationaryAction, FileDropTarget, FileMenuPlace,
-    LastActivationClick, Message,
+    FileMenuTargetKind, LastActivationClick, Message,
 };
 use crate::selection_summary::{summarize_entries, PaneSelectionSummary};
 
@@ -424,16 +424,16 @@ impl FileBrowser {
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
-        let target_is_directory = self.entry_kind(&path) == Some(FileKind::Directory);
+        let target_kind = self.file_menu_target_kind(&path);
         let can_batch_rename = self.batch_rename_available_for_selection();
         let can_create_symlink = self.selection_all_paths_local();
         if self.tab().location == BrowserLocation::Trash {
             self.open_trash_context_menu(Some(path));
-        } else if self.file_area_menu_is_visible(true, target_is_directory, can_batch_rename) {
+        } else if self.file_area_menu_is_visible(true, target_kind, can_batch_rename) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
                 place: self.file_menu_place(),
                 target: Some(path.clone()),
-                target_is_directory,
+                target_kind,
                 paste_directory: self.entry_parent_directory(&path),
                 can_batch_rename,
                 can_create_symlink,
@@ -477,11 +477,11 @@ impl FileBrowser {
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
-        if self.file_area_menu_is_visible(false, false, false) {
+        if self.file_area_menu_is_visible(false, FileMenuTargetKind::File, false) {
             self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
                 place: FileMenuPlace::Folder,
                 target: None,
-                target_is_directory: false,
+                target_kind: FileMenuTargetKind::File,
                 paste_directory: directory,
                 can_batch_rename: false,
                 can_create_symlink: false,
@@ -498,6 +498,16 @@ impl FileBrowser {
         Task::batch([expansion_command, rename_command])
     }
 
+    fn file_menu_target_kind(&self, path: &Path) -> FileMenuTargetKind {
+        if self.entry_kind(path) != Some(FileKind::Directory) {
+            FileMenuTargetKind::File
+        } else if self.sidebar_favorite_exists(path) {
+            FileMenuTargetKind::FavoriteFolder
+        } else {
+            FileMenuTargetKind::Folder
+        }
+    }
+
     fn file_menu_place(&self) -> FileMenuPlace {
         match self.tab().location {
             BrowserLocation::Search(_) => FileMenuPlace::SearchResults,
@@ -509,7 +519,7 @@ impl FileBrowser {
     pub(super) fn file_area_menu_is_visible(
         &self,
         has_target: bool,
-        target_is_directory: bool,
+        target_kind: FileMenuTargetKind,
         can_batch_rename: bool,
     ) -> bool {
         let menus = &self.user_config.context_menus;
@@ -517,7 +527,7 @@ impl FileBrowser {
             !menus
                 .file_entry_menu_entries(
                     self.file_menu_place(),
-                    target_is_directory,
+                    target_kind,
                     can_batch_rename,
                     true,
                 )

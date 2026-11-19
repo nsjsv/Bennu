@@ -11,6 +11,8 @@ pub(crate) enum FileAreaMenuItem {
     SmartExtractHere,
     ExtractToArchiveFolder,
     OpenWith,
+    /// 只给还没收藏的文件夹：加到侧栏收藏夹最后。
+    AddToFavorites,
     Copy,
     Duplicate,
     Move,
@@ -31,12 +33,13 @@ pub(crate) enum FileAreaMenuItem {
     SendToPhone,
 }
 
-pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 23] = [
+pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 24] = [
     FileAreaMenuItem::Open,
     FileAreaMenuItem::OpenContainingFolder,
     FileAreaMenuItem::SmartExtractHere,
     FileAreaMenuItem::ExtractToArchiveFolder,
     FileAreaMenuItem::OpenWith,
+    FileAreaMenuItem::AddToFavorites,
     FileAreaMenuItem::Copy,
     FileAreaMenuItem::Duplicate,
     FileAreaMenuItem::Move,
@@ -120,6 +123,7 @@ impl FileAreaMenuItem {
             Self::SmartExtractHere => tr!("Smart Extract Here"),
             Self::ExtractToArchiveFolder => tr!("Extract to Archive Folder"),
             Self::OpenWith => tr!("Open with"),
+            Self::AddToFavorites => tr!("Add to Favorites"),
             Self::Copy => tr!("Copy"),
             Self::Duplicate => tr!("Duplicate"),
             Self::Move => tr!("Move"),
@@ -148,6 +152,7 @@ impl FileAreaMenuItem {
             Self::SmartExtractHere => "smart_extract_here",
             Self::ExtractToArchiveFolder => "extract_to_archive_folder",
             Self::OpenWith => "open_with",
+            Self::AddToFavorites => "add_to_favorites",
             Self::Copy => "copy",
             Self::Duplicate => "duplicate",
             Self::Move => "move",
@@ -176,6 +181,7 @@ impl FileAreaMenuItem {
             "smart_extract_here" => Self::SmartExtractHere,
             "extract_to_archive_folder" => Self::ExtractToArchiveFolder,
             "open_with" => Self::OpenWith,
+            "add_to_favorites" => Self::AddToFavorites,
             "copy" => Self::Copy,
             "duplicate" => Self::Duplicate,
             "move" => Self::Move,
@@ -210,6 +216,7 @@ impl FileAreaMenuItem {
             Self::OpenContainingFolder => IconSymbol::FolderOpen,
             Self::SmartExtractHere | Self::ExtractToArchiveFolder => IconSymbol::FileArchive,
             Self::OpenWith => IconSymbol::Monitor,
+            Self::AddToFavorites => IconSymbol::Bookmark,
             Self::Copy | Self::Duplicate | Self::Paste => IconSymbol::Copy,
             Self::Move => IconSymbol::ArrowRight,
             Self::Tools => IconSymbol::Settings,

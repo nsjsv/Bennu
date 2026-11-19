@@ -9,7 +9,12 @@ fn defaults_match_existing_menu_structure() {
     let preferences = ContextMenuPreferences::defaults();
     // 一级结构:组锚点折叠成员,其余保持全集原序;工具组插在移动和粘贴之间。
     assert_eq!(
-        preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true),
+        preferences.file_entry_menu_entries(
+            FileMenuPlace::Folder,
+            FileMenuTargetKind::File,
+            true,
+            true
+        ),
         vec![
             FileEntryMenuEntry::Item(FileAreaMenuItem::Open),
             FileEntryMenuEntry::Item(FileAreaMenuItem::SmartExtractHere),
@@ -50,14 +55,9 @@ fn defaults_match_existing_menu_structure() {
 fn runtime_eligibility_gates_members_and_degrades_groups() {
     let preferences = ContextMenuPreferences::defaults();
     // 目录:工具子菜单无文件校验。
-    let tools_members = |target_is_directory: bool, can_create_symlink: bool| {
+    let tools_members = |target_kind: FileMenuTargetKind, can_create_symlink: bool| {
         preferences
-            .file_entry_menu_entries(
-                FileMenuPlace::Folder,
-                target_is_directory,
-                true,
-                can_create_symlink,
-            )
+            .file_entry_menu_entries(FileMenuPlace::Folder, target_kind, true, can_create_symlink)
             .iter()
             .find_map(|entry| match entry {
                 FileEntryMenuEntry::Group {
@@ -68,11 +68,20 @@ fn runtime_eligibility_gates_members_and_degrades_groups() {
             })
             .unwrap()
     };
-    assert!(!tools_members(true, true).contains(&FileAreaMenuItem::FileChecksum));
+    assert!(
+        !tools_members(FileMenuTargetKind::Folder, true).contains(&FileAreaMenuItem::FileChecksum)
+    );
     // 远程挂载:工具子菜单无创建符号链接。
-    assert!(!tools_members(false, false).contains(&FileAreaMenuItem::CreateSymlink));
+    assert!(
+        !tools_members(FileMenuTargetKind::File, false).contains(&FileAreaMenuItem::CreateSymlink)
+    );
     // 不可批量重命名:重命名组退化为普通行。
-    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, false, true);
+    let entries = preferences.file_entry_menu_entries(
+        FileMenuPlace::Folder,
+        FileMenuTargetKind::File,
+        false,
+        true,
+    );
     assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Rename)));
     assert!(!entries.iter().any(|entry| matches!(
         entry,
@@ -101,11 +110,16 @@ fn selection_only_items_stay_out_of_the_blank_area_menu() {
 #[test]
 fn new_entry_position_tracks_visibility() {
     let mut preferences = ContextMenuPreferences::defaults();
-    // 隐藏前 6 项(Open/打开所在文件夹/两个解压项/OpenWith/Copy);组行随锚点一起消失。
-    for index in 0..6 {
+    // 隐藏前 7 项(Open/打开所在文件夹/两个解压项/OpenWith/加入收藏夹/Copy);组行随锚点一起消失。
+    for index in 0..7 {
         preferences.file_entry.toggle(index);
     }
-    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, false, true);
+    let entries = preferences.file_entry_menu_entries(
+        FileMenuPlace::Folder,
+        FileMenuTargetKind::File,
+        false,
+        true,
+    );
     let new_entry_index = entries
         .iter()
         .position(|entry| {
@@ -132,7 +146,12 @@ fn hidden_group_anchor_hides_the_whole_group() {
         .position(|entry| entry.item == FileAreaMenuItem::Copy)
         .unwrap();
     preferences.file_entry.toggle(copy_index);
-    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
+    let entries = preferences.file_entry_menu_entries(
+        FileMenuPlace::Folder,
+        FileMenuTargetKind::File,
+        true,
+        true,
+    );
     assert!(!entries.iter().any(|entry| matches!(
         entry,
         FileEntryMenuEntry::Group {
@@ -163,7 +182,12 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     // 复制组成员全部隐藏 → 复制退化为普通行(单点动作仍在)。
     toggle_item(&mut preferences, FileAreaMenuItem::Duplicate);
     toggle_item(&mut preferences, FileAreaMenuItem::CopyPath);
-    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
+    let entries = preferences.file_entry_menu_entries(
+        FileMenuPlace::Folder,
+        FileMenuTargetKind::File,
+        true,
+        true,
+    );
     assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Copy)));
     // 工具组成员全部隐藏 → 纯触发器整行省略。
     for member in [
@@ -174,7 +198,12 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     ] {
         toggle_item(&mut preferences, member);
     }
-    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
+    let entries = preferences.file_entry_menu_entries(
+        FileMenuPlace::Folder,
+        FileMenuTargetKind::File,
+        true,
+        true,
+    );
     assert!(!entries.iter().any(|entry| matches!(
         entry,
         FileEntryMenuEntry::Group {
@@ -184,7 +213,12 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     )));
     // 「新建...」硬编码行恒在:成员隐藏也保持组行。
     toggle_item(&mut preferences, FileAreaMenuItem::NewFolderFromSelection);
-    let entries = preferences.file_entry_menu_entries(FileMenuPlace::Folder, false, true, true);
+    let entries = preferences.file_entry_menu_entries(
+        FileMenuPlace::Folder,
+        FileMenuTargetKind::File,
+        true,
+        true,
+    );
     assert!(entries.iter().any(|entry| matches!(
         entry,
         FileEntryMenuEntry::Group {
@@ -284,8 +318,8 @@ fn stored_layout_missing_new_items_puts_them_back_where_they_belong() {
 fn file_entry_settings_rows_project_groups_to_single_rows() {
     let preferences = ContextMenuPreferences::defaults();
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    // 23 项中 8 个成员被收进组面板,顶级行 = 15 行。
-    assert_eq!(rows.len(), 15);
+    // 24 项中 8 个成员被收进组面板,顶级行 = 16 行。
+    assert_eq!(rows.len(), 16);
     let group_anchors: Vec<_> = rows.iter().filter_map(|row| row.group_anchor).collect();
     assert_eq!(
         group_anchors,
@@ -309,18 +343,18 @@ fn file_entry_settings_rows_project_groups_to_single_rows() {
 #[test]
 fn file_entry_drag_moves_the_anchor_entry_only() {
     let mut preferences = ContextMenuPreferences::defaults();
-    // 复制组锚点在布局下标 5;拖到粘贴(下标 12)之后:
+    // 复制组锚点在布局下标 6;拖到粘贴(下标 13)之后:
     // 锚点条目换位,成员条目留在原下标。
-    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 5, 12);
+    preferences.reorder_settings_row(ContextMenuSettingsPage::FileEntry, 6, 13);
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    assert_eq!(rows[12].label, "Copy");
-    // 锚点移走后,原下标 5 由成员 Duplicate 顶上;CopyPath 前移到 17。
+    assert_eq!(rows[13].label, "Copy");
+    // 锚点移走后,原下标 6 由成员 Duplicate 顶上;CopyPath 前移到 18。
     assert_eq!(
-        preferences.file_entry.entries[5].item,
+        preferences.file_entry.entries[6].item,
         FileAreaMenuItem::Duplicate
     );
     assert_eq!(
-        preferences.file_entry.entries[17].item,
+        preferences.file_entry.entries[18].item,
         FileAreaMenuItem::CopyPath
     );
 }
@@ -421,4 +455,33 @@ fn saved_type_layout_from_the_old_more_menu_keeps_choices_and_gains_every_type()
             SearchEntryTypePreset::Links,
         ]
     );
+}
+
+/// 「加入收藏夹」只给还没收藏的文件夹，排在「打开方式」后面。
+#[test]
+fn add_to_favorites_is_offered_only_for_folders_not_yet_in_favorites() {
+    let preferences = ContextMenuPreferences::defaults();
+    let top_level_items = |target_kind| {
+        preferences
+            .file_entry_menu_entries(FileMenuPlace::Folder, target_kind, true, true)
+            .into_iter()
+            .map(|entry| match entry {
+                FileEntryMenuEntry::Item(item) => item,
+                FileEntryMenuEntry::Group { anchor, .. } => anchor,
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let folder_items = top_level_items(FileMenuTargetKind::Folder);
+    let open_with = folder_items
+        .iter()
+        .position(|item| *item == FileAreaMenuItem::OpenWith)
+        .expect("folders get Open With");
+    assert_eq!(
+        folder_items.get(open_with + 1),
+        Some(&FileAreaMenuItem::AddToFavorites)
+    );
+    for target_kind in [FileMenuTargetKind::FavoriteFolder, FileMenuTargetKind::File] {
+        assert!(!top_level_items(target_kind).contains(&FileAreaMenuItem::AddToFavorites));
+    }
 }

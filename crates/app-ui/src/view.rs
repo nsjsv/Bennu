@@ -54,9 +54,7 @@ mod trash_warning;
 mod window_chrome;
 mod window_control_settings;
 
-pub(crate) use sidebar_panel::{
-    SIDEBAR_LIST_PADDING_TOP, SIDEBAR_ROW_HEIGHT, SIDEBAR_ROW_SPACING, SIDEBAR_SECTION_LABEL_HEIGHT,
-};
+pub(crate) use sidebar_panel::{SIDEBAR_ROW_HEIGHT, SIDEBAR_ROW_SPACING};
 pub(crate) use window_chrome::{main_toolbar_height, window_shell};
 
 pub(crate) use address_bar::address_input_id;

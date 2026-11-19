@@ -242,7 +242,7 @@ fn result_menu_opens_the_containing_folder_instead_of_pasting() {
         .browser
         .user_config
         .context_menus
-        .file_entry_menu_entries(menu.place, false, true, true)
+        .file_entry_menu_entries(menu.place, menu.target_kind, true, true)
         .into_iter()
         .flat_map(|entry| match entry {
             FileEntryMenuEntry::Item(item) => vec![item],

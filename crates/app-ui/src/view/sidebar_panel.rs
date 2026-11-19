@@ -6,7 +6,6 @@ use iced::{Alignment, Element, Length, Padding};
 use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::transfer::TransferMessage;
 use crate::app::FileBrowser;
-use crate::app::SidebarFixedEntry;
 use crate::appearance::{
     enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, hovered_sidebar_item_style,
     selected_sidebar_item_style, sidebar_bookmark_drop_slot_style,
@@ -53,12 +52,12 @@ const SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT: f32 = 3.0;
 const SIDEBAR_ROW_PADDING_X: f32 = 8.0;
 const SIDEBAR_LABEL_SPACING: f32 = 8.0;
 
-// 侧栏列表的几何：界面按这些常量排，收藏夹拖放落点（app/sidebar_bookmarks）按同样的
-// 常量算。行高必须固定——跟着字号变的行高曾让落点整体偏移（2026-11-10）。
+// 侧栏列表的几何。拖动收藏调顺序时，动画按行高加间距一格一格地挪（app/sidebar_bookmarks），
+// 所以行高必须固定，不能跟着字号变。拖放落点不靠这些常量，按量出来的位置算。
 pub(crate) const SIDEBAR_ROW_HEIGHT: f32 = 32.0;
 pub(crate) const SIDEBAR_ROW_SPACING: f32 = 2.0;
-pub(crate) const SIDEBAR_SECTION_LABEL_HEIGHT: f32 = 30.0;
-pub(crate) const SIDEBAR_LIST_PADDING_TOP: f32 = 4.0;
+const SIDEBAR_SECTION_LABEL_HEIGHT: f32 = 30.0;
+const SIDEBAR_LIST_PADDING_TOP: f32 = 4.0;
 const SIDEBAR_LIST_PADDING_X: f32 = 8.0;
 const SIDEBAR_LIST_PADDING_BOTTOM: f32 = 12.0;
 
@@ -81,37 +80,21 @@ pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
         bottom: SIDEBAR_LIST_PADDING_BOTTOM,
         left: SIDEBAR_LIST_PADDING_X,
     });
-    for entry in browser.sidebar_fixed_entries() {
-        sidebar = sidebar.push(match entry {
-            SidebarFixedEntry::Location(location) => sidebar_location_item(browser, location),
-            SidebarFixedEntry::Trash => sidebar_trash_item(browser),
-            SidebarFixedEntry::LocalSend => sidebar_local_send_item(browser),
-            SidebarFixedEntry::LocalSendDevice(favorite) => {
-                sidebar_local_send_device_item(browser, favorite)
-            }
-        });
-    }
-
-    let favorite_locations = browser
+    for location in browser
         .sidebar_locations
         .iter()
-        .filter(|location| location.kind.is_user_favorite())
-        .collect::<Vec<_>>();
-    let can_drop_bookmark = browser.can_drop_sidebar_bookmark();
-    if can_drop_bookmark || !favorite_locations.is_empty() {
-        let favorites_label = sidebar_section_label(tr!("Favorites"));
-        sidebar = sidebar.push(if can_drop_bookmark && favorite_locations.is_empty() {
-            track_file_drag_hit_test_marker(
-                favorites_label,
-                FileDragHitTestMarker::EmptySidebarBookmarks,
-            )
-        } else {
-            favorites_label
-        });
-
-        for (index, location) in favorite_locations.iter().enumerate() {
-            sidebar = sidebar.push(sidebar_location_item_with_index(browser, location, index));
-        }
+        .filter(|location| !location.kind.is_user_favorite())
+    {
+        sidebar = sidebar.push(sidebar_location_item(browser, location));
+    }
+    sidebar = sidebar
+        .push(sidebar_trash_item(browser))
+        .push(sidebar_local_send_item(browser));
+    for favorite in &browser.user_config().transfer_favorite_devices {
+        sidebar = sidebar.push(sidebar_local_send_device_item(browser, favorite));
+    }
+    if let Some(favorites) = sidebar_favorites_section(browser) {
+        sidebar = sidebar.push(favorites);
     }
 
     sidebar = append_sidebar_network_connections(sidebar, browser);
@@ -132,13 +115,18 @@ pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill);
 
-    let sidebar_content: Element<'_, Message> = if can_drop_bookmark {
-        mouse_area(sidebar_content_panel)
-            .on_move(Message::SidebarPointerMoved)
+    // 外层一直包着：拖动时才按条件包一层会改控件树，侧栏的滚动状态会被重建。
+    let sidebar_content = mouse_area(sidebar_content_panel);
+    let sidebar_content = if browser
+        .file_drag
+        .as_ref()
+        .is_some_and(|file_drag| file_drag.is_dragging())
+    {
+        sidebar_content
+            .on_move(|_| Message::SidebarPointerMoved)
             .on_exit(Message::SidebarPointerExited)
-            .into()
     } else {
-        sidebar_content_panel.into()
+        sidebar_content
     };
 
     row![sidebar_content, sidebar_resize_handle()]
@@ -266,7 +254,7 @@ fn sidebar_location_item_content<'a>(
     };
 
     let item_container = if let Some(favorite_index) = favorite_index {
-        sidebar_bookmark_drop_overlay(browser, item_container, favorite_index)
+        with_favorite_drop_line(browser, favorite_index, item_container)
     } else {
         item_container.into()
     };
@@ -317,41 +305,62 @@ fn sidebar_location_item_content<'a>(
     )
 }
 
-fn sidebar_bookmark_drop_overlay<'a>(
+/// 收藏区：「收藏夹」标题 + 收藏行；拖新收藏时末尾再多一条空白带，拖到列表下面就是加到最后。
+/// 整区量一个矩形，拖入落点按它和里面的行算（`favorite_drop_target`）。
+fn sidebar_favorites_section(browser: &FileBrowser) -> Option<Element<'_, Message>> {
+    let favorites = browser
+        .sidebar_locations
+        .iter()
+        .filter(|location| location.kind.is_user_favorite())
+        .collect::<Vec<_>>();
+    let accepts_new_favorite = browser.can_drop_sidebar_bookmark();
+    if favorites.is_empty() && !accepts_new_favorite {
+        return None;
+    }
+    let mut section = Column::new()
+        .spacing(SIDEBAR_ROW_SPACING)
+        .push(sidebar_section_label(tr!("Favorites")));
+    for (index, location) in favorites.iter().enumerate() {
+        section = section.push(sidebar_location_item_with_index(browser, location, index));
+    }
+    if accepts_new_favorite {
+        let append_band = Space::new()
+            .width(Length::Fill)
+            .height(Length::Fixed(SIDEBAR_ROW_HEIGHT));
+        section = section.push(with_favorite_drop_line(
+            browser,
+            favorites.len(),
+            append_band,
+        ));
+    }
+    Some(track_file_drag_hit_test_marker(
+        section,
+        FileDragHitTestMarker::SidebarFavorites,
+    ))
+}
+
+/// 插到第 `slot_index` 个位置时，插入线画在那个位置的顶上：第几行，或者末尾空白带
+/// （加到最后、收藏夹为空）。
+fn with_favorite_drop_line<'a>(
     browser: &FileBrowser,
-    item_container: iced::widget::Container<'a, Message>,
-    favorite_index: usize,
+    slot_index: usize,
+    content: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message> {
-    let Some(slot) = browser.sidebar_bookmark_drop_slot else {
-        return item_container.into();
-    };
-
-    let SidebarBookmarkDropSlot::Insert { index } = slot;
-    let line_alignment = if index == 0 && favorite_index == 0 {
-        SidebarBookmarkDropLineAlignment::Top
-    } else if index > 0 && index == favorite_index + 1 {
-        SidebarBookmarkDropLineAlignment::Bottom
-    } else {
-        return item_container.into();
-    };
-
+    if browser.sidebar_bookmark_drop_slot
+        != Some(SidebarBookmarkDropSlot::Insert { index: slot_index })
+    {
+        return content.into();
+    }
     let line = container(Space::new().height(Length::Fixed(SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT)))
         .height(Length::Fixed(SIDEBAR_BOOKMARK_DROP_SLOT_HEIGHT))
         .width(Length::Fill)
         .style(sidebar_bookmark_drop_slot_style);
-    let aligned_line = match line_alignment {
-        SidebarBookmarkDropLineAlignment::Top => container(line).align_top(Length::Fill),
-        SidebarBookmarkDropLineAlignment::Bottom => container(line).align_bottom(Length::Fill),
-    };
-
-    stack([item_container.into(), aligned_line.into()])
-        .width(Length::Fill)
-        .into()
-}
-
-enum SidebarBookmarkDropLineAlignment {
-    Top,
-    Bottom,
+    stack([
+        content.into(),
+        container(line).align_top(Length::Fill).into(),
+    ])
+    .width(Length::Fill)
+    .into()
 }
 
 fn sidebar_device_provider_failure_message(

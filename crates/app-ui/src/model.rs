@@ -460,12 +460,14 @@ pub(crate) enum Message {
     SidebarHoverCleared(PathBuf),
     SidebarTrashHovered,
     SidebarTrashHoverCleared,
-    SidebarPointerMoved(Point),
+    /// 应用内拖放时指针在侧栏上移动；位置取窗口坐标 `cursor_position`。
+    SidebarPointerMoved,
     SidebarPointerExited,
     SidebarBookmarkPressed(PathBuf),
     SidebarBookmarkRightClicked(PathBuf),
     SidebarBookmarkEntered(PathBuf),
     SidebarBookmarkReleased,
+    SidebarBookmarkAddRequested(PathBuf),
     SidebarBookmarkDeleteRequested(PathBuf),
     SidebarResizeStarted,
     RightPreviewPanelResizeStarted,
@@ -959,11 +961,26 @@ pub(crate) enum FileMenuPlace {
     SearchResults,
 }
 
+/// 菜单打在什么上：「计算校验」只给文件，「加入收藏夹」只给还没收藏的文件夹。
+/// 空白处菜单没有目标，按文件记（只有条目菜单看它）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FileMenuTargetKind {
+    File,
+    Folder,
+    FavoriteFolder,
+}
+
+impl FileMenuTargetKind {
+    pub(crate) fn is_directory(self) -> bool {
+        self != Self::File
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct FileContextMenuState {
     pub(crate) place: FileMenuPlace,
     pub(crate) target: Option<PathBuf>,
-    pub(crate) target_is_directory: bool,
+    pub(crate) target_kind: FileMenuTargetKind,
     pub(crate) paste_directory: PathBuf,
     pub(crate) can_batch_rename: bool,
     /// 选中项含远程挂载路径时为 false:gvfs 上的 symlink 不可靠,菜单隐藏「创建符号链接」。

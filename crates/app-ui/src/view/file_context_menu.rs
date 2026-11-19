@@ -44,6 +44,7 @@ fn item_section(item: FileAreaMenuItem) -> MenuSection {
         FileAreaMenuItem::Open
         | FileAreaMenuItem::OpenContainingFolder
         | FileAreaMenuItem::OpenWith
+        | FileAreaMenuItem::AddToFavorites
         | FileAreaMenuItem::SmartExtractHere
         | FileAreaMenuItem::ExtractToArchiveFolder => MenuSection::Open,
         FileAreaMenuItem::Copy
@@ -135,7 +136,7 @@ pub(super) fn file_context_menu_panel<'a>(
     keyboard_modifiers: iced::keyboard::Modifiers,
     file_grouping: FileGroupingMode,
 ) -> (Element<'a, Message>, Option<(Element<'a, Message>, f32)>) {
-    let terminal_directory = if menu.target_is_directory {
+    let terminal_directory = if menu.target_kind.is_directory() {
         menu.target
             .clone()
             .unwrap_or_else(|| menu.paste_directory.clone())
@@ -152,7 +153,7 @@ pub(super) fn file_context_menu_panel<'a>(
         Some(_) => {
             let mut entries = context_menus.file_entry_menu_entries(
                 menu.place,
-                menu.target_is_directory,
+                menu.target_kind,
                 menu.can_batch_rename,
                 menu.can_create_symlink,
             );
@@ -337,6 +338,11 @@ fn file_menu_action_row(
             item.label(),
             Message::OpenWithRequested(path.clone()),
         ),
+        (FileAreaMenuItem::AddToFavorites, Some(path)) => menu_item(
+            item.icon(),
+            item.label(),
+            Message::SidebarBookmarkAddRequested(path.clone()),
+        ),
         (FileAreaMenuItem::Copy, _) => {
             let (icon, label, message) = copy_menu_action(alt_held);
             menu_item(icon, label, message)
@@ -378,6 +384,7 @@ fn file_menu_action_row(
             | FileAreaMenuItem::Open
             | FileAreaMenuItem::OpenContainingFolder
             | FileAreaMenuItem::OpenWith
+            | FileAreaMenuItem::AddToFavorites
             | FileAreaMenuItem::Rename
             | FileAreaMenuItem::Properties,
             _,

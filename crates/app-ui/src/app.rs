@@ -70,8 +70,6 @@ mod session_persistence;
 mod session_restore;
 mod shortcuts;
 mod sidebar_bookmarks;
-mod video_fullscreen;
-pub(crate) use sidebar_bookmarks::SidebarFixedEntry;
 mod sidebar_devices;
 mod sidebar_resize;
 mod smart_extract;
@@ -90,6 +88,7 @@ mod trash;
 #[cfg(test)]
 mod trash_tests;
 mod update;
+mod video_fullscreen;
 mod view_modes;
 mod wayland_dnd;
 mod window_chrome;

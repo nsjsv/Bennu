@@ -502,7 +502,7 @@ impl FileBrowser {
         })
     }
 
-    fn refresh_hovered_target_from_ready_layout(&mut self) -> Task<Message> {
+    pub(in crate::app) fn refresh_hovered_target_from_ready_layout(&mut self) -> Task<Message> {
         let (target, hovered_entry, hovered_sidebar, spring_hover) = self
             .file_drop_session
             .as_ref()
@@ -726,7 +726,7 @@ impl FileBrowser {
             }
             (FileDropOrigin::Internal(snapshot), FileDropTarget::SidebarBookmarkSlot(slot)) => {
                 snapshot.bookmark_source.map_or_else(Task::none, |source| {
-                    self.insert_sidebar_bookmark_from_drag(slot, source)
+                    self.insert_sidebar_bookmark(slot, source)
                 })
             }
             (FileDropOrigin::External, FileDropTarget::Directory(directory)) => {

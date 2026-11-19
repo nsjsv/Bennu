@@ -2,13 +2,10 @@ use std::path::Path;
 
 use iced::Point;
 
-use super::super::sidebar_bookmarks::{
-    sidebar_bookmark_row_pointer_target, SidebarBookmarkRowPointerTarget,
-};
+use super::super::sidebar_bookmarks::favorite_drop_target;
 use super::FileBrowser;
 use crate::model::{
     FileDragHitTestBounds, FileDropEntryTargetBounds, FileDropHitTestBounds, FileDropTarget,
-    SidebarBookmarkDropSlot,
 };
 
 pub(super) fn freeze_file_drop_hit_test_bounds(
@@ -51,7 +48,7 @@ pub(super) fn freeze_file_drop_hit_test_bounds(
             .filter(|target| browser.pane_accepts_file_drag(target.pane_id))
             .collect(),
         sidebar_directories: measured.sidebar_directories,
-        empty_sidebar_bookmarks: measured.empty_sidebar_bookmarks,
+        sidebar_favorites: measured.sidebar_favorites,
         local_send: measured.local_send,
     }
 }
@@ -77,45 +74,19 @@ pub(super) fn resolve_file_drop_target(
         return Some(target.clone());
     }
 
-    if let Some(bookmark_source) = bookmark_source {
-        if bounds
-            .empty_sidebar_bookmarks
-            .is_some_and(|area| area.contains(position))
-        {
-            return Some(FileDropTarget::SidebarBookmarkSlot(
-                SidebarBookmarkDropSlot::Insert { index: 0 },
-            ));
-        }
-        if let Some(target) = bounds
+    if bookmark_source.is_some()
+        && bounds
+            .sidebar_favorites
+            .is_some_and(|section| section.contains(position))
+    {
+        let rows = bounds
             .sidebar_directories
             .iter()
-            .rev()
-            .find(|target| target.bounds.contains(position))
-        {
-            let Some(favorite_index) = target.favorite_index else {
-                return Some(FileDropTarget::Directory(target.directory.clone()));
-            };
-            return match sidebar_bookmark_row_pointer_target(
-                position.y,
-                target.bounds.y,
-                target.bounds.height,
-            ) {
-                SidebarBookmarkRowPointerTarget::InsertBefore => Some(
-                    FileDropTarget::SidebarBookmarkSlot(SidebarBookmarkDropSlot::Insert {
-                        index: favorite_index,
-                    }),
-                ),
-                SidebarBookmarkRowPointerTarget::Directory => (target.directory
-                    != *bookmark_source)
-                    .then(|| FileDropTarget::Directory(target.directory.clone())),
-                SidebarBookmarkRowPointerTarget::InsertAfter => Some(
-                    FileDropTarget::SidebarBookmarkSlot(SidebarBookmarkDropSlot::Insert {
-                        index: favorite_index + 1,
-                    }),
-                ),
-            };
-        }
-    } else if let Some(target) = bounds
+            .filter(|target| target.favorite_index.is_some())
+            .map(|target| (target.directory.as_path(), target.bounds));
+        return Some(favorite_drop_target(rows, position.y));
+    }
+    if let Some(target) = bounds
         .sidebar_directories
         .iter()
         .rev()

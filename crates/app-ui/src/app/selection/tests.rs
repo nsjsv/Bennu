@@ -787,7 +787,10 @@ fn right_clicking_directory_selects_menu_target_without_focusing_it() {
         panic!("file context menu opens");
     };
     assert_eq!(context_menu.target.as_ref(), Some(&directory));
-    assert!(context_menu.target_is_directory);
+    assert_eq!(
+        context_menu.target_kind,
+        crate::model::FileMenuTargetKind::Folder
+    );
     assert_eq!(browser.paste_target_directory(), Some(current_dir));
 }
 

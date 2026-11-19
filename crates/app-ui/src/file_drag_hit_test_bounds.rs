@@ -38,7 +38,8 @@ pub(crate) enum FileDragHitTestMarker {
         directory: PathBuf,
         favorite_index: Option<usize>,
     },
-    EmptySidebarBookmarks,
+    /// 侧栏整个收藏区，收藏夹拖入的落点按它和里面的收藏行算。
+    SidebarFavorites,
     /// 侧栏 LocalSend 入口或它下面的收藏设备。
     SidebarLocalSend {
         target: FileDropTarget,
@@ -111,7 +112,7 @@ struct FileDragHitTestBoundsOperation {
     directory_targets: Vec<DirectoryFileDragTargetBounds>,
     blocked_directories: Vec<FileDragBlockedDirectoryBounds>,
     sidebar_directories: Vec<SidebarFileDragTargetBounds>,
-    empty_sidebar_bookmark_bounds: Option<Rectangle>,
+    sidebar_favorites: Option<Rectangle>,
     local_send: Vec<(FileDropTarget, Rectangle)>,
     /// 遍历中遇到的滚动可视区(surface 坐标),拖拽聚合判断用来区分
     /// "超出列表视口"与"超出窗口"。
@@ -131,7 +132,7 @@ impl FileDragHitTestBoundsOperation {
             directory_targets: Vec::new(),
             blocked_directories: Vec::new(),
             sidebar_directories: Vec::new(),
-            empty_sidebar_bookmark_bounds: None,
+            sidebar_favorites: None,
             local_send: Vec::new(),
             scrollable_viewports: Vec::new(),
         }
@@ -166,7 +167,7 @@ impl FileDragHitTestBoundsOperation {
             directory_targets: self.directory_targets.clone(),
             blocked_directories: self.blocked_directories.clone(),
             sidebar_directories: self.sidebar_directories.clone(),
-            empty_sidebar_bookmarks: self.empty_sidebar_bookmark_bounds,
+            sidebar_favorites: self.sidebar_favorites,
             local_send: self.local_send.clone(),
         }
     }
@@ -261,8 +262,8 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
                     bounds,
                 });
             }
-            FileDragHitTestMarker::EmptySidebarBookmarks => {
-                self.empty_sidebar_bookmark_bounds = Some(bounds);
+            FileDragHitTestMarker::SidebarFavorites => {
+                self.sidebar_favorites = Some(bounds);
             }
             FileDragHitTestMarker::SidebarLocalSend { target } => {
                 self.local_send.push((target.clone(), bounds));

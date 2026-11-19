@@ -107,6 +107,7 @@ bennu
 | `bennu .`| Opens the current directory|
 | `bennu ~/Downloads ~/Documents`| Opens multiple locations as tabs in one pane, in order|
 | `bennu report.pdf notes.txt`| Opens each file's folder and selects it|
+| `bennu --new-window .`| Opens a separate window, whatever the launch behavior setting says|
 
 If the app is already running, invoking the command again reuses the existing instance: without paths it focuses the main window; with paths it reuses existing tabs and only adds missing directories — other tabs and columns are never cleared.
 

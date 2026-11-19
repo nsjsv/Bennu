@@ -270,6 +270,8 @@ impl FileBrowser {
             ShortcutAction::NewTab => self.open_new_tab_here(),
             ShortcutAction::CloseTab => self.close_active_tab_from_keyboard(),
             ShortcutAction::RestoreClosedTab => self.restore_closed_tab(),
+            ShortcutAction::NewWindow => self.open_new_window_here(),
+            ShortcutAction::OpenInNewWindow => self.open_selected_in_new_window(),
             ShortcutAction::CloseWindow => self.close_auxiliary_window(self.main_window),
             ShortcutAction::ToggleSplit => self.toggle_split_view(),
             ShortcutAction::FocusOtherPane => self.focus_other_pane(),

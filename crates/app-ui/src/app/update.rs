@@ -124,11 +124,12 @@ impl FileBrowser {
             Message::OpenWithApplicationFinished(result) => {
                 self.accept_open_with_application_finished(result)
             }
-            Message::OpenTerminalFinished(Ok(())) => {
+            Message::OpenTerminalFinished(Ok(())) | Message::NewWindowOpenFinished(Ok(())) => {
                 self.retract_global_error(GlobalErrorSource::Launch);
                 Task::none()
             }
-            Message::OpenTerminalFinished(Err(error)) => {
+            Message::OpenTerminalFinished(Err(error))
+            | Message::NewWindowOpenFinished(Err(error)) => {
                 self.show_global_error_from(GlobalErrorSource::Launch, error);
                 Task::none()
             }

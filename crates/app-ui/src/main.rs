@@ -104,15 +104,15 @@ fn main() -> std::process::ExitCode {
         }
     };
 
-    let (application_launch_request, activation_service) = match action {
-        command_line::CommandLineAction::Launch(request) => {
-            if let Err(error) = terminal_detach::detach_from_launching_terminal() {
-                eprintln!("bennu: could not detach from the terminal: {error}");
-                return std::process::ExitCode::FAILURE;
-            }
-            (Some(request), false)
-        }
-        command_line::CommandLineAction::ActivationService => (None, true),
+    // `--new-window` 不看“启动行为”设置。
+    let (application_launch_request, activation_service, launch_window_override) = match action {
+        command_line::CommandLineAction::Launch(request) => (Some(request), false, None),
+        command_line::CommandLineAction::LaunchInNewWindow(request) => (
+            Some(request),
+            false,
+            Some(config::LaunchWindowPolicy::OpenNewWindow),
+        ),
+        command_line::CommandLineAction::ActivationService => (None, true, None),
         command_line::CommandLineAction::RendererProbe => {
             return match startup_rendering::run_renderer_probe_process() {
                 Ok(()) => std::process::ExitCode::SUCCESS,
@@ -128,6 +128,12 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::SUCCESS;
         }
     };
+    if application_launch_request.is_some() {
+        if let Err(error) = terminal_detach::detach_from_launching_terminal() {
+            eprintln!("bennu: could not detach from the terminal: {error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    }
     startup_trace::begin_launch_from_env();
 
     // 进程里所有读写状态库的地方共用这一份连接；句柄全部释放后再打开会重新建表。
@@ -139,7 +145,9 @@ fn main() -> std::process::ExitCode {
         .map(command_line::ApplicationLaunchRequest::activation_paths)
         .unwrap_or_default();
     startup_trace::mark("desktop_activation_claim_started");
-    let desktop_launch_window_policy = match config::stored_launch_window_policy() {
+    let launch_window_policy =
+        launch_window_override.unwrap_or_else(config::stored_launch_window_policy);
+    let desktop_launch_window_policy = match launch_window_policy {
         config::LaunchWindowPolicy::MergeIntoExisting => {
             desktop_linux::DesktopLaunchWindowPolicy::MergeIntoExisting
         }

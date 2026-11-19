@@ -11,13 +11,15 @@ use crate::model::{
     BrowserTabSession, BrowserViewMode, ColumnBrowserViewport,
 };
 
-pub(crate) const HELP_TEXT: &str = "Usage: bennu [OPTIONS] [PATH]...\n\nOpen local directories or reveal local files.\n\nArguments:\n  [PATH]...        Local directories or files to open\n\nOptions:\n  -h, --help       Print help\n  -V, --version    Print version\n";
+pub(crate) const HELP_TEXT: &str = "Usage: bennu [OPTIONS] [PATH]...\n\nOpen local directories or reveal local files.\n\nArguments:\n  [PATH]...        Local directories or files to open\n\nOptions:\n      --new-window Open a new window even when Bennu merges launches into an open window\n  -h, --help       Print help\n  -V, --version    Print version\n";
 pub(crate) const VERSION_TEXT: &str = concat!("bennu ", env!("CARGO_PKG_VERSION"), "\n");
 pub(crate) const RENDERER_PROBE_ARGUMENT: &str = "--renderer-probe";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CommandLineAction {
     Launch(ApplicationLaunchRequest),
+    /// `--new-window`：不管“启动行为”设置，自己开一个窗口，不交给已经开着的窗口。
+    LaunchInNewWindow(ApplicationLaunchRequest),
     ActivationService,
     RendererProbe,
     PrintHelp,
@@ -173,6 +175,7 @@ pub(crate) fn parse_arguments(
     let mut path_arguments = Vec::new();
     let mut activation_service = false;
     let mut renderer_probe = false;
+    let mut new_window = false;
     while let Some(argument) = parser
         .next()
         .map_err(|error| CommandLineError::Arguments(error.to_string()))?
@@ -182,6 +185,7 @@ pub(crate) fn parse_arguments(
             Short('V') | Long("version") => return Ok(CommandLineAction::PrintVersion),
             Long("activation-service") => activation_service = true,
             Long("renderer-probe") => renderer_probe = true,
+            Long("new-window") => new_window = true,
             Value(path) => path_arguments.push(path),
             unexpected => {
                 return Err(CommandLineError::Arguments(
@@ -194,6 +198,11 @@ pub(crate) fn parse_arguments(
     if activation_service && renderer_probe {
         return Err(CommandLineError::Arguments(
             "--activation-service and --renderer-probe cannot be used together".to_owned(),
+        ));
+    }
+    if new_window && (activation_service || renderer_probe) {
+        return Err(CommandLineError::Arguments(
+            "--new-window only applies to opening a window".to_owned(),
         ));
     }
 
@@ -215,16 +224,19 @@ pub(crate) fn parse_arguments(
         ));
     }
 
-    if path_arguments.is_empty() {
-        return Ok(CommandLineAction::Launch(
-            ApplicationLaunchRequest::ConfiguredStartup,
-        ));
-    }
-
-    let workspace = classify_explicit_workspace(path_arguments, current_directory)?;
-    Ok(CommandLineAction::Launch(
-        ApplicationLaunchRequest::ExplicitWorkspace(workspace),
-    ))
+    let request = if path_arguments.is_empty() {
+        ApplicationLaunchRequest::ConfiguredStartup
+    } else {
+        ApplicationLaunchRequest::ExplicitWorkspace(classify_explicit_workspace(
+            path_arguments,
+            current_directory,
+        )?)
+    };
+    Ok(if new_window {
+        CommandLineAction::LaunchInNewWindow(request)
+    } else {
+        CommandLineAction::Launch(request)
+    })
 }
 
 fn classify_explicit_workspace(
@@ -291,6 +303,33 @@ mod tests {
             panic!("expected explicit workspace launch");
         };
         workspace
+    }
+
+    #[test]
+    fn new_window_launches_in_a_window_of_its_own() {
+        let root = TempDir::new().expect("create temp directory");
+
+        assert_eq!(
+            parse([OsString::from("--new-window")], root.path()).expect("parse new window"),
+            CommandLineAction::LaunchInNewWindow(ApplicationLaunchRequest::ConfiguredStartup)
+        );
+        let with_path = parse(
+            [OsString::from("--new-window"), root.path().into()],
+            root.path(),
+        )
+        .expect("parse new window with a path");
+        assert!(matches!(
+            with_path,
+            CommandLineAction::LaunchInNewWindow(ApplicationLaunchRequest::ExplicitWorkspace(_))
+        ));
+        assert!(parse(
+            [
+                OsString::from("--new-window"),
+                OsString::from("--activation-service")
+            ],
+            root.path()
+        )
+        .is_err());
     }
 
     #[test]

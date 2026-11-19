@@ -374,6 +374,7 @@ pub(crate) enum Message {
     OpenWithApplicationSelected(String),
     OpenWithApplicationFinished(Result<(), String>),
     OpenTerminalFinished(Result<(), String>),
+    NewWindowOpenFinished(Result<(), String>),
     FileProperties(FilePropertiesMessage),
     FileOperationProgressed(
         u64,

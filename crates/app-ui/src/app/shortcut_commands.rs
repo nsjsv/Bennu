@@ -7,6 +7,7 @@ use file_core::FileKind;
 use iced::Task;
 
 use super::FileBrowser;
+use crate::commands::open_new_window_command;
 use crate::model::{Message, NavigationMode, SearchInputFocusCheckOrigin};
 
 impl FileBrowser {
@@ -72,6 +73,24 @@ impl FileBrowser {
         match self.keyboard_target_directory() {
             Some(directory) => self.create_empty_file_in(directory),
             None => Task::none(),
+        }
+    }
+
+    /// Ctrl+N：另开一个窗口显示当前文件夹（回收站、搜索里是主目录）。
+    pub(super) fn open_new_window_here(&mut self) -> Task<Message> {
+        let directory = self
+            .tab()
+            .current_directory()
+            .map(PathBuf::from)
+            .unwrap_or_else(file_core::app_dirs::home_dir);
+        open_new_window_command(directory)
+    }
+
+    /// Shift+Enter：选中的文件夹在新窗口打开；选中的是文件就不做事。
+    pub(super) fn open_selected_in_new_window(&mut self) -> Task<Message> {
+        match self.tab().selected.clone() {
+            Some(path) if self.entry_acts_as_directory(&path) => open_new_window_command(path),
+            _ => Task::none(),
         }
     }
 

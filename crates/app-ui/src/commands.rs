@@ -308,6 +308,28 @@ pub(crate) fn open_terminal_command(
     )
 }
 
+/// 另开一个窗口（`bennu --new-window 文件夹`）。窗口是独立进程，丢掉句柄后由 tokio 回收。
+pub(crate) fn open_new_window_command(directory: PathBuf) -> Task<Message> {
+    Task::perform(
+        async move {
+            let spawned = std::env::current_exe().and_then(|executable| {
+                tokio::process::Command::new(executable)
+                    .arg("--new-window")
+                    .arg("--")
+                    .arg(&directory)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+            });
+            spawned
+                .map(drop)
+                .map_err(|error| tr!("Could not open a new window: %1", error.to_string()))
+        },
+        Message::NewWindowOpenFinished,
+    )
+}
+
 pub(crate) fn write_file_clipboard_command(selection: FileClipboardSelection) -> Task<Message> {
     Task::perform(
         async move {

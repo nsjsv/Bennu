@@ -199,7 +199,11 @@ mod tests {
             config.action_for(KeyArea::Terminal, &ctrl_shift_t),
             Some(ShortcutAction::TerminalNewTab)
         );
-        assert_eq!(config.action_for(KeyArea::FileBrowser, &ctrl_shift_t), None);
+        // 同一个键在文件区是恢复关闭的标签页。
+        assert_eq!(
+            config.action_for(KeyArea::FileBrowser, &ctrl_shift_t),
+            Some(ShortcutAction::RestoreClosedTab)
+        );
         assert_eq!(
             config.action_for(
                 KeyArea::Terminal,
@@ -216,8 +220,9 @@ mod tests {
             config.conflicting_action(ShortcutAction::Refresh, &KeyPress::ctrl('D')),
             Some(ShortcutAction::DuplicateSelected)
         );
+        // 终端作用域的键不和文件区冲突。
         assert_eq!(
-            config.conflicting_action(ShortcutAction::Refresh, &KeyPress::ctrl_shift('T')),
+            config.conflicting_action(ShortcutAction::Refresh, &KeyPress::ctrl_shift('W')),
             None
         );
         assert_eq!(

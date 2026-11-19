@@ -5,14 +5,15 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::model::{
-    BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, BrowserViewMode,
-    FileDragPhase, Message, NavigationMode, SearchWorkspaceSessionId, SplitAxis, SplitRegion,
-    TabDragMode, TabDragState, TabSplitTarget,
+    tab_session_from_live, BrowserLocation, BrowserPane, BrowserPaneId, BrowserPaneLayout,
+    BrowserTab, BrowserViewMode, FileDragPhase, Message, NavigationMode, SearchWorkspaceSessionId,
+    SplitAxis, SplitRegion, TabDragMode, TabDragState, TabSplitTarget,
 };
 
 mod animation;
 pub(crate) use animation::{TabAnimationState, TabBarReveal};
 use animation::{TAB_REORDER_HORIZONTAL_PADDING, TAB_REORDER_MIN_SLOT_WIDTH, TAB_REORDER_SPACING};
+mod closed_tabs;
 mod folder_middle_click_split;
 mod keyboard_tabs;
 pub(super) use keyboard_tabs::TabDirection;
@@ -181,6 +182,8 @@ impl FileBrowser {
             return Task::none();
         };
         let was_active = tab_id == self.pane().active_tab_id;
+        let closing_snapshot = tab_session_from_live(&self.pane().tabs[closing_index]);
+        self.remember_closed_tab(closing_snapshot);
         self.invalidate_file_drop_for_tab_close();
 
         let drag_finish_task = if self

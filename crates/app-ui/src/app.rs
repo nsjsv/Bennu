@@ -430,6 +430,8 @@ pub(crate) struct FileBrowser {
     last_browser_session_save: Option<std::time::Instant>,
     file_drag_edge_scroll: Option<file_drag_edge_scroll::FileDragEdgeScroll>,
     next_tab_id: usize,
+    /// 本窗口最近关掉的标签页（快照，后关的在最后），Ctrl+Shift+T 依次恢复。只在内存里。
+    closed_tabs: Vec<crate::model::BrowserTabSession>,
     next_pane_id: u64,
     next_icon_grid_expansion_session_id: u64,
     next_list_expansion_follow_session_id: u64,
@@ -808,6 +810,7 @@ impl FileBrowser {
             last_browser_session_save: None,
             file_drag_edge_scroll: None,
             next_tab_id: 1,
+            closed_tabs: Vec::new(),
             next_pane_id: 1,
             next_icon_grid_expansion_session_id: 1,
             next_list_expansion_follow_session_id: 1,

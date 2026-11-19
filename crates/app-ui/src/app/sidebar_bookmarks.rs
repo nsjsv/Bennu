@@ -84,9 +84,17 @@ impl FileBrowser {
         }
     }
 
-    /// 应用内拖放（X11、原生拖放没起来）在侧栏上移动。原生拖放期间侧栏收不到指针移动，
-    /// 所以这里只服务应用内拖放：和原生拖放一样，拿拖动开始时量好的布局和窗口坐标算落点。
+    /// 应用内拖放（X11、原生拖放没起来）在侧栏上移动：和原生拖放一样，拿拖动开始时量好的
+    /// 布局和窗口坐标算落点。交给原生拖放以后落点归合成器的位置；原生拖放结束那一刻侧栏还会
+    /// 收到一次指针移动（2026-11-19 日志），不能拿它改写松手位置，所以只认还在自绘预览的拖动。
     pub(super) fn follow_in_app_drag_over_sidebar(&mut self) -> Task<Message> {
+        if !self
+            .file_drag
+            .as_ref()
+            .is_some_and(|file_drag| file_drag.displays_iced_drag_preview())
+        {
+            return Task::none();
+        }
         let position = self.cursor_position.get();
         if let Some(session) = &mut self.file_drop_session {
             session.position = position;

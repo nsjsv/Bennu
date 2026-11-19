@@ -196,6 +196,30 @@ fn in_app_drag_over_the_sidebar_lands_where_native_drag_lands() {
     );
 }
 
+/// 交给原生拖放以后，侧栏收到的指针移动不改落点位置（原生拖放结束那一刻会来一次）。
+#[test]
+fn pointer_moves_after_the_native_handoff_leave_the_drop_position_alone() {
+    let mut browser = browser_with_bookmarks(vec![bookmark("/home/user/alpha")]);
+    start_directory_file_drag(&mut browser, Path::new("/home/user/projects"));
+    measure_drop_layout(&mut browser, measured_sidebar(&["/home/user/alpha"]));
+    let gap = first_row_top() + SIDEBAR_LOCATION_ROW_HEIGHT + SIDEBAR_ROW_SPACING / 2.0;
+    assert_eq!(hover_sidebar_at(&mut browser, gap), Some(insert_at(1)));
+
+    let session_id = desktop_linux::WaylandDndController::new()
+        .start_file_drag(
+            vec![PathBuf::from("/home/user/projects")],
+            desktop_linux::WaylandFileDragIcon::new(1, 1, vec![0, 0, 0, 255]).expect("test icon"),
+        )
+        .expect("source session");
+    browser.file_drag.as_mut().expect("file drag").native_dnd =
+        crate::model::FileDragNativeDndState::Started(session_id);
+    hover_sidebar_at(&mut browser, SECTION_TOP + 10.0);
+
+    let session = browser.file_drop_session.as_ref().expect("drop session");
+    assert_eq!(session.position, Some(Point::new(20.0, gap)));
+    assert_eq!(session.hovered_target, Some(insert_at(1)));
+}
+
 #[test]
 fn a_folder_already_in_favorites_drags_like_any_folder() {
     let mut browser = browser_with_bookmarks(vec![bookmark("/home/user/alpha")]);

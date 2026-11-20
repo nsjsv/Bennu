@@ -35,7 +35,8 @@ pub use model::{
     SearchProviderFailure, SearchQuery, SearchResultBatch, SearchRootAvailability,
     SearchRootStatus, SearchScope, SearchServiceEvent, SearchServicePhase, SearchServiceRequest,
     SearchServiceStatus, SearchSortDirection, SearchSortField, SearchTextScope, SizeRange,
-    TimeRange, MAX_EXTENSION_TOKEN_BYTES, MAX_QUERY_EXTENSIONS, PROTOCOL_VERSION,
+    TimeRange, MAX_EXTENSION_TOKEN_BYTES, MAX_QUERY_EXTENSIONS, MAX_QUERY_RESULTS,
+    PROTOCOL_VERSION,
 };
 pub use protocol::{
     configure_path_preferences_via_socket, default_socket_path, path_configuration_via_socket,

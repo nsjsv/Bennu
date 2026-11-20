@@ -495,8 +495,11 @@ fn validate_wire_query(query: &SearchQuery) -> Result<(), String> {
     {
         return Err("search extension filter contains an invalid extension token".to_owned());
     }
-    if !(1..=200).contains(&query.limit) {
-        return Err("search result limit must be between 1 and 200".to_owned());
+    if !(1..=crate::model::MAX_QUERY_RESULTS).contains(&query.limit) {
+        return Err(format!(
+            "search result limit must be between 1 and {}",
+            crate::model::MAX_QUERY_RESULTS
+        ));
     }
     // 偏移翻页每页都要跳过前面的行，所以限住偏移；定格位置在查询时按定格长度检查。
     if matches!(

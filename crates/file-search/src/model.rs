@@ -174,6 +174,9 @@ pub const MAX_EXTENSION_TOKEN_BYTES: usize = 63;
 /// 单次查询允许的自定义扩展名数量上限，与 entry_type_rules 的量级约束一致。
 pub const MAX_QUERY_EXTENSIONS: usize = 16;
 
+/// 单次查询最多要多少条结果；要更多就按 `next_cursor` 翻页。
+pub const MAX_QUERY_RESULTS: usize = 200;
+
 /// 扩展名 token 的唯一字符白名单：字母数字与 `. - +`。
 /// 拒绝空白与 `%` `_` 等通配符，使 SQL 端 LIKE 拼接无需转义。
 pub fn extension_token_is_valid(token: &str) -> bool {

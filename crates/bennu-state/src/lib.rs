@@ -4,6 +4,7 @@
 //! 传输记录各有一个存储类型，从同一个句柄派生，互不知道对方的表。
 
 mod browser_session;
+mod command_outputs;
 mod database;
 mod error;
 mod preferences_payload;
@@ -19,6 +20,7 @@ pub use browser_session::{
     StoredBrowserSession, StoredBrowserTab, StoredBrowserViewMode, StoredColumnBrowserViewport,
     StoredColumnViewport, StoredListViewport, StoredSplitAxis,
 };
+pub use command_outputs::{CommandOutputStore, StoredCommandOutput, StoredCommandResult};
 pub use database::StateDatabase;
 pub use error::{StoreError, StoreResult};
 pub use preferences_payload::{

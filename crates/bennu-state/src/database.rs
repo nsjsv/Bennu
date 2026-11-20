@@ -72,6 +72,7 @@ impl OpenDatabase {
             crate::user_settings::SCHEMA_SQL,
             crate::browser_session::SCHEMA_SQL,
             crate::transfer_history::SCHEMA_SQL,
+            crate::command_outputs::SCHEMA_SQL,
         ] {
             writer.execute_batch(schema)?;
         }

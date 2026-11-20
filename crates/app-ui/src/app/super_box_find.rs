@@ -113,10 +113,13 @@ impl FileBrowser {
             }
             (_, _, selection) => {
                 let navigation = self.navigate_to(folder, NavigationMode::RecordHistory);
-                if let Some(selection) = selection {
-                    self.select_path(selection);
-                }
-                navigation
+                let Some(selection) = selection else {
+                    return navigation;
+                };
+                // 找到的是隐藏文件时也要在所在文件夹里列出来，才选得中。
+                let revealed = self.reveal_path(selection.clone());
+                self.select_path(selection);
+                Task::batch([navigation, revealed])
             }
         }
     }

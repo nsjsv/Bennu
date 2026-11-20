@@ -581,7 +581,7 @@ impl FileBrowser {
             waiting_for: root_path,
             target_selection,
         });
-        load_expanded_directory_command(request, self.options.clone(), cancellation)
+        load_expanded_directory_command(request, self.listing_options(pane_id), cancellation)
     }
 
     fn clear_list_expansion_for_follow(&mut self) {
@@ -717,7 +717,7 @@ impl FileBrowser {
             plan.waiting_for = next_path;
             return load_expanded_directory_command(
                 next_request,
-                self.options.clone(),
+                self.listing_options(self.active_pane_id()),
                 cancellation,
             );
         }
@@ -908,7 +908,11 @@ impl FileBrowser {
         );
         self.tab_mut().expanded_directories.insert(path, expanded);
         Task::batch([
-            load_expanded_directory_command(request, self.options.clone(), cancellation),
+            load_expanded_directory_command(
+                request,
+                self.listing_options(self.active_pane_id()),
+                cancellation,
+            ),
             self.schedule_thumbnail_refresh(),
             self.request_browser_session_save(),
         ])

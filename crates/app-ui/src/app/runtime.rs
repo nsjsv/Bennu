@@ -126,13 +126,14 @@ fn desktop_activation_stream(
     })
 }
 
-/// 监视一个显示中的目录。列表的隐藏规则进订阅身份：看不见的变化在这里就丢掉，
-/// 不发消息、不叫醒界面；切换「显示隐藏文件」时订阅随之换新。
+/// 监视一个显示中的目录。放不放行隐藏条目的变化进订阅身份：看不见的变化在这里就丢掉，
+/// 不发消息、不叫醒界面；切换「显示隐藏文件」或目录里列着点名的隐藏条目时订阅随之换新。
+/// 放行后哪一个隐藏条目真在列表里，由各标签应用变化时按自己的规则判断。
 pub(super) fn directory_watch_subscription(
     path: PathBuf,
-    include_hidden: bool,
+    passes_hidden: bool,
 ) -> Subscription<Message> {
-    Subscription::run_with((path, include_hidden), directory_watch_stream)
+    Subscription::run_with((path, passes_hidden), directory_watch_stream)
 }
 
 /// 状态库（含 WAL、回滚日志）有写入时报一次；开始监视时先报一次，补上监视建立之前
@@ -305,11 +306,11 @@ pub(super) fn x11_file_dnd_subscription(
 }
 
 fn directory_watch_stream(
-    (path, include_hidden): &(PathBuf, bool),
+    (path, passes_hidden): &(PathBuf, bool),
 ) -> impl iced::futures::Stream<Item = Message> + 'static {
     let path = path.clone();
     let listing = ScanOptions {
-        include_hidden: *include_hidden,
+        include_hidden: *passes_hidden,
         ..ScanOptions::default()
     };
     iced::stream::channel(DIRECTORY_WATCH_CHANNEL_SIZE, async move |mut output| {

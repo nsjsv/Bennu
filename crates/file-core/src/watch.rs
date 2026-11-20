@@ -33,16 +33,12 @@ impl ResolvedEntryChange {
     /// 这条变化会不会改动按 `options` 列出的列表。看不见的变化（不显示隐藏文件时
     /// 隐藏条目的增删改）不必叫醒界面，更不能让它重扫。
     pub fn affects_listing(&self, options: &ScanOptions) -> bool {
-        let listed = |path: &Path| {
-            path.file_name()
-                .is_some_and(|name| options.includes_entry(is_hidden_name(name)))
-        };
         match self {
-            Self::Added(entry) | Self::ContentChanged(entry) => {
-                options.includes_entry(entry.is_hidden())
+            Self::Added(entry) | Self::ContentChanged(entry) => options.includes_path(entry.path()),
+            Self::Removed { path } => options.includes_path(path),
+            Self::Renamed { from, to } => {
+                options.includes_path(from) || options.includes_path(to.path())
             }
-            Self::Removed { path } => listed(path),
-            Self::Renamed { from, to } => listed(from) || options.includes_entry(to.is_hidden()),
             Self::RescanRequired => true,
         }
     }
@@ -493,5 +489,29 @@ mod tests {
         assert!(hiding.affects_listing(&excluded));
         assert!(revealing.affects_listing(&excluded));
         assert!(ResolvedEntryChange::RescanRequired.affects_listing(&excluded));
+    }
+
+    /// 点名路径途经的隐藏条目在列表里，它的变化要放行；同目录别的隐藏条目照旧丢掉。
+    #[tokio::test]
+    async fn changes_to_the_revealed_hidden_entry_affect_the_listing() {
+        let directory = tempfile::tempdir().unwrap();
+        let revealed = directory.path().join(".config");
+        let other = directory.path().join(".cache");
+        std::fs::create_dir(&revealed).unwrap();
+        std::fs::create_dir(&other).unwrap();
+        let revealed_entry = discovered_entry_at(&revealed).await.unwrap();
+        let other_entry = discovered_entry_at(&other).await.unwrap();
+        let options = ScanOptions {
+            revealed_path: Some(revealed.join("fish")),
+            ..ScanOptions::default()
+        };
+
+        assert!(ResolvedEntryChange::Added(revealed_entry).affects_listing(&options));
+        assert!(ResolvedEntryChange::Removed {
+            path: revealed.clone()
+        }
+        .affects_listing(&options));
+        assert!(!ResolvedEntryChange::Added(other_entry).affects_listing(&options));
+        assert!(!ResolvedEntryChange::Removed { path: other }.affects_listing(&options));
     }
 }

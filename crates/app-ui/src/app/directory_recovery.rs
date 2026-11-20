@@ -62,7 +62,11 @@ impl FileBrowser {
         let (parent_request, cancellation) =
             self.begin_directory_load(request.pane_id, parent_directory);
         Task::batch([
-            load_directory_command(parent_request, self.options.clone(), cancellation),
+            load_directory_command(
+                parent_request,
+                self.listing_options(request.pane_id),
+                cancellation,
+            ),
             self.request_browser_session_save(),
         ])
     }

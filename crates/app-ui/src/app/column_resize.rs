@@ -186,6 +186,7 @@ impl FileBrowser {
     pub(super) fn toggle_show_hidden_files(&mut self) -> Task<Message> {
         self.options.include_hidden = !self.options.include_hidden;
         self.user_config.show_hidden_files = self.options.include_hidden;
+        self.reveal_open_column_chains();
         let persist_command = self.persist_user_preferences_command();
         let reload_command = self.reload_current();
         Task::batch([persist_command, reload_command])

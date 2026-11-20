@@ -63,6 +63,9 @@ mod preview_window_view;
 mod properties;
 mod remote_mounts;
 mod rendering_settings;
+mod revealed_path;
+#[cfg(test)]
+mod revealed_path_tests;
 pub(crate) mod right_preview_panel;
 mod runtime;
 mod search;
@@ -946,11 +949,11 @@ impl FileBrowser {
         }
 
         let include_hidden = self.options.include_hidden;
-        subscriptions.extend(
-            self.watched_directories()
-                .into_iter()
-                .map(|directory| directory_watch_subscription(directory, include_hidden)),
-        );
+        let revealing = self.directories_listing_revealed_entries();
+        subscriptions.extend(self.watched_directories().into_iter().map(|directory| {
+            let passes_hidden = include_hidden || revealing.contains(directory.as_path());
+            directory_watch_subscription(directory, passes_hidden)
+        }));
 
         if self.settings_window.is_some()
             && self.selected_settings_category == crate::model::SettingsCategory::Search

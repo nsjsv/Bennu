@@ -52,7 +52,7 @@ pub(crate) async fn discover_archive_directory(
     for (name, info) in children {
         let is_hidden = is_hidden_name(&name);
         hidden_entries += usize::from(is_hidden);
-        if !options.includes_entry(is_hidden) {
+        if !options.includes_entry(virtual_directory, &name) {
             continue;
         }
         entries.push(DiscoveredDirectoryEntry::with_archive_member_metadata(

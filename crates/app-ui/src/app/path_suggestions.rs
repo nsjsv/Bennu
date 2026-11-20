@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use iced::Task;
@@ -8,7 +8,7 @@ use super::FileBrowser;
 use crate::commands::path_suggestions_command;
 use crate::model::{
     AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest, BrowserPaneId,
-    Message, NavigationMode, PaneAddressBarTransition, PaneAddressEditingSession,
+    BrowserViewMode, Message, NavigationMode, PaneAddressBarTransition, PaneAddressEditingSession,
     PathSuggestionDirection,
 };
 use crate::view::address_input_id;
@@ -167,6 +167,15 @@ impl FileBrowser {
             return Task::none();
         };
         self.start_address_bar_exit(pane_id, editing.session.draft);
+        // 多栏里输入的在第一栏下面：第一栏不动，往右一路打开到它，和在栏里一级级点进去一样。
+        let tab = self.tab();
+        if tab.view_mode() == BrowserViewMode::Columns
+            && tab
+                .current_directory()
+                .is_some_and(|first_column| lies_under(&target, first_column))
+        {
+            return self.reveal_in_columns(target.clone(), Some(target));
+        }
         self.navigate_to(target, NavigationMode::RecordHistory)
     }
 
@@ -344,6 +353,16 @@ fn focus_address_input(pane_id: BrowserPaneId) -> Task<Message> {
     ])
 }
 
+/// `path` 字面上在 `directory` 下面（不是它自己）。输入里带 `..` 的不算：栏链只能一级级往下开。
+fn lies_under(path: &Path, directory: &Path) -> bool {
+    path.strip_prefix(directory).is_ok_and(|rest| {
+        rest.components().next().is_some()
+            && rest
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+    })
+}
+
 fn path_from_address_draft(draft: &str, current_dir: &Path) -> Option<PathBuf> {
     let trimmed = draft.trim();
     if trimmed.is_empty() {
@@ -454,7 +473,7 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
         let current_dir = PathBuf::from("/workspace");
         let deepest_open_directory = current_dir.join("project/src");
-        browser.tab_mut().location = BrowserLocation::Directory(current_dir);
+        browser.tab_mut().location = BrowserLocation::Directory(current_dir.clone());
         browser
             .tab_mut()
             .choose_view_mode(crate::model::BrowserViewMode::Columns);
@@ -473,9 +492,11 @@ mod tests {
         let _ = browser.update_address_draft(BrowserPaneId::PRIMARY, "child".to_owned());
         let _ = browser.submit_address_editing(BrowserPaneId::PRIMARY);
 
+        // 输入的在第一栏下面：第一栏不动，往右开到它。
+        assert_eq!(browser.tab().current_directory().unwrap(), current_dir);
         assert_eq!(
-            browser.tab().current_directory().unwrap(),
-            deepest_open_directory.join("child")
+            browser.tab().deepest_open_column_directory,
+            Some(deepest_open_directory.join("child"))
         );
     }
 

@@ -129,8 +129,8 @@ impl FileBrowser {
         entries: DirectoryEntrySnapshot,
         discovery: Option<DirectoryDiscovery>,
     ) -> Task<Message> {
-        let sort_options = self.options.clone();
         let pane_id = request.pane_id;
+        let sort_options = self.listing_options(pane_id);
         let is_active = pane_id == self.active_pane_id();
         let Some(pane) = self.pane_by_id_mut(pane_id) else {
             return Task::none();
@@ -238,7 +238,11 @@ impl FileBrowser {
         self.prune_list_directory_summaries_to_live_roots();
         Task::batch([
             cancel_address_editing,
-            load_directory_command(request, self.options.clone(), cancellation),
+            load_directory_command(
+                request,
+                self.listing_options(self.active_pane_id()),
+                cancellation,
+            ),
             self.request_browser_session_save(),
             self.reveal_address_bar_current_segment(self.active_pane_id()),
         ])
@@ -375,7 +379,7 @@ impl FileBrowser {
         let (request, cancellation) = self.begin_directory_load(pane_id, current_dir);
         commands.push(load_directory_command(
             request,
-            self.options.clone(),
+            self.listing_options(pane_id),
             cancellation,
         ));
         Task::batch(commands)
@@ -464,7 +468,7 @@ impl FileBrowser {
         Task::batch(commands)
     }
 
-    fn reload_observed_directory_in_pane(
+    pub(super) fn reload_observed_directory_in_pane(
         &mut self,
         pane_id: BrowserPaneId,
         path: &Path,
@@ -480,7 +484,7 @@ impl FileBrowser {
             return self.schedule_directory_reload(pane_id);
         }
         let load_context = self.expanded_directory_load_context(pane_id, path);
-        let options = self.options.clone();
+        let options = self.listing_options(pane_id);
         let Some(expanded) = self
             .pane_by_id_mut(pane_id)
             .and_then(|pane| pane.tab_mut().expanded_directories.get_mut(path))
@@ -711,7 +715,7 @@ impl FileBrowser {
                     Self::next_expanded_directory_load_request(load_context, path, expanded);
                 Some(load_expanded_directory_command(
                     request,
-                    self.options.clone(),
+                    self.listing_options(pane_id),
                     cancellation,
                 ))
             })

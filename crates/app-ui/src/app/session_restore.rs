@@ -123,7 +123,11 @@ impl FileBrowser {
             self.show_global_error(error);
         }
         let (request, cancellation) = self.begin_directory_load(BrowserPaneId::PRIMARY, directory);
-        load_directory_command(request, self.options.clone(), cancellation)
+        load_directory_command(
+            request,
+            self.listing_options(BrowserPaneId::PRIMARY),
+            cancellation,
+        )
     }
 
     fn apply_restored_session(

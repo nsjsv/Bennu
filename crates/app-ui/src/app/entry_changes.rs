@@ -44,8 +44,8 @@ impl FileBrowser {
         }
 
         let removed_paths = removed_paths(changes);
-        // 排序参数提前克隆一份：遍历窗格要独占借用 self.panes。
-        let sort_options = self.options.clone();
+        // 全局选项提前克隆一份：遍历窗格要独占借用 self.panes。
+        let base_options = self.options.clone();
         let mut placed_any = false;
         let mut affected_any = false;
         // summaries 需要的直接子条目数必须来自刚应用成功的位置：显示该目录
@@ -58,6 +58,8 @@ impl FileBrowser {
             let active_tab_id = pane.active_tab_id;
             let load_generation = pane.directory_load_generation;
             for tab in &mut pane.tabs {
+                // 每个标签按自己的点名路径决定哪些隐藏条目在列表里。
+                let sort_options = tab.listing_options(&base_options);
                 // 窗格同一时刻只扫描活动标签；后台标签的 Discovering 只是还没
                 // 加载过，切回时会整个重扫，没有扫描可等。
                 let scan_generation = (tab.id == active_tab_id
@@ -447,7 +449,7 @@ fn upsert_discovered_entry(
     entry: &DiscoveredDirectoryEntry,
     options: &file_core::ScanOptions,
 ) -> bool {
-    if !options.includes_entry(entry.is_hidden()) {
+    if !options.includes_path(entry.path()) {
         return false;
     }
     let entries = Arc::make_mut(&mut discovery.entries);

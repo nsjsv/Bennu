@@ -90,7 +90,7 @@ impl FileBrowser {
             return Task::none();
         };
         let pane_id = load_owner.pane_id();
-        let options = self.options.clone();
+        let options = self.listing_options(pane_id);
         let loaded_path = request.path.clone();
         let loaded_successfully = entries.is_ok();
         let mut loaded_child_count = None;

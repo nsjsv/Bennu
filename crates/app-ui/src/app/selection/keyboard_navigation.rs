@@ -104,7 +104,8 @@ impl FileBrowser {
     }
 
     /// 多栏视图里一路展开到 `folder`（它成为最后一栏），再选中 `selection`。`folder` 在当前第一栏
-    /// 下面时第一栏不动；不在时从两者共同的上级开始（第一栏换成它）。
+    /// 下面时第一栏不动；不在时从两者共同的上级开始（第一栏换成它）。要去的地方是点名的：
+    /// 不显示隐藏文件时，路上的隐藏目录和选中的隐藏条目也列在各自的上一级栏里。
     pub(in crate::app) fn reveal_in_columns(
         &mut self,
         folder: PathBuf,
@@ -120,6 +121,8 @@ impl FileBrowser {
         if current.as_ref() != Some(&root) {
             tasks.push(self.navigate_to(root.clone(), NavigationMode::RecordHistory));
         }
+        // 先换点名再开栏：要重读的上级和新开的栏都按新规则列。
+        tasks.push(self.reveal_path(selection.clone().unwrap_or_else(|| folder.clone())));
         let mut chain = folder
             .ancestors()
             .take_while(|directory| *directory != root)
@@ -173,7 +176,11 @@ impl FileBrowser {
             &mut expanded,
         );
         self.tab_mut().expanded_directories.insert(path, expanded);
-        load_expanded_directory_command(request, self.options.clone(), cancellation)
+        load_expanded_directory_command(
+            request,
+            self.listing_options(self.active_pane_id()),
+            cancellation,
+        )
     }
 
     pub(super) fn open_preview(&mut self) -> Task<Message> {

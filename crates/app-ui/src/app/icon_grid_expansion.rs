@@ -257,7 +257,7 @@ impl FileBrowser {
             &mut expanded,
         );
         self.icon_grid_expansion = Some(IconGridExpansionState::new(context, anchor, expanded));
-        load_expanded_directory_command(request, self.options.clone(), cancellation)
+        load_expanded_directory_command(request, self.listing_options(pane_id), cancellation)
     }
 
     fn start_icon_grid_child(&mut self, anchor: IconGridExpansionAnchor) -> Task<Message> {
@@ -285,7 +285,11 @@ impl FileBrowser {
             }
             return Task::none();
         }
-        load_expanded_directory_command(request, self.options.clone(), cancellation)
+        load_expanded_directory_command(
+            request,
+            self.listing_options(context.pane_id),
+            cancellation,
+        )
     }
 
     /// 已加载的面板刷新时旧条目一直显示、结果落地整体替换，所以不清条目、不动选择。
@@ -310,7 +314,11 @@ impl FileBrowser {
             path,
             &mut expanded.contents,
         );
-        load_expanded_directory_command(request, self.options.clone(), cancellation)
+        load_expanded_directory_command(
+            request,
+            self.listing_options(context.pane_id),
+            cancellation,
+        )
     }
 
     fn close_icon_grid_directory(&mut self, path: PathBuf) -> Task<Message> {

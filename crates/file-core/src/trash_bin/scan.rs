@@ -93,7 +93,8 @@ pub(super) fn scan_trash_with_catalog(
                 .map(OsStr::to_os_string)
                 .unwrap_or_else(|| item_name.clone());
             let is_hidden = is_hidden_name(&display_name);
-            if !options.includes_entry(is_hidden) {
+            // 回收站视图按原名显示，隐藏与否也看原名。
+            if !options.includes_entry(&location.files.path, &display_name) {
                 continue;
             }
             let trash_path = location.files.path.join(&item_name);

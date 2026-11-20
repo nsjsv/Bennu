@@ -23,6 +23,7 @@ fn sort_entries_keeps_directories_first_then_sorts_by_name() {
     ];
     let options = ScanOptions {
         include_hidden: true,
+        revealed_path: None,
         sort_field: SortField::Name,
         sort_direction: SortDirection::Ascending,
         directories_first: true,
@@ -42,6 +43,7 @@ fn sort_entries_can_sort_by_size_descending() {
     ];
     let options = ScanOptions {
         include_hidden: true,
+        revealed_path: None,
         sort_field: SortField::Size,
         sort_direction: SortDirection::Descending,
         directories_first: false,

@@ -594,6 +594,7 @@ fn compare_entry_names(left: &DirectoryEntry, right: &DirectoryEntry) -> Orderin
         right,
         &ScanOptions {
             include_hidden: true,
+            revealed_path: None,
             sort_field: SortField::Name,
             sort_direction: SortDirection::Ascending,
             directories_first: false,

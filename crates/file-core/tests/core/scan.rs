@@ -430,6 +430,51 @@ async fn discovery_applies_hidden_filter_before_authoritative_collection() {
     assert_eq!(hidden_included.entries.len(), 2);
 }
 
+/// 点名路径途经的隐藏条目照样列出，同一目录里别的隐藏条目照旧不列；更深一层同理。
+#[tokio::test]
+async fn discovery_lists_only_the_hidden_entries_on_the_way_to_the_revealed_path() {
+    let dir = tempdir().unwrap();
+    let config = dir.path().join(".config");
+    fs::create_dir_all(config.join(".secret/inner")).unwrap();
+    fs::create_dir(config.join("fish")).unwrap();
+    fs::create_dir(config.join(".other")).unwrap();
+    fs::create_dir(dir.path().join(".ssh")).unwrap();
+    fs::write(dir.path().join("visible.txt"), []).unwrap();
+    let options = ScanOptions {
+        revealed_path: Some(config.join(".secret/inner")),
+        ..ScanOptions::default()
+    };
+    let listed_names = |directory: std::path::PathBuf| {
+        let options = options.clone();
+        async move {
+            let discovery = discover_directory_with_progress(
+                directory,
+                options,
+                tokio_util::sync::CancellationToken::new(),
+                |_| {},
+            )
+            .await
+            .unwrap();
+            let mut names = discovery
+                .entries
+                .iter()
+                .map(|entry| entry.name().to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            names.sort();
+            (names, discovery.hidden_entries)
+        }
+    };
+
+    assert_eq!(
+        listed_names(dir.path().to_path_buf()).await,
+        (vec![".config".to_owned(), "visible.txt".to_owned()], 2)
+    );
+    assert_eq!(
+        listed_names(config).await,
+        (vec![".secret".to_owned(), "fish".to_owned()], 2)
+    );
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn discovery_preserves_non_utf8_name_bytes() {

@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use file_core::{
-    DirectoryDiscovery, DirectoryEntry, ResolvedEntryChange, SortDirection, SortField, TrashEntry,
+    DirectoryDiscovery, DirectoryEntry, ResolvedEntryChange, ScanOptions, SortDirection, SortField,
+    TrashEntry,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -427,6 +428,9 @@ pub(crate) struct BrowserTab {
     pub(crate) selected_paths: HashSet<PathBuf>,
     pub(crate) selection_anchor: Option<PathBuf>,
     pub(crate) deepest_open_column_directory: Option<PathBuf>,
+    /// 用户点名要去的路径（地址栏、定位找到的文件），见 `ScanOptions::revealed_path`。
+    /// 一直留到离开这棵目录树：在栏里点到别处时，上一级栏里那个隐藏条目还在，点得回去。
+    pub(crate) revealed_path: Option<PathBuf>,
     pub(crate) expanded_directories: HashMap<PathBuf, ExpandedDirectory>,
     /// 用户给这个标签选的视图，会话保存的也是它；实际显示方式见 `view_mode()`。
     chosen_view_mode: BrowserViewMode,
@@ -453,6 +457,14 @@ impl BrowserTab {
     /// 正在看的真实目录；回收站没有。
     pub(crate) fn current_directory(&self) -> Option<&Path> {
         self.location.directory()
+    }
+
+    /// 这个标签列目录的规则：全局的显示与排序选项，加上本标签的点名路径。
+    pub(crate) fn listing_options(&self, base: &ScanOptions) -> ScanOptions {
+        ScanOptions {
+            revealed_path: self.revealed_path.clone(),
+            ..base.clone()
+        }
     }
 
     /// 这个位置实际的显示方式。分栏要沿一串目录展开，回收站和搜索结果不是目录，选了分栏
@@ -514,6 +526,7 @@ impl BrowserTab {
             selected_paths: HashSet::new(),
             selection_anchor: None,
             deepest_open_column_directory: None,
+            revealed_path: None,
             expanded_directories: HashMap::new(),
             chosen_view_mode: BrowserViewMode::Columns,
             back_stack: Vec::new(),
@@ -600,6 +613,7 @@ impl BrowserTab {
     /// 离开当前目录树：取消展开目录的加载，清空展开状态与多栏链。
     pub(crate) fn close_expanded_directories(&mut self) {
         self.deepest_open_column_directory = None;
+        self.revealed_path = None;
         cancel_and_clear_expanded_directories(&mut self.expanded_directories);
     }
 
@@ -673,6 +687,7 @@ impl BrowserTab {
         migrate_path_set(&mut self.selected_paths, migrations);
         migrate_optional_path(&mut self.selection_anchor, migrations);
         migrate_optional_path(&mut self.deepest_open_column_directory, migrations);
+        migrate_optional_path(&mut self.revealed_path, migrations);
         migrate_expanded_directories(&mut self.expanded_directories, migrations);
     }
 
@@ -683,6 +698,7 @@ impl BrowserTab {
         self.selected_paths.clear();
         self.selection_anchor = None;
         self.deepest_open_column_directory = None;
+        self.revealed_path = None;
         cancel_and_clear_expanded_directories(&mut self.expanded_directories);
     }
 

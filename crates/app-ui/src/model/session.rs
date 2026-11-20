@@ -58,6 +58,8 @@ impl BrowserTabSession {
         tab.selected_paths = self.selected_paths.clone();
         tab.selection_anchor = self.selected.clone();
         tab.deepest_open_column_directory = self.deepest_open_column_directory.clone();
+        // 恢复出来的栏链是用户上次开着的路：途经隐藏目录时上一级栏里也得列出它。
+        tab.revealed_path = self.deepest_open_column_directory.clone();
         tab.expanded_directories = self.restored_expanded_directories();
         tab.choose_view_mode(self.view_mode);
         tab.back_stack = history_from_session(&self.back_stack);

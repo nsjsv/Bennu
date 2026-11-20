@@ -117,9 +117,9 @@ pub use ops::{
     CopiedTarget, MetadataKind, MetadataLossSample, MetadataLossSummary, METADATA_LOSS_SAMPLE_LIMIT,
 };
 pub use scan::{
-    discover_directory_with_progress, is_hidden_name, scan_directory, scan_directory_with_progress,
-    DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryScan, DirectoryScanBatch, FileError,
-    ScanOptions, ScanWarning,
+    discover_directory_with_progress, is_hidden_name, revealed_hidden_entries, scan_directory,
+    scan_directory_with_progress, DirectoryDiscovery, DirectoryDiscoveryBatch, DirectoryScan,
+    DirectoryScanBatch, FileError, ScanOptions, ScanWarning,
 };
 pub use sort::{
     apply_entry_options, compare_entries, discovered_sort_is_ready, filter_hidden,

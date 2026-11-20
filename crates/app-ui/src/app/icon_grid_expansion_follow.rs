@@ -60,7 +60,11 @@ impl FileBrowser {
             deepest_directory,
             target_selection,
         ));
-        load_expanded_directory_command(request, self.options.clone(), cancellation)
+        load_expanded_directory_command(
+            request,
+            self.listing_options(self.active_pane_id()),
+            cancellation,
+        )
     }
 
     pub(super) fn advance_icon_grid_expansion_follow(&mut self) -> Task<Message> {

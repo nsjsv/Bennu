@@ -23,23 +23,48 @@ const DIRECTORY_SCAN_BATCH_SIZE: usize = 128;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanOptions {
     pub include_hidden: bool,
+    /// 用户点名要去的路径（地址栏输入、定位找到的文件）。不显示隐藏文件时，它途经的隐藏条目
+    /// 照样列在各自的上一级里：要去的地方得看得见，其余隐藏条目照旧不列。
+    pub revealed_path: Option<PathBuf>,
     pub sort_field: SortField,
     pub sort_direction: SortDirection,
     pub directories_first: bool,
 }
 
 impl ScanOptions {
-    /// 这个条目会不会出现在列表里。全量扫描、增量变化、归档和回收站都用这一条规则，
-    /// 否则增量与重扫得到的列表会不一样。
-    pub fn includes_entry(&self, is_hidden: bool) -> bool {
-        self.include_hidden || !is_hidden
+    /// `directory` 里名叫 `name` 的条目会不会出现在列表里。全量扫描、增量变化、文件监听、
+    /// 归档和回收站都用这一条规则，否则增量与重扫得到的列表会不一样。
+    pub fn includes_entry(&self, directory: &Path, name: &std::ffi::OsStr) -> bool {
+        self.include_hidden
+            || !is_hidden_name(name)
+            || self
+                .revealed_path
+                .as_deref()
+                .and_then(|revealed| revealed.strip_prefix(directory).ok())
+                .and_then(|rest| rest.iter().next())
+                == Some(name)
     }
+
+    /// 只有条目完整路径时的同一条规则。
+    pub fn includes_path(&self, path: &Path) -> bool {
+        match (path.parent(), path.file_name()) {
+            (Some(directory), Some(name)) => self.includes_entry(directory, name),
+            _ => true,
+        }
+    }
+}
+
+/// 点名 `path` 时额外列出的隐藏条目：路径上每个隐藏的部分。它们的上一级就是列表因此多一项的目录。
+pub fn revealed_hidden_entries(path: &Path) -> impl Iterator<Item = &Path> {
+    path.ancestors()
+        .filter(|ancestor| ancestor.file_name().is_some_and(is_hidden_name))
 }
 
 impl Default for ScanOptions {
     fn default() -> Self {
         Self {
             include_hidden: false,
+            revealed_path: None,
             sort_field: SortField::Name,
             sort_direction: SortDirection::Ascending,
             directories_first: true,
@@ -134,7 +159,7 @@ pub async fn discover_directory_with_progress(
         let name = dir_entry.file_name();
         let is_hidden = is_hidden_name(&name);
         hidden_entries += usize::from(is_hidden);
-        if !options.includes_entry(is_hidden) {
+        if !options.includes_entry(&path, &name) {
             continue;
         }
         let entry_path = dir_entry.path();

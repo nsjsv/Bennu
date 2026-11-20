@@ -148,9 +148,6 @@ pub enum QueuedFileOperation {
     },
 }
 
-/// 执行命令时，标准输出、标准错误各留多少末尾：失败说明取它的最后几行，成功时整段交回去显示。
-pub const COMMAND_OUTPUT_TAIL_BYTES: usize = 64 * 1024;
-
 /// 一次命令执行：程序、参数（已经切好、填好）、在哪个文件夹里执行。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandInvocation {

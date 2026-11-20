@@ -23,7 +23,7 @@ pub use executor::run_file_operation;
 pub use outcome::{
     completed_migrations_cross_directory_tree_boundary,
     completed_migrations_have_source_in_directory_tree, completed_migrations_leave_directory_tree,
-    completed_migrations_touch_directory_tree, path_after_completed_migrations, CommandOutput,
+    completed_migrations_touch_directory_tree, path_after_completed_migrations,
     CompletedPathMigration, CompletedTransfer, FileOperationCompletion,
     FileOperationHistoryEligibility, FileOperationOutcome, KeptNewFolder, RenameRejection,
 };

@@ -71,12 +71,7 @@ async fn commands_run_one_after_another_in_the_given_folder() {
     )
     .await;
 
-    assert_eq!(
-        outcome,
-        Ok(FileOperationOutcome::CommandsRan {
-            output: CommandOutput::default()
-        })
-    );
+    assert_eq!(outcome, Ok(FileOperationOutcome::NoHistory));
     assert_eq!(
         std::fs::read_to_string(directory.path().join("second"))
             .unwrap()
@@ -100,10 +95,7 @@ async fn arguments_reach_the_program_byte_for_byte() {
     )
     .await;
 
-    assert!(matches!(
-        outcome,
-        Ok(FileOperationOutcome::CommandsRan { .. })
-    ));
+    assert_eq!(outcome, Ok(FileOperationOutcome::NoHistory));
     assert_eq!(
         std::fs::read_to_string(directory.path().join("out")).unwrap(),
         tricky
@@ -229,28 +221,4 @@ async fn pausing_stops_the_command_and_resuming_lets_it_go_on() {
         .unwrap()
         .unwrap();
     assert!(outcome.is_err());
-}
-
-#[tokio::test]
-async fn the_last_command_hands_back_the_end_of_its_output() {
-    let directory = tempfile::tempdir().unwrap();
-    let outcome = run(
-        vec![
-            shell("echo first", directory.path(), &[]),
-            shell(
-                "head -c 70000 /dev/zero | tr '\\0' a; echo; echo oops >&2",
-                directory.path(),
-                &[],
-            ),
-        ],
-        running(),
-    )
-    .await;
-
-    let Ok(FileOperationOutcome::CommandsRan { output }) = outcome else {
-        panic!("{outcome:?}");
-    };
-    assert_eq!(output.stdout.len(), crate::COMMAND_OUTPUT_TAIL_BYTES);
-    assert!(output.stdout.ends_with(b"aaa\n"));
-    assert_eq!(output.stderr, b"oops\n");
 }

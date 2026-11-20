@@ -411,9 +411,9 @@ impl FileOperationHistoryItem {
     fn from_outcome(outcome: &FileOperationOutcome) -> Option<Self> {
         match outcome {
             // 撤销收纳只在撤销时发生，它本身不再进历史。
-            FileOperationOutcome::NoHistory
-            | FileOperationOutcome::CommandsRan { .. }
-            | FileOperationOutcome::NewFolderUngathered { .. } => None,
+            FileOperationOutcome::NoHistory | FileOperationOutcome::NewFolderUngathered { .. } => {
+                None
+            }
             FileOperationOutcome::Convert { outputs, .. } => Self::appeared(outputs.clone()),
             FileOperationOutcome::CreatedArchive { archive } => {
                 Self::appeared(vec![archive.clone()])

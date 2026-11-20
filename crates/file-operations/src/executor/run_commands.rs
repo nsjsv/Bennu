@@ -11,10 +11,12 @@ use file_core::{FileError, FileOperationControls, FileOperationRunState};
 use tokio::process::Command;
 
 use crate::{
-    CommandInvocation, CommandOutput, FileOperationEvent, FileOperationEventSender,
-    FileOperationOutcome, FileOperationProgressUpdate, COMMAND_OUTPUT_TAIL_BYTES,
+    CommandInvocation, FileOperationEvent, FileOperationEventSender, FileOperationOutcome,
+    FileOperationProgressUpdate,
 };
 
+/// 失败说明里保留的输出末尾。
+const OUTPUT_TAIL_BYTES: usize = 4 * 1024;
 /// 失败说明里最多放几行输出。
 const OUTPUT_TAIL_LINES: usize = 5;
 /// SIGTERM 之后等它自己退出多久，再 SIGKILL 整组。
@@ -27,9 +29,8 @@ pub(super) async fn run_queued_commands(
     output: &FileOperationEventSender,
 ) -> Result<FileOperationOutcome, String> {
     let total = invocations.len();
-    let mut output_of_last = CommandOutput::default();
     for (index, invocation) in invocations.iter().enumerate() {
-        output_of_last = run_command(invocation, &mut controls)
+        run_command(invocation, &mut controls)
             .await
             .map_err(|failure| failure.to_string())?;
         let _ = output
@@ -43,9 +44,7 @@ pub(super) async fn run_queued_commands(
             })
             .await;
     }
-    Ok(FileOperationOutcome::CommandsRan {
-        output: output_of_last,
-    })
+    Ok(FileOperationOutcome::NoHistory)
 }
 
 #[derive(Debug)]
@@ -95,7 +94,7 @@ impl std::fmt::Display for CommandFailure {
 async fn run_command(
     invocation: &CommandInvocation,
     controls: &mut FileOperationControls,
-) -> Result<CommandOutput, CommandFailure> {
+) -> Result<(), CommandFailure> {
     controls
         .wait_until_running()
         .await
@@ -117,11 +116,11 @@ async fn run_command(
     let group = child.id().map(|pid| pid as libc::pid_t);
     let stdout = tokio::spawn(bennu_subprocess::read_child_output_tail(
         child.stdout.take().expect("stdout is piped"),
-        COMMAND_OUTPUT_TAIL_BYTES,
+        OUTPUT_TAIL_BYTES,
     ));
     let stderr = tokio::spawn(bennu_subprocess::read_child_output_tail(
         child.stderr.take().expect("stderr is piped"),
-        COMMAND_OUTPUT_TAIL_BYTES,
+        OUTPUT_TAIL_BYTES,
     ));
     let cancel = controls.cancellation_token();
     let mut run_state_open = true;
@@ -147,16 +146,15 @@ async fn run_command(
             }
         }
     };
-    let stderr = stderr.await.ok().and_then(Result::ok).unwrap_or_default();
-    let stdout = stdout.await.ok().and_then(Result::ok).unwrap_or_default();
     if status.success() {
-        return Ok(CommandOutput { stdout, stderr });
+        return Ok(());
     }
     // 出错信息一般写在 stderr；没写时看 stdout。
+    let stderr = stderr.await.ok().and_then(Result::ok).unwrap_or_default();
     let output = if stderr.iter().any(|byte| !byte.is_ascii_whitespace()) {
         stderr
     } else {
-        stdout
+        stdout.await.ok().and_then(Result::ok).unwrap_or_default()
     };
     Err(CommandFailure::Exited {
         program: program_name,

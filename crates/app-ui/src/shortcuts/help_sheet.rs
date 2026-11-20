@@ -1,13 +1,11 @@
 //! F1 快捷键一览的内容：用户当前实际的键（改过的就是改后的），加上绑了键的动作、固定键、
 //! vim 命令和预览窗口里的键。视图只负责排版。
 
-use std::sync::Arc;
-
 use super::action::{ShortcutAction, ShortcutGroup};
 use super::key_press::KeyPress;
 use super::keymap::{LiveKeymap, ShortcutTarget};
 use super::letter_layer::LetterMode;
-use crate::actions::{ActionDefinition, ActionId};
+use crate::actions::ActionId;
 
 pub(crate) struct HelpSection {
     pub(crate) title: String,
@@ -44,10 +42,10 @@ fn key_labels(keys: &[KeyPress]) -> String {
         .join(" / ")
 }
 
-/// `actions` 是动作文件夹里现在有的动作；只列出绑了键的。
-pub(crate) fn shortcut_help_sections(
+/// `actions` 是现在有的动作和服务菜单（和它们的名字）；只列出绑了键的。
+pub(crate) fn shortcut_help_sections<'a>(
     keymap: &LiveKeymap<'_, impl Fn(&ActionId) -> bool>,
-    actions: &[Arc<ActionDefinition>],
+    actions: impl IntoIterator<Item = (ActionId, &'a str)>,
     letter_mode: LetterMode,
 ) -> Vec<HelpSection> {
     let mut sections = vec![moving_section(letter_mode)];
@@ -72,10 +70,10 @@ pub(crate) fn shortcut_help_sections(
         });
     }
     let action_rows = actions
-        .iter()
-        .filter_map(|definition| {
-            let keys = keymap.keys(ShortcutTarget::Action(definition.id.clone()));
-            (!keys.is_empty()).then(|| row(key_labels(&keys), definition.name.clone()))
+        .into_iter()
+        .filter_map(|(id, name)| {
+            let keys = keymap.keys(ShortcutTarget::Action(id));
+            (!keys.is_empty()).then(|| row(key_labels(&keys), name.to_owned()))
         })
         .collect::<Vec<_>>();
     if !action_rows.is_empty() {
@@ -190,7 +188,11 @@ mod tests {
     #[test]
     fn the_sheet_shows_the_keys_the_user_set() {
         let mut config = ShortcutConfig::default();
-        let default = shortcut_help_sections(&config.live(|_| false), &[], LetterMode::TypeToJump);
+        let default = shortcut_help_sections(
+            &config.live(|_| false),
+            std::iter::empty(),
+            LetterMode::TypeToJump,
+        );
         assert_eq!(
             find_row(&default, &ShortcutAction::Redo.label()).map(|row| row.keys.as_str()),
             Some("Ctrl+Shift+Z / Ctrl+Y")
@@ -198,7 +200,11 @@ mod tests {
 
         config.set_keys(ShortcutAction::Redo, vec![KeyPress::ctrl('R')]);
         config.set_keys(ShortcutAction::RenameSelected, Vec::new());
-        let changed = shortcut_help_sections(&config.live(|_| false), &[], LetterMode::TypeToJump);
+        let changed = shortcut_help_sections(
+            &config.live(|_| false),
+            std::iter::empty(),
+            LetterMode::TypeToJump,
+        );
         assert_eq!(
             find_row(&changed, &ShortcutAction::Redo.label()).map(|row| row.keys.as_str()),
             Some("Ctrl+R")
@@ -215,7 +221,7 @@ mod tests {
         let config = ShortcutConfig::default();
         let title = LetterMode::Vim.label();
         let has_vim = |mode| {
-            shortcut_help_sections(&config.live(|_| false), &[], mode)
+            shortcut_help_sections(&config.live(|_| false), std::iter::empty(), mode)
                 .iter()
                 .any(|section| section.title == title)
         };

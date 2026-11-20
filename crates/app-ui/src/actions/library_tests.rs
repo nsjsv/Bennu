@@ -8,6 +8,16 @@ types = ["video/*"]
 steps = [{ convert = "m4a" }]
 "#;
 
+/// 只有这个动作文件夹，没有服务菜单。
+fn sources(folder: &Path) -> ActionSources {
+    ActionSources {
+        action_folder: folder.to_path_buf(),
+        data_dirs: Vec::new(),
+        show_settings: folder.join("kservicemenurc"),
+        language: UiLanguage::English,
+    }
+}
+
 fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -16,7 +26,7 @@ fn write(path: &Path, text: &str) {
 #[test]
 fn a_missing_folder_has_no_actions_and_no_problems() {
     let directory = tempfile::tempdir().unwrap();
-    let library = ActionLibrary::load(&directory.path().join("actions"));
+    let library = ActionLibrary::load(&sources(&directory.path().join("actions")));
     assert!(library.definitions().is_empty());
     assert!(library.problems().is_empty());
 }
@@ -46,12 +56,12 @@ fn good_files_load_and_bad_ones_are_listed_without_stopping_the_rest() {
     .unwrap();
     assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
 
-    let library = ActionLibrary::load(&folder);
+    let library = ActionLibrary::load(&sources(&folder));
 
     let names = library
         .definitions()
         .iter()
-        .map(|definition| definition.id.file_stem())
+        .map(|definition| definition.id.fallback_label())
         .collect::<Vec<_>>();
     assert_eq!(names, ["extract-audio"]);
     let problems = library
@@ -82,7 +92,7 @@ fn a_folder_other_users_can_change_loads_nothing() {
     write(&folder.join("extract-audio.toml"), EXTRACT_AUDIO);
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o777)).unwrap();
 
-    let library = ActionLibrary::load(&folder);
+    let library = ActionLibrary::load(&sources(&folder));
 
     assert!(library.definitions().is_empty());
     assert_eq!(library.problems().len(), 1);
@@ -110,7 +120,7 @@ fn matching_follows_the_types_of_the_whole_selection() {
         &folder.join("anything.toml"),
         "name = \"Anything\"\nsteps = [{ copy_paths = true }]\n",
     );
-    let library = ActionLibrary::load(&folder);
+    let library = ActionLibrary::load(&sources(&folder));
     let names = |items: &[(&str, bool)]| {
         let target = library.target(
             items
@@ -118,7 +128,9 @@ fn matching_follows_the_types_of_the_whole_selection() {
                 .map(|(path, is_directory)| (Path::new(*path), *is_directory)),
         );
         library
-            .matching(&target)
+            .applicable(&target)
+            .own
+            .iter()
             .map(|definition| definition.name.clone())
             .collect::<Vec<_>>()
     };

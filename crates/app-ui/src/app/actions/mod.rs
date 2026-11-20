@@ -4,6 +4,7 @@
 mod library_loading;
 mod notify;
 mod run;
+mod service_menu_launch;
 mod steps;
 
 use std::path::PathBuf;
@@ -16,7 +17,7 @@ pub(crate) use run::ActionRuns;
 pub(crate) use steps::PreparedStep;
 
 use super::FileBrowser;
-use crate::actions::{ActionDefinition, ActionId, ActionLibrary};
+use crate::actions::{ActionId, ActionLibrary, ApplicableActions};
 use crate::model::{BrowserLocation, Message};
 
 /// 动作作用在什么上。
@@ -40,6 +41,11 @@ pub(crate) enum ActionMessage {
         prepared: PreparedStep,
     },
     HintExpired,
+    /// 服务菜单的进程启动完了；失败时带着原因。
+    ServiceMenuEnded {
+        name: String,
+        result: Result<(), String>,
+    },
     /// 设置页的“打开动作文件夹”：不存在时先建好（只有自己能进），再在新标签页里打开。
     FolderOpenRequested,
     FolderReady(Result<PathBuf, String>),
@@ -86,6 +92,12 @@ impl FileBrowser {
                 self.show_global_error(error);
                 Task::none()
             }
+            ActionMessage::ServiceMenuEnded { name, result } => {
+                if let Err(reason) = result {
+                    self.show_global_error(tr!("%1 failed: %2", name, reason));
+                }
+                Task::none()
+            }
             ActionMessage::HintExpired => {
                 if self
                     .action_hint
@@ -108,9 +120,9 @@ impl FileBrowser {
             crate::shortcuts::ShortcutTarget::Builtin(action) => action.label(),
             crate::shortcuts::ShortcutTarget::Action(id) => self
                 .action_library
-                .find(id)
-                .map(|definition| definition.name.clone())
-                .unwrap_or_else(|| id.file_stem().to_owned()),
+                .name(id)
+                .map(str::to_owned)
+                .unwrap_or_else(|| id.fallback_label()),
         }
     }
 
@@ -124,23 +136,15 @@ impl FileBrowser {
         } else {
             ActionSubject::Selection
         };
-        if let Some(definition) = self
-            .applicable_actions(&subject)
-            .into_iter()
-            .find(|definition| definition.id == *action)
-        {
-            let items = self
-                .action_items(&subject)
-                .map(|items| items.into_iter().map(|(path, _)| path).collect())
-                .unwrap_or_default();
-            return self.start_action_run(definition, items);
+        if let Some(task) = self.start_if_applicable(action, &subject) {
+            return task;
         }
-        let Some(definition) = self.action_library.find(action) else {
+        let Some(name) = self.action_library.name(action) else {
             return Task::none();
         };
         let until = Instant::now() + HINT_DURATION;
         self.action_hint = Some(ActionHint {
-            text: tr!("“%1” does not apply to the selected items", definition.name),
+            text: tr!("“%1” does not apply to the selected items", name),
             until,
         });
         // 计时器要在运行时里建，放进 async 块里，等任务真正开始跑时才建。
@@ -149,38 +153,55 @@ impl FileBrowser {
         })
     }
 
-    /// 适用于这一批的动作，按名字排序。回收站里、压缩包里面没有动作：那里的东西是只读的。
-    pub(crate) fn applicable_actions(
-        &self,
-        subject: &ActionSubject,
-    ) -> Vec<std::sync::Arc<ActionDefinition>> {
+    /// 适用于这一批的动作。回收站里、压缩包里面没有动作：那里的东西是只读的。
+    pub(crate) fn applicable_actions(&self, subject: &ActionSubject) -> ApplicableActions {
         let Some(items) = self.action_items(subject) else {
-            return Vec::new();
+            return ApplicableActions::default();
         };
+        self.applicable_to(&items)
+    }
+
+    fn applicable_to(&self, items: &[(PathBuf, bool)]) -> ApplicableActions {
         let target = self.action_library.target(
             items
                 .iter()
                 .map(|(path, is_directory)| (path.as_path(), *is_directory)),
         );
-        self.action_library.matching(&target).cloned().collect()
+        self.action_library.applicable(&target)
     }
 
     fn invoke_action(&mut self, action: &ActionId, subject: ActionSubject) -> Task<Message> {
         self.context_menu = None;
-        let Some(definition) = self
-            .applicable_actions(&subject)
-            .into_iter()
-            .find(|definition| definition.id == *action)
-        else {
-            return Task::none();
-        };
-        let Some(items) = self.action_items(&subject) else {
-            return Task::none();
-        };
-        self.start_action_run(
-            definition,
-            items.into_iter().map(|(path, _)| path).collect(),
-        )
+        self.start_if_applicable(action, &subject)
+            .unwrap_or_else(Task::none)
+    }
+
+    /// 菜单和快捷键共用的入口：动作适用于这一批时开始运行；不适用（或者这里不能有动作）时
+    /// None。按快捷键时每次都重新判断，同 KIO。
+    fn start_if_applicable(
+        &mut self,
+        action: &ActionId,
+        subject: &ActionSubject,
+    ) -> Option<Task<Message>> {
+        let items = self.action_items(subject)?;
+        let applicable = self.applicable_to(&items);
+        let paths = items.into_iter().map(|(path, _)| path).collect();
+        match action {
+            ActionId::File(_) => {
+                let definition = applicable
+                    .own
+                    .into_iter()
+                    .find(|definition| definition.id == *action)?;
+                Some(self.start_action_run(definition, paths))
+            }
+            ActionId::ServiceMenu(key) => {
+                let definition = applicable
+                    .service_menus
+                    .into_iter()
+                    .find(|definition| definition.key == *key)?;
+                Some(self.launch_service_menu(&definition, paths))
+            }
+        }
     }
 
     /// 这一批的路径和它是不是文件夹；这里不能有动作时为 None。是不是文件夹看已经列出来的

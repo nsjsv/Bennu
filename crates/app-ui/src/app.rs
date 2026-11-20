@@ -980,7 +980,7 @@ impl FileBrowser {
         );
 
         subscriptions.push(self.terminal_output_subscription());
-        subscriptions.push(actions::action_library_subscription());
+        subscriptions.push(actions::action_library_subscription(self.active_language()));
 
         let remote_preview_progress_is_indeterminate = matches!(
             self.preview_engine.preview.as_ref(),

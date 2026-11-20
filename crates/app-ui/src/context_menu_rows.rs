@@ -1,8 +1,13 @@
 //! 文件区右键菜单有哪些行：视图按它画，键盘按它走，键盘执行的就是鼠标点那一行发的消息。
 //! 每行带着它对应的快捷键，菜单里显示的键和实际键位是同一份。
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use iced::keyboard;
 
+use crate::actions::service_menu::Priority;
+use crate::actions::{ActionId, ServiceMenuAction};
 use crate::app::actions::{ActionMessage, ActionSubject};
 use crate::app::archive_creation::ArchiveCreationMessage;
 use crate::app::checksum::ChecksumMessage;
@@ -291,45 +296,105 @@ fn item_row(
     })
 }
 
-/// 自定义动作：不超过这么多个时直接排在菜单里，多了收进"动作"子菜单（和服务菜单一样）。
+/// "动作"那一块不超过这么多个时直接排在菜单里，多了收进"动作"子菜单（同 KIO）。
 const INLINE_ACTION_LIMIT: usize = 4;
 
+/// 自定义动作和服务菜单，顺序同 KIO 的 `addServiceActionsTo`：
+/// 1. 能收起来的一块：Bennu 自己的动作，Important 的项，普通的项；
+/// 2. 服务菜单自己的子菜单，每个一行（Bennu 的菜单只有一层子菜单，所以不收进"动作"）；
+/// 3. TopLevel 的项，总是直接放在主菜单里。
+///
+/// 同一组里的服务菜单项按动作键排序，子菜单按名字排序。
 fn action_rows(menu: &FileContextMenuState) -> Vec<MenuRow> {
     let subject = match &menu.target {
         Some(_) => ActionSubject::Selection,
         None => ActionSubject::Folder(menu.paste_directory.clone()),
     };
-    let rows = menu
+    let row = |id: ActionId, name: &str| MenuRow {
+        icon: Some(IconSymbol::Play),
+        label: name.to_owned(),
+        section: MenuSection::NewAndShare,
+        shortcut: Some(ShortcutTarget::Action(id.clone())),
+        checked: false,
+        kind: MenuRowKind::Action(Message::Action(ActionMessage::Invoked {
+            action: id,
+            subject: subject.clone(),
+        })),
+    };
+    let service_menus = &menu.actions.service_menus;
+    let loose = |priority: Priority| {
+        let mut chosen = service_menus
+            .iter()
+            .filter(|action| action.priority == priority && action.submenu.is_none())
+            .collect::<Vec<_>>();
+        chosen.sort_by(|left, right| left.order_key().cmp(&right.order_key()));
+        chosen
+            .into_iter()
+            .map(|action| row(action.id(), &action.name))
+            .collect::<Vec<_>>()
+    };
+
+    let mut block = menu
         .actions
+        .own
         .iter()
-        .map(|definition| MenuRow {
-            icon: Some(IconSymbol::Play),
-            label: definition.name.clone(),
-            section: MenuSection::NewAndShare,
-            shortcut: Some(ShortcutTarget::Action(definition.id.clone())),
-            checked: false,
-            kind: MenuRowKind::Action(Message::Action(ActionMessage::Invoked {
-                action: definition.id.clone(),
-                subject: subject.clone(),
-            })),
-        })
+        .map(|definition| row(definition.id.clone(), &definition.name))
         .collect::<Vec<_>>();
-    if rows.len() <= INLINE_ACTION_LIMIT {
-        return rows;
+    block.extend(loose(Priority::Important));
+    block.extend(loose(Priority::Normal));
+    let mut rows = if block.len() <= INLINE_ACTION_LIMIT {
+        block
+    } else {
+        let expansion = FileContextMenuExpansion::Group(FileAreaMenuItem::Actions);
+        vec![submenu_row(
+            FileAreaMenuItem::Actions.label(),
+            expansion,
+            block,
+        )]
+    };
+
+    let mut submenus = BTreeMap::<(Priority, &str), Vec<&Arc<ServiceMenuAction>>>::new();
+    for action in service_menus {
+        if let Some(name) = &action.submenu {
+            submenus
+                .entry((action.priority, name.as_str()))
+                .or_default()
+                .push(action);
+        }
     }
-    let expansion = FileContextMenuExpansion::Group(FileAreaMenuItem::Actions);
-    vec![MenuRow {
+    for (index, ((_, name), mut members)) in submenus.into_iter().enumerate() {
+        members.sort_by(|left, right| left.order_key().cmp(&right.order_key()));
+        let members = members
+            .into_iter()
+            .map(|action| row(action.id(), &action.name))
+            .collect();
+        rows.push(submenu_row(
+            name.to_owned(),
+            FileContextMenuExpansion::ServiceSubmenu(index),
+            members,
+        ));
+    }
+    rows.extend(loose(Priority::TopLevel));
+    rows
+}
+
+fn submenu_row(
+    label: String,
+    expansion: FileContextMenuExpansion,
+    members: Vec<MenuRow>,
+) -> MenuRow {
+    MenuRow {
         icon: Some(FileAreaMenuItem::Actions.icon()),
-        label: FileAreaMenuItem::Actions.label(),
+        label,
         section: MenuSection::NewAndShare,
         shortcut: None,
         checked: false,
         kind: MenuRowKind::Submenu {
             expansion,
             on_press: Message::FileContextMenuExpansionChanged(expansion),
-            members: rows,
+            members,
         },
-    }]
+    }
 }
 
 /// 复制：按住 Alt 时实时切换为复制路径。

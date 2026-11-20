@@ -22,7 +22,7 @@ pub(super) fn shortcut_help_panel(browser: &FileBrowser) -> Element<'static, Mes
     let config = browser.user_config();
     let sections = shortcut_help_sections(
         &browser.keymap(),
-        browser.action_library.definitions(),
+        browser.action_library.shortcut_targets(),
         config.letter_mode,
     );
     // 两栏按行数大致对半分：每一组放进当前较短的那一栏。

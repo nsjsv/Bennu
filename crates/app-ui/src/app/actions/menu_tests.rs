@@ -206,3 +206,116 @@ fn action_keys_work_whichever_arrives_first_the_actions_or_the_settings() {
         Some(target)
     );
 }
+
+fn service_menu(
+    key: &str,
+    name: &str,
+    priority: crate::actions::service_menu::Priority,
+    submenu: Option<&str>,
+) -> crate::actions::ServiceMenuAction {
+    crate::actions::ServiceMenuAction {
+        priority,
+        submenu: submenu.map(str::to_owned),
+        ..crate::actions::ServiceMenuAction::for_tests(key, name, "true %f")
+    }
+}
+
+/// 菜单里"动作"那一块：每一行的名字，子菜单行再带上它里面的名字。
+fn action_area(rows: &[MenuRow]) -> Vec<(String, Vec<String>)> {
+    rows.iter()
+        .filter_map(|row| match &row.kind {
+            MenuRowKind::Action(Message::Action(_)) => Some((row.label.clone(), Vec::new())),
+            MenuRowKind::Submenu {
+                expansion, members, ..
+            } if matches!(
+                expansion,
+                crate::model::FileContextMenuExpansion::ServiceSubmenu(_)
+            ) || *expansion
+                == crate::model::FileContextMenuExpansion::Group(
+                    crate::model::FileAreaMenuItem::Actions,
+                ) =>
+            {
+                Some((
+                    row.label.clone(),
+                    members.iter().map(|member| member.label.clone()).collect(),
+                ))
+            }
+            MenuRowKind::Action(_) | MenuRowKind::Submenu { .. } => None,
+        })
+        .collect()
+}
+
+#[test]
+fn service_menus_sit_with_the_actions_in_the_order_dolphin_uses() {
+    use crate::actions::service_menu::Priority::{Important, Normal, TopLevel};
+    let directory = tempfile::tempdir().unwrap();
+    let mut browser = browser_with(
+        directory.path(),
+        vec![
+            definition("a1", TypeFilter::Anything),
+            definition("a2", TypeFilter::Anything),
+        ],
+    );
+    let menus = vec![
+        service_menu("top", "top", TopLevel, None),
+        service_menu("k2", "alpha", Normal, None),
+        service_menu("k1", "zeta", Normal, None),
+        service_menu("c-b", "convert b", Normal, Some("Convert")),
+        service_menu("c-a", "convert a", Normal, Some("Convert")),
+        service_menu("x", "x", TopLevel, Some("Alpha")),
+        service_menu("imp", "important", Important, None),
+    ];
+    let library = ActionLibrary::from_definitions(vec![
+        definition("a1", TypeFilter::Anything),
+        definition("a2", TypeFilter::Anything),
+    ])
+    .with_service_menus(menus);
+    drop(browser.handle_action_message(ActionMessage::LibraryLoaded(library)));
+    drop(browser.open_blank_context_menu(directory.path().to_path_buf(), iced::Point::ORIGIN));
+
+    let owned = |items: &[&str]| {
+        items
+            .iter()
+            .map(|item| item.to_string())
+            .collect::<Vec<_>>()
+    };
+    // 自己的动作、Important、普通的项共 5 个，收进"动作"；同组里按动作键排，不按名字。
+    // 子菜单不收起来，按优先级再按名字；TopLevel 的项放最后。
+    assert_eq!(
+        action_area(&menu_rows(&browser)),
+        [
+            (
+                tr!("Actions"),
+                owned(&["a1", "a2", "important", "zeta", "alpha"])
+            ),
+            ("Convert".to_owned(), owned(&["convert a", "convert b"])),
+            ("Alpha".to_owned(), owned(&["x"])),
+            ("top".to_owned(), Vec::new()),
+        ]
+    );
+}
+
+#[test]
+fn a_few_service_menus_sit_inline_and_their_rows_carry_their_shortcut() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut browser = browser_with(directory.path(), Vec::new());
+    let library =
+        ActionLibrary::from_definitions(Vec::new()).with_service_menus(vec![service_menu(
+            "one",
+            "one",
+            crate::actions::service_menu::Priority::Normal,
+            None,
+        )]);
+    drop(browser.handle_action_message(ActionMessage::LibraryLoaded(library)));
+    drop(browser.open_blank_context_menu(directory.path().to_path_buf(), iced::Point::ORIGIN));
+
+    let rows = menu_rows(&browser);
+    let row = rows.iter().find(|row| row.label == "one").expect("inline");
+    assert_eq!(
+        row.shortcut,
+        Some(ShortcutTarget::Action(ActionId::service_menu(
+            "test.desktop",
+            "one"
+        )))
+    );
+}

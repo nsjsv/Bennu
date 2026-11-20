@@ -115,4 +115,33 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "Other users can change it, so it is not used",
         "别的用户能修改它，所以不使用",
     ),
+    // Dolphin 服务菜单
+    ("The quotes or brackets in Exec do not match", "Exec 里的引号或括号没有配对"),
+    ("Exec ends with a lone %", "Exec 以单独一个 % 结尾"),
+    ("It has no [Desktop Entry] group", "没有 [Desktop Entry] 组"),
+    (
+        "It does not say which items it is for (MimeType=), so it is never shown",
+        "没有写对哪些类型显示（MimeType=），所以永远不会显示",
+    ),
+    ("It has no actions (Actions=)", "没有动作（Actions=）"),
+    ("It has no Exec line", "没有 Exec 行"),
+    ("The group is missing", "缺少这个组"),
+    (
+        "It is not executable, so it is not used. If you trust it, run: chmod +x %1",
+        "它没有执行权限，所以不使用。确认可信后运行：chmod +x %1",
+    ),
+    ("%1 failed: %2", "%1 失败：%2"),
+    ("a line break", "换行"),
+    ("a control character", "控制字符"),
+    (
+        "%1 contains %2, and the command hands the name on to another command line, so it was not run",
+        "%1 里有%2，而这条命令会把文件名交给另一层命令行，为了安全没有执行",
+    ),
+    ("The program %1 is not executable", "程序 %1 没有执行权限"),
+    ("Could not find the program “%1”", "找不到程序“%1”"),
+    ("Dolphin Service Menus", "Dolphin 服务菜单"),
+    (
+        "Read from kio/servicemenus in the data folders, by the same rules as Dolphin. Ones turned off in Dolphin's settings are left out. They can have shortcuts too.",
+        "从各数据目录的 kio/servicemenus 读取，规则和 Dolphin 一样。在 Dolphin 设置里关掉的不列出。它们也能绑快捷键。",
+    ),
 ];

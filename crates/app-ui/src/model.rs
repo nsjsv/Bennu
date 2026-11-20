@@ -1002,8 +1002,8 @@ pub(crate) struct FileContextMenuState {
     pub(crate) inside_archive: bool,
     /// 键盘在菜单里停在哪；鼠标移进菜单行就清掉，两种高亮不同时出现。
     pub(crate) keyboard_highlight: Option<MenuHighlight>,
-    /// 打开菜单那一刻适用于这一批的自定义动作，按名字排序。
-    pub(crate) actions: Vec<std::sync::Arc<crate::actions::ActionDefinition>>,
+    /// 打开菜单那一刻适用于这一批的自定义动作和服务菜单。
+    pub(crate) actions: crate::actions::ApplicableActions,
 }
 
 /// 键盘在菜单里的位置：第几行，展开了子菜单时还有子菜单里的第几项。
@@ -1038,6 +1038,8 @@ pub(crate) enum FileContextMenuExpansion {
     /// 空白菜单末尾固定的「分组方式」子菜单;不进可配置菜单体系,
     /// 与组锚点共用悬停展开状态。
     FileGrouping,
+    /// 服务菜单自己的子菜单（`X-KDE-Submenu`），序号是它在菜单里的第几个。
+    ServiceSubmenu(usize),
 }
 
 #[derive(Debug, Clone)]

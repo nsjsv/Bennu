@@ -105,7 +105,7 @@ pub(super) fn file_context_menu_panel(
     Element<'static, Message>,
     Option<(Element<'static, Message>, f32)>,
 ) {
-    let keymap = config.shortcuts.live(|id| actions.find(id).is_some());
+    let keymap = config.shortcuts.live(|id| actions.contains(id));
     let rows = file_context_menu_rows(
         menu,
         &config.context_menus,

@@ -17,7 +17,7 @@ use super::{themed_icon, IconTone};
 
 const ROW_ICON_SIZE: f32 = 14.0;
 
-/// 每个分组一张卡片，最后是动作文件夹里的动作；正在录键的那一行上面多一行提示。
+/// 每个分组一张卡片，最后是动作和服务菜单；正在录键的那一行上面多一行提示。
 pub(super) fn shortcut_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let mut groups: Vec<(String, Vec<SettingsRow<'static>>)> = Vec::new();
     let mut current_group = None;
@@ -30,12 +30,8 @@ pub(super) fn shortcut_settings_sections(browser: &FileBrowser) -> Vec<Element<'
         push_target_rows(browser, rows, action.into());
     }
     let mut action_rows = Vec::new();
-    for definition in browser.action_library.definitions() {
-        push_target_rows(
-            browser,
-            &mut action_rows,
-            ShortcutTarget::Action(definition.id.clone()),
-        );
+    for (id, _) in browser.action_library.shortcut_targets() {
+        push_target_rows(browser, &mut action_rows, ShortcutTarget::Action(id));
     }
     if !action_rows.is_empty() {
         groups.push((tr!("Actions"), action_rows));

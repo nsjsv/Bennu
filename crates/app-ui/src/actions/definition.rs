@@ -8,30 +8,64 @@ use super::notice::ActionNotice;
 use super::template::{CommandTemplate, PathTemplate};
 use super::type_filter::TypeFilter;
 
-/// 动作的身份：文件名去掉 `.toml`。快捷键按它记，所以改了文件名要重新绑键。
+/// 动作的身份。快捷键按它记，所以改了文件名要重新绑键。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct ActionId(Arc<str>);
+pub(crate) enum ActionId {
+    /// Bennu 的动作文件：文件名去掉 `.toml`。
+    File(Arc<str>),
+    ServiceMenu(ServiceMenuKey),
+}
+
+/// Dolphin 服务菜单里的一项：`.desktop` 文件名（同名文件只用一个，所以它就够分辨文件），
+/// 加上 `[Desktop Action <键>]` 的键。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct ServiceMenuKey {
+    pub(crate) file: Arc<str>,
+    pub(crate) action: Arc<str>,
+}
 
 impl ActionId {
-    /// 存储里写成 `action:<文件名>`，和内置动作的键放在同一个列表里也不会撞名。
-    const CONFIG_PREFIX: &'static str = "action:";
+    /// 存储里写成 `action:<文件名>` 和 `servicemenu:<文件名>/<键>`，和内置动作的键放在同一个列表里
+    /// 也不会撞名。文件名里不会有 `/`，按第一个 `/` 分开。
+    const FILE_PREFIX: &'static str = "action:";
+    const SERVICE_MENU_PREFIX: &'static str = "servicemenu:";
 
     pub(crate) fn from_file_stem(stem: &str) -> Self {
-        Self(Arc::from(stem))
+        Self::File(Arc::from(stem))
+    }
+
+    pub(crate) fn service_menu(file: &str, action: &str) -> Self {
+        Self::ServiceMenu(ServiceMenuKey {
+            file: Arc::from(file),
+            action: Arc::from(action),
+        })
     }
 
     pub(crate) fn from_config_key(key: &str) -> Option<Self> {
-        key.strip_prefix(Self::CONFIG_PREFIX)
-            .filter(|stem| !stem.is_empty())
-            .map(Self::from_file_stem)
+        if let Some(stem) = key.strip_prefix(Self::FILE_PREFIX) {
+            return (!stem.is_empty()).then(|| Self::from_file_stem(stem));
+        }
+        let (file, action) = key
+            .strip_prefix(Self::SERVICE_MENU_PREFIX)?
+            .split_once('/')?;
+        (!file.is_empty() && !action.is_empty()).then(|| Self::service_menu(file, action))
     }
 
     pub(crate) fn config_key(&self) -> String {
-        format!("{}{}", Self::CONFIG_PREFIX, self.0)
+        match self {
+            Self::File(stem) => format!("{}{stem}", Self::FILE_PREFIX),
+            Self::ServiceMenu(key) => {
+                format!("{}{}/{}", Self::SERVICE_MENU_PREFIX, key.file, key.action)
+            }
+        }
     }
 
-    pub(crate) fn file_stem(&self) -> &str {
-        &self.0
+    /// 文件不在了、读不出名字时显示的：文件名（服务菜单再加上它的键）。
+    pub(crate) fn fallback_label(&self) -> String {
+        match self {
+            Self::File(stem) => stem.to_string(),
+            Self::ServiceMenu(key) => format!("{}/{}", key.file, key.action),
+        }
     }
 }
 

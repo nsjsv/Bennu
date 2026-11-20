@@ -21,7 +21,7 @@ impl FileBrowser {
         let library = &self.action_library;
         self.user_config
             .shortcuts
-            .live(move |id| library.find(id).is_some())
+            .live(move |id| library.contains(id))
     }
 
     pub(super) fn handle_keyboard_key_pressed(

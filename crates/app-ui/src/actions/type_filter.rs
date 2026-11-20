@@ -107,10 +107,6 @@ impl TargetTypes {
         }
         Self(distinct)
     }
-
-    pub(crate) fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
 }
 
 impl TypeFilter {
@@ -128,6 +124,17 @@ impl TypeFilter {
                 })
                 .collect::<Vec<_>>()
                 .join(" "),
+        }
+    }
+
+    /// 至少有一项匹配其中一个类型：服务菜单的排除类型用它（同 KIO 的 `ExcludeServiceTypes`）。
+    pub(crate) fn matches_any(&self, targets: &TargetTypes) -> bool {
+        match self {
+            Self::Anything => !targets.0.is_empty(),
+            Self::Patterns(patterns) => targets
+                .0
+                .iter()
+                .any(|item| patterns.iter().any(|pattern| pattern.matches(item))),
         }
     }
 

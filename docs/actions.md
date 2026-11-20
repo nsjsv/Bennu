@@ -1,6 +1,7 @@
 # 自定义动作
 
 一个动作就是一个 `.toml` 文件，放在 `$XDG_CONFIG_HOME/bennu/actions/`（默认 `~/.config/bennu/actions/`）。
+KDE 的 Dolphin 服务菜单也能直接用，见[最后一节](#dolphin-服务菜单)。
 动作会出现在适用项目的右键菜单里，也可以在 **设置 → 快捷键** 最下面的“动作”组里给它绑键。
 文件一保存就生效，不用重启。**设置 → 动作** 列出所有动作，写错的文件也在那里，带着原因和行号。
 
@@ -182,3 +183,42 @@ compress = "zip"
 [[steps]]
 copy_paths = true
 ```
+
+## Dolphin 服务菜单
+
+给 Dolphin 装的服务菜单（`.desktop` 文件）在 Bennu 里也能用，规则和 Dolphin 一样：
+
+- 从这些地方读：`~/.local/share/kio/servicemenus/`、`/usr/share/kio/servicemenus/`，以及其他数据目录（`$XDG_DATA_DIRS`）下的 `kio/servicemenus/`。旧的 `kservices5/` 也读。
+  同名文件只用第一个，所以放在自己目录里的能盖掉系统的。
+- 文件一保存就生效。
+- 自己目录里的服务菜单要有执行权限才用（`chmod +x 文件`），这和 Dolphin 一样。没有执行权限的不出现在菜单里，**设置 → 动作** 页会列出它和要运行的命令。
+- 对哪些项显示（`MimeType`、`ExcludeServiceTypes`）、选几项时显示（`X-KDE-MinNumberOfUrls` 等）、放在菜单哪里（`X-KDE-Priority`、`X-KDE-Submenu`），都照 Dolphin。
+- 在 Dolphin 设置里关掉的服务菜单，这里也不显示。
+- 在 **设置 → 快捷键** 的"动作"组里也能给服务菜单绑键。
+
+例子，放在 `~/.local/share/kio/servicemenus/sha256.desktop`，然后 `chmod +x` 它：
+
+```ini
+[Desktop Entry]
+Type=Service
+MimeType=application/octet-stream;
+Actions=sha256
+
+[Desktop Action sha256]
+Name=复制 SHA-256
+Exec=sh -c 'sha256sum "$1" | cut -d" " -f1 | wl-copy' _ %f
+```
+
+命令照 Dolphin 的方式执行，`|`、`;`、`&&`、`$(…)` 都能用。启动之后就不管了：不进任务队列，不能撤销。
+
+文件名总是作为单独的参数传进去，最外层的 shell 不会把它当成命令。
+但有些服务菜单把 `%f` 写进了一段要交给第二层 shell 的命令里，比如 `bash -c "mpv \"%f\""`。
+这时文件名里只要有 `` $ ` " \ ; & | < > `` 或换行，Bennu 就不执行，并说明原因。Dolphin 会照样执行，碰上故意起的文件名就可能执行里面的命令。
+单独写的 `"%f"` 只是一个普通参数，不受影响。
+
+和 Dolphin 不一样的地方：
+
+- 服务菜单自己的子菜单总是单独一行，不收进"动作"子菜单。
+- 不画分隔线（`_SEPARATOR_`）。
+- 图标统一用动作图标。
+- 不支持 Dolphin 的 C++ 插件，也不支持 `.directory` 里的动作。

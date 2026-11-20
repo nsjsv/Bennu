@@ -45,10 +45,37 @@ fn defaults_match_existing_menu_structure() {
             },
             FileEntryMenuEntry::Item(FileAreaMenuItem::OpenTerminalHere),
             FileEntryMenuEntry::Item(FileAreaMenuItem::SendToPhone),
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Actions),
             FileEntryMenuEntry::Item(FileAreaMenuItem::Delete),
             FileEntryMenuEntry::Item(FileAreaMenuItem::Properties),
         ]
     );
+}
+
+/// 老用户存的布局里没有"动作"这一项：它落在"发到手机"后面，不跑到菜单最后。
+#[test]
+fn the_new_actions_slot_lands_next_to_its_neighbor_in_an_old_layout() {
+    let stored: Vec<(String, bool)> = FILE_ENTRY_MENU_ITEMS
+        .iter()
+        .filter(|item| **item != FileAreaMenuItem::Actions)
+        .map(|item| (item.config_value().to_owned(), true))
+        .collect();
+    let layout = ContextMenuLayout::<FileAreaMenuItem>::normalized_from_stored(
+        &stored,
+        &FILE_ENTRY_MENU_ITEMS,
+        FileAreaMenuItem::from_config_value,
+    );
+    let items = layout
+        .entries
+        .iter()
+        .map(|entry| entry.item)
+        .collect::<Vec<_>>();
+    let actions = items
+        .iter()
+        .position(|item| *item == FileAreaMenuItem::Actions)
+        .unwrap();
+    assert_eq!(items[actions - 1], FileAreaMenuItem::SendToPhone);
+    assert_eq!(items[actions + 1], FileAreaMenuItem::Delete);
 }
 
 #[test]
@@ -318,8 +345,8 @@ fn stored_layout_missing_new_items_puts_them_back_where_they_belong() {
 fn file_entry_settings_rows_project_groups_to_single_rows() {
     let preferences = ContextMenuPreferences::defaults();
     let rows = preferences.settings_rows(ContextMenuSettingsPage::FileEntry);
-    // 24 项中 8 个成员被收进组面板,顶级行 = 16 行。
-    assert_eq!(rows.len(), 16);
+    // 25 项中 8 个成员被收进组面板,顶级行 = 17 行。
+    assert_eq!(rows.len(), 17);
     let group_anchors: Vec<_> = rows.iter().filter_map(|row| row.group_anchor).collect();
     assert_eq!(
         group_anchors,

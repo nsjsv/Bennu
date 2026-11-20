@@ -89,7 +89,10 @@ fn recoverable_task_waits_for_journal_ack_before_starting() {
     let acceptance = queue.accept_persistence_outcome(persistence_outcome);
 
     assert!(acceptance.error.is_none());
-    assert!(queue.tasks()[0].stored_id.is_some(), "insert assigned stored id");
+    assert!(
+        queue.tasks()[0].stored_id.is_some(),
+        "insert assigned stored id"
+    );
     // 写库后任务在队列里的 id 不变：进度、完成、取消消息一直用它。
     assert_eq!(queue.tasks()[0].id, local_task_id);
     assert_eq!(queue.tasks()[0].status, FileOperationStatus::Running);

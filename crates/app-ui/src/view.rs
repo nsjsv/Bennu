@@ -1,4 +1,5 @@
 mod about_settings;
+mod action_settings;
 mod address_bar;
 mod advanced_new_folder;
 mod application_logs;
@@ -394,6 +395,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             context_menu,
             browser.keyboard_modifiers,
             browser.user_config(),
+            &browser.action_library,
         );
         // 主菜单只按自身尺寸做 At 钳制,子菜单展开收起永不挤动它;
         // 子菜单后 push,翻转重叠时绘制在主菜单之上且事件先达。
@@ -506,6 +508,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             element: operation_queue_panel(
                 &browser.operation_queue,
                 &browser.transfer_tasks,
+                &browser.action_runs,
                 browser.operation_progress_animation_frame,
             ),
             placement: FloatingPlacement::BottomLeft {

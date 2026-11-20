@@ -180,6 +180,9 @@ fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
         SettingsCategory::Transfer => settings_page(transfer_settings_sections(browser)),
         SettingsCategory::Search => settings_page(search_settings_sections(browser)),
         SettingsCategory::Shortcuts => settings_page(shortcut_settings_sections(browser)),
+        SettingsCategory::Actions => {
+            settings_page(super::action_settings::action_settings_sections(browser))
+        }
         SettingsCategory::Logs => settings_page(application_logs_sections(browser)),
         SettingsCategory::About => settings_page(about_settings_sections()),
     }

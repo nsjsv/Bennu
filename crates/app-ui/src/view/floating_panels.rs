@@ -238,10 +238,12 @@ pub(super) struct ContextMenuPanels<'a> {
     pub(super) submenu: Option<(Element<'a, Message>, f32)>,
 }
 
+/// `actions` 是动作文件夹现在的内容：菜单上显示的键要按哪些动作在来算。
 pub(super) fn context_menu_panel<'a>(
     menu: &'a ContextMenuState,
     keyboard_modifiers: iced::keyboard::Modifiers,
     config: &'a crate::config::UserConfig,
+    actions: &crate::actions::ActionLibrary,
 ) -> ContextMenuPanels<'a> {
     let context_menus = &config.context_menus;
     let list_view_preferences = &config.list_view_preferences;
@@ -251,7 +253,8 @@ pub(super) fn context_menu_panel<'a>(
             submenu: None,
         },
         ContextMenuState::FileArea(menu) => {
-            let (root, submenu) = file_context_menu_panel(menu, keyboard_modifiers, config);
+            let (root, submenu) =
+                file_context_menu_panel(menu, keyboard_modifiers, config, actions);
             ContextMenuPanels { root, submenu }
         }
         ContextMenuState::ListColumns(menu) => ContextMenuPanels {

@@ -126,6 +126,7 @@ bennu --version
 
 - [Matugen 配色](docs/matugen.md)：从壁纸生成配色，所有窗口热更新
 - [Niri 悬浮窗口](docs/niri.md)：让设置、属性、预览窗口悬浮打开
+- [自定义动作](docs/actions.md)：把转换、压缩、复制、移动、执行命令串成自己的右键菜单项，还能绑快捷键
 
 ## 从源码构建
 

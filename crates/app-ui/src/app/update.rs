@@ -615,6 +615,7 @@ impl FileBrowser {
             Message::DismissFloating => self.dismiss_floating(),
             Message::ArchiveCreation(message) => self.handle_archive_creation_message(message),
             Message::Convert(message) => self.handle_convert_message(message),
+            Message::Action(message) => self.handle_action_message(message),
             Message::Checksum(message) => self.handle_checksum_message(message),
             Message::ArchiveExtraction(message) => self.handle_archive_extraction_message(message),
             Message::ArchiveMemberPassword(message) => {

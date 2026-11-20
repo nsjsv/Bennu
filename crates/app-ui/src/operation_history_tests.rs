@@ -210,7 +210,7 @@ fn stopped_task_keeps_undo_for_the_part_that_finished() {
             path: PathBuf::from("/tmp/New File"),
         }));
 
-    history.record(TaskEnd::Stopped(&FileOperationOutcome::NoHistory));
+    history.record(TaskEnd::Canceled(&FileOperationOutcome::NoHistory));
     assert_eq!(history.redo_stack.len(), 1);
 
     history.record(TaskEnd::Interrupted(&moved(vec![transfer(
@@ -218,7 +218,9 @@ fn stopped_task_keeps_undo_for_the_part_that_finished() {
     )])));
     assert!(history.undo_stack.is_empty());
 
-    history.record(TaskEnd::Stopped(&moved(vec![transfer("/a/one", "/b/one")])));
+    history.record(TaskEnd::Canceled(&moved(vec![transfer(
+        "/a/one", "/b/one",
+    )])));
     assert!(history.redo_stack.is_empty());
     let undo = history
         .next_undo_operation()
@@ -238,7 +240,7 @@ fn stopped_trash_keeps_undo_for_items_already_in_trash() {
         PathBuf::from("/workspace/a"),
     );
 
-    history.record(TaskEnd::Stopped(&FileOperationOutcome::Trash {
+    history.record(TaskEnd::Canceled(&FileOperationOutcome::Trash {
         entries: vec![entry.clone()],
         untrashable: Vec::new(),
     }));
@@ -265,7 +267,7 @@ fn failed_undo_move_splits_completed_and_remaining_transfers() {
         &mut history,
         &mut queue,
         task_id,
-        TaskEnd::Stopped(&moved(vec![transfer("/b/two", "/a/two")])),
+        TaskEnd::Canceled(&moved(vec![transfer("/b/two", "/a/two")])),
     );
 
     let remaining_undo = history
@@ -313,7 +315,7 @@ fn failed_redo_move_splits_completed_and_remaining_transfers() {
         &mut history,
         &mut queue,
         task_id,
-        TaskEnd::Stopped(&moved(vec![transfer("/a/one", "/b/one")])),
+        TaskEnd::Canceled(&moved(vec![transfer("/a/one", "/b/one")])),
     );
 
     let remaining_redo = history

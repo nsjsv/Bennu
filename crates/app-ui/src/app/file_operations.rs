@@ -10,6 +10,7 @@ use file_operations::{
 };
 
 use super::global_error::GlobalErrorSource;
+use super::task_end::TaskOwner;
 use super::FileBrowser;
 use crate::commands::{file_operation_driver_task, file_operation_persistence_command};
 use crate::model::{
@@ -252,8 +253,9 @@ impl FileBrowser {
         };
 
         let completed_successfully = matches!(completion, FileOperationCompletion::Succeeded(_));
-        let is_history_replay = self.operation_history.is_replaying(task_id);
-        let created_path = (completed_successfully && !is_history_replay)
+        let owner = self.task_owner(task_id);
+        let user_task = owner == TaskOwner::User;
+        let created_path = (completed_successfully && user_task)
             .then(|| match &completion {
                 FileOperationCompletion::Succeeded(outcome) => outcome_created_path(outcome),
                 _ => None,
@@ -261,12 +263,12 @@ impl FileBrowser {
             .flatten();
 
         // 高级新建的收尾动作(进入/新标签进入)替代默认的重命名态;
-        // 历史重放不消费收尾意图;创建失败时丢弃,避免遗留到无关操作。
+        // 历史重放和动作不消费收尾意图;创建失败时丢弃,避免遗留到无关操作。
         let mut tasks: Vec<Task<Message>> = Vec::new();
         let is_create_directories = completed_operation.as_ref().is_some_and(|operation| {
             matches!(operation, QueuedFileOperation::CreateDirectories { .. })
         });
-        let after = if !is_history_replay && is_create_directories {
+        let after = if user_task && is_create_directories {
             self.pending_advanced_new_folder_after.take()
         } else {
             None
@@ -292,7 +294,7 @@ impl FileBrowser {
         }
 
         // 复制副本对齐 Finder:成功后整批选中新副本(撤销重放不抢焦点)。
-        if !is_history_replay
+        if user_task
             && completed_operation
                 .as_ref()
                 .is_some_and(QueuedFileOperation::selects_completed_copies)
@@ -311,7 +313,9 @@ impl FileBrowser {
             }
         }
 
+        // 动作里的各步不发自己的通知，整个动作结束时由动作发。
         let desktop_notification_task = match completed_operation.as_ref() {
+            Some(_) if owner == TaskOwner::Action => Task::none(),
             Some(operation) => {
                 self.file_operation_notification_command(operation, terminal_status, &completion)
             }
@@ -363,19 +367,32 @@ impl FileBrowser {
             }
             None => Task::none(),
         };
+        let rejected_rename_reason = match &completion {
+            FileOperationCompletion::RenameRejected { reason, .. } => {
+                reason.message(self.active_language())
+            }
+            _ => String::new(),
+        };
         let end = match &completion {
             FileOperationCompletion::Succeeded(outcome) => TaskEnd::Completed(outcome),
-            FileOperationCompletion::Canceled(partial_outcome)
-            | FileOperationCompletion::Failed {
-                partial_outcome, ..
-            } => TaskEnd::Stopped(partial_outcome),
+            FileOperationCompletion::Canceled(partial_outcome) => {
+                TaskEnd::Canceled(partial_outcome)
+            }
+            FileOperationCompletion::Failed {
+                error,
+                partial_outcome,
+            } => TaskEnd::Failed {
+                partial: partial_outcome,
+                error,
+            },
             FileOperationCompletion::RecoveryInterrupted(_, partial_outcome)
             | FileOperationCompletion::RecoveryBlocked {
                 partial_outcome, ..
             } => TaskEnd::Interrupted(partial_outcome),
-            FileOperationCompletion::RenameRejected { .. } => {
-                TaskEnd::Stopped(&FileOperationOutcome::NoHistory)
-            }
+            FileOperationCompletion::RenameRejected { .. } => TaskEnd::Failed {
+                partial: &FileOperationOutcome::NoHistory,
+                error: &rejected_rename_reason,
+            },
         };
         tasks.push(self.accept_task_end(task_id, end));
         // 原因已由 queue_finish_from_completion 写进任务行，这是文件操作错误的
@@ -386,7 +403,7 @@ impl FileBrowser {
             reason,
         } = &completion
         {
-            if !is_history_replay {
+            if user_task {
                 tasks.push(self.reopen_rejected_rename(path, attempted_name, *reason));
             }
         }
@@ -429,19 +446,25 @@ impl FileBrowser {
         let acceptance = self
             .operation_queue
             .accept_persistence_outcome(persistence_outcome);
-        if let Some(error) = acceptance.error {
-            self.show_global_error(error);
+        let rejection = acceptance.error.unwrap_or_default();
+        if !rejection.is_empty() {
+            self.show_global_error(rejection.clone());
         }
-        let ended_without_running = [
-            acceptance.rejected_task_id,
-            acceptance.canceled_before_start_task_id,
-        ]
-        .into_iter()
-        .flatten()
-        .map(|task_id| {
-            self.accept_task_end(task_id, TaskEnd::Stopped(&FileOperationOutcome::NoHistory))
-        })
-        .collect::<Vec<_>>();
+        let mut ended_without_running = Vec::new();
+        if let Some(task_id) = acceptance.rejected_task_id {
+            ended_without_running.push(self.accept_task_end(
+                task_id,
+                TaskEnd::Failed {
+                    partial: &FileOperationOutcome::NoHistory,
+                    error: &rejection,
+                },
+            ));
+        }
+        if let Some(task_id) = acceptance.canceled_before_start_task_id {
+            ended_without_running.push(
+                self.accept_task_end(task_id, TaskEnd::Canceled(&FileOperationOutcome::NoHistory)),
+            );
+        }
         let next_persistence = self.continue_file_operation_persistence();
         let shutdown_progress = self.accept_file_operation_persistence_progress(
             acceptance.persisted_recoverable_terminal_stored_id,

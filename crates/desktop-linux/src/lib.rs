@@ -1,3 +1,4 @@
+pub mod command_line;
 mod desktop_entries;
 mod desktop_notifications;
 pub use display_renderer;

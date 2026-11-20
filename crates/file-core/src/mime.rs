@@ -292,6 +292,26 @@ impl MimeDatabase {
         false
     }
 
+    /// `mime` 的规范名和它沿父类表往上的所有父类（规范名，去重，自己在最前）。不含规范约定的
+    /// 两个隐含父类（text/plain、application/octet-stream），要不要算由调用方决定。一项的类型
+    /// 要和很多个类型比时，先算出这一串，比的时候只查表。
+    pub fn ancestors(&self, mime: &str) -> Vec<String> {
+        let mut ancestors = vec![self.canonical(mime)];
+        let mut next = 0;
+        while let Some(current) = ancestors.get(next).cloned() {
+            next += 1;
+            for cache in &self.caches {
+                for parent in cache.parents(&current) {
+                    let parent = self.canonical(parent);
+                    if !ancestors.contains(&parent) {
+                        ancestors.push(parent);
+                    }
+                }
+            }
+        }
+        ancestors
+    }
+
     /// `base` 和库里所有属于它的子类的类型（规范名，去重）。
     pub fn inheriting_types(&self, base: &str) -> Arc<[String]> {
         let mut inheriting = self

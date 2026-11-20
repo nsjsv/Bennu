@@ -24,10 +24,29 @@ pub(crate) enum HistoryDirection {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum TaskEnd<'a> {
     Completed(&'a FileOperationOutcome),
-    /// 失败、取消，或者还没开始就被拒、被取消。
-    Stopped(&'a FileOperationOutcome),
-    /// 恢复中断：之后还会接着恢复，现在只交代重放。
+    /// 失败，或者还没开始就被拒。
+    Failed {
+        partial: &'a FileOperationOutcome,
+        error: &'a str,
+    },
+    /// 用户取消，或者还没开始就被取消。
+    Canceled(&'a FileOperationOutcome),
+    /// 恢复中断：之后还会接着恢复，到时候再结束一次。
     Interrupted(&'a FileOperationOutcome),
+}
+
+impl<'a> TaskEnd<'a> {
+    /// 停下前已经生效的部分；完成时就是结果。
+    pub(crate) fn outcome(self) -> &'a FileOperationOutcome {
+        match self {
+            Self::Completed(outcome)
+            | Self::Failed {
+                partial: outcome, ..
+            }
+            | Self::Canceled(outcome)
+            | Self::Interrupted(outcome) => outcome,
+        }
+    }
 }
 
 /// 把一个操作放进任务队列。历史只通过它入队，拿到的任务 id 用来认它的结束。
@@ -124,7 +143,11 @@ impl FileOperationHistory {
                 }
                 self.redo_stack.clear();
             }
-            TaskEnd::Stopped(partial_outcome) => {
+            TaskEnd::Failed {
+                partial: partial_outcome,
+                ..
+            }
+            | TaskEnd::Canceled(partial_outcome) => {
                 if let Some(item) = FileOperationHistoryItem::from_outcome(partial_outcome) {
                     self.undo_stack.push(HistoryEntry { items: vec![item] });
                     self.redo_stack.clear();
@@ -133,6 +156,18 @@ impl FileOperationHistory {
             // 恢复完会再以完成或停下结束一次，那时再记。
             TaskEnd::Interrupted(_) => {}
         }
+    }
+
+    /// 一个动作结束：它做成的各步按执行顺序记成一条，一次撤销整个动作。
+    pub(crate) fn record_action(&mut self, outcomes: &[FileOperationOutcome]) {
+        let items = outcomes
+            .iter()
+            .filter_map(FileOperationHistoryItem::from_outcome)
+            .collect::<Vec<_>>();
+        if !outcomes.is_empty() {
+            self.redo_stack.clear();
+        }
+        push_entry(&mut self.undo_stack, items);
     }
 
     pub(crate) fn is_replaying(&self, task_id: u64) -> bool {
@@ -172,9 +207,9 @@ impl FileOperationHistory {
                 replay.finished.extend(opposite);
                 self.advance_replay(enqueue)
             }
-            TaskEnd::Stopped(partial_outcome) | TaskEnd::Interrupted(partial_outcome) => {
+            TaskEnd::Failed { .. } | TaskEnd::Canceled(_) | TaskEnd::Interrupted(_) => {
                 let (unfinished, finished) =
-                    split_stopped_replay(replay.direction, item, partial_outcome);
+                    split_stopped_replay(replay.direction, item, end.outcome());
                 replay.finished.extend(finished);
                 replay.remaining.extend(unfinished);
                 self.stop_replay();

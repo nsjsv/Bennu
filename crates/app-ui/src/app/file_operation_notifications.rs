@@ -10,7 +10,7 @@ use crate::model::{sanitized_application_log_detail, Message};
 use crate::operation_queue_display::OperationPathLines;
 use file_operations::{FileOperationCompletion, FileOperationTerminalStatus, QueuedFileOperation};
 
-const NOTIFICATION_FILE_NAME_MAX_CHARS: usize = 96;
+pub(in crate::app) const NOTIFICATION_FILE_NAME_MAX_CHARS: usize = 96;
 const NOTIFICATION_FAILURE_REASON_MAX_CHARS: usize = 160;
 
 struct DesktopNotificationText {
@@ -165,7 +165,7 @@ fn operation_supports_desktop_notification(operation: &QueuedFileOperation) -> b
 }
 
 /// 同 KDE 作业通知：失败原因就是任务的完整错误，压成一行、太长才截断。
-fn bounded_notification_failure_reason(error: &str) -> String {
+pub(in crate::app) fn bounded_notification_failure_reason(error: &str) -> String {
     let reason = error.split_whitespace().collect::<Vec<_>>().join(" ");
     if reason.chars().count() <= NOTIFICATION_FAILURE_REASON_MAX_CHARS {
         return reason;

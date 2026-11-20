@@ -48,7 +48,7 @@ pub(crate) struct VimState {
     last_jump: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum VimCommand {
     Key(FileContentKey),
     TabNumber(u8),
@@ -58,7 +58,7 @@ pub(crate) enum VimCommand {
     JumpPrevious,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum VimFeed {
     Run(VimCommand),
     /// 两键命令的第一个键，等第二个。

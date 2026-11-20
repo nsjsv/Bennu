@@ -26,6 +26,7 @@
 #[macro_use]
 extern crate bennu_localization;
 
+mod actions;
 mod animation;
 mod app;
 mod app_icon;

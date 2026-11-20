@@ -1,3 +1,4 @@
+pub(crate) mod actions;
 mod advanced_new_folder;
 mod application_logs;
 mod application_shutdown;
@@ -82,9 +83,9 @@ mod split_resize;
 mod startup;
 mod startup_settings;
 mod tabs;
-mod task_end;
 #[cfg(test)]
 mod task_driving_tests;
+mod task_end;
 #[cfg(test)]
 mod terminal_follow_tests;
 mod text_input_shortcuts;
@@ -422,6 +423,10 @@ pub(crate) struct FileBrowser {
     pub(crate) operation_queue: FileOperationQueue,
     pub(crate) operation_progress_animation_frame: u8,
     operation_history: FileOperationHistory,
+    /// 动作文件夹最近一次读出来的内容；第一次读完之前是空的。
+    pub(crate) action_library: crate::actions::ActionLibrary,
+    pub(crate) action_runs: actions::ActionRuns,
+    pub(crate) action_hint: Option<actions::ActionHint>,
     list_directory_summary_cache: crate::model::ListDirectorySummaryCache,
     user_preferences_save_in_flight: bool,
     pending_user_preferences_save: Option<config::UserPreferences>,
@@ -813,6 +818,9 @@ impl FileBrowser {
             operation_queue: FileOperationQueue::new(),
             operation_progress_animation_frame: 0,
             operation_history: FileOperationHistory::new(),
+            action_library: crate::actions::ActionLibrary::empty(),
+            action_runs: actions::ActionRuns::default(),
+            action_hint: None,
             list_directory_summary_cache: crate::model::ListDirectorySummaryCache::default(),
             user_preferences_save_in_flight: false,
             pending_user_preferences_save: None,
@@ -972,6 +980,7 @@ impl FileBrowser {
         );
 
         subscriptions.push(self.terminal_output_subscription());
+        subscriptions.push(actions::action_library_subscription());
 
         let remote_preview_progress_is_indeterminate = matches!(
             self.preview_engine.preview.as_ref(),

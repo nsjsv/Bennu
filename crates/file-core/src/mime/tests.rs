@@ -457,6 +457,24 @@ fn aliases_and_subclasses() {
 }
 
 #[test]
+fn ancestors_follow_aliases_and_parents_once() {
+    let database = database();
+    let ancestors = database.ancestors("image/svg+xml");
+    assert_eq!(ancestors.first().map(String::as_str), Some("image/svg+xml"));
+    assert!(ancestors
+        .iter()
+        .any(|ancestor| ancestor == "application/xml"));
+    let compressed_tar = database.ancestors("application/x-compressed-tar");
+    assert!(compressed_tar
+        .iter()
+        .any(|ancestor| ancestor == "application/gzip"));
+    assert_eq!(
+        database.ancestors("application/x-gzip"),
+        ["application/gzip"]
+    );
+}
+
+#[test]
 fn inheriting_types_lists_every_known_subclass() {
     let database = database();
     let mut text = database.inheriting_types(TEXT_PLAIN).to_vec();

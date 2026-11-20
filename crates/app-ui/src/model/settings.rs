@@ -6,18 +6,20 @@ pub(crate) enum SettingsCategory {
     Transfer,
     Search,
     Shortcuts,
+    Actions,
     Logs,
     About,
 }
 
 impl SettingsCategory {
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::General,
         Self::Appearance,
         Self::Files,
         Self::Transfer,
         Self::Search,
         Self::Shortcuts,
+        Self::Actions,
         Self::Logs,
         Self::About,
     ];
@@ -30,6 +32,7 @@ impl SettingsCategory {
             Self::Transfer => tr!("Transfer"),
             Self::Search => tr!("Search"),
             Self::Shortcuts => tr!("Shortcuts"),
+            Self::Actions => tr!("Actions"),
             Self::Logs => tr!("Logs"),
             Self::About => tr!("About"),
         }

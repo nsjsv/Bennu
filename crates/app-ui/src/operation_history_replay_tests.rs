@@ -194,7 +194,7 @@ fn a_stopped_entry_keeps_the_rest_for_the_next_undo() {
         &mut history,
         &mut queue,
         second,
-        TaskEnd::Stopped(&FileOperationOutcome::NoHistory),
+        TaskEnd::Canceled(&FileOperationOutcome::NoHistory),
     );
 
     assert_eq!(queue.operations.len(), 2, "the queued press was dropped");

@@ -24,10 +24,8 @@ impl FileBrowser {
             return Task::none();
         };
         let closes = fixed_key(&press) == Some(FixedKey::Escape)
-            || self
-                .shortcut_config()
-                .action_for(KeyArea::FileBrowser, &press)
-                == Some(ShortcutAction::ShowShortcuts);
+            || self.keymap().target_for(KeyArea::FileBrowser, &press)
+                == Some(ShortcutAction::ShowShortcuts.into());
         if closes {
             self.shortcut_help_open = false;
         }

@@ -33,7 +33,7 @@ use crate::config::{RenderingGpuPreference, UiLanguage, UiLanguageSetting, UserC
 use crate::network_connections::{
     NetworkConnectionMessage, SidebarNetworkConnectionContextMenuState,
 };
-use crate::shortcuts::{CaptureSlot, FileContentKey, ShortcutAction};
+use crate::shortcuts::{CaptureSlot, FileContentKey};
 use crate::sidebar_devices::{
     SidebarDeviceAction, SidebarDeviceActionRequest, SidebarDeviceContextMenuState,
 };
@@ -109,12 +109,12 @@ pub(crate) use advanced_new_folder::{
 };
 mod convert;
 pub(crate) use convert::{
-    AudioConvertOptions, AudioEdit, ConvertDefaults, ConvertEdit, ConvertInputError, ConvertScene,
-    ConvertSource, ConvertState, ConvertibleMediaKind, ImageConvertOptions, ImageEdit,
-    MediaOptions, MediaSection, QualityChoice, QualityControl, QualitySelection, ResizeChoice,
-    ResizeSelection, SectionEdit, SizeUnit, VideoClip, VideoConvertOptions, VideoEdit, VideoTarget,
-    AUDIO_TARGET_FORMATS, CONVERT_SCENES, FPS_CHOICES, IMAGE_TARGET_FORMATS, QUALITY_PRESETS,
-    RESIZE_PERCENT_CHOICES, SIZE_UNITS,
+    AudioConvertOptions, AudioEdit, ConversionSettings, ConvertDefaults, ConvertEdit,
+    ConvertInputError, ConvertScene, ConvertSource, ConvertState, ConvertibleMediaKind,
+    ImageConvertOptions, ImageEdit, MediaOptions, MediaSection, QualityChoice, QualityControl,
+    QualitySelection, ResizeChoice, ResizeSelection, SectionEdit, SizeUnit, VideoClip,
+    VideoConvertOptions, VideoEdit, VideoTarget, AUDIO_TARGET_FORMATS, CONVERT_SCENES, FPS_CHOICES,
+    IMAGE_TARGET_FORMATS, QUALITY_PRESETS, RESIZE_PERCENT_CHOICES, SIZE_UNITS,
 };
 mod batch_rename;
 pub(crate) use batch_rename::{
@@ -501,10 +501,10 @@ pub(crate) enum Message {
     /// 跟着消失）。
     LetterInputDeadlinePassed,
     LetterModeSelected(crate::shortcuts::LetterMode),
-    ShortcutCaptureStarted(ShortcutAction, CaptureSlot),
+    ShortcutCaptureStarted(crate::shortcuts::ShortcutTarget, CaptureSlot),
     ShortcutCaptureCanceled,
     ShortcutCapturedKeyRemoved,
-    ShortcutBindingReset(ShortcutAction),
+    ShortcutBindingReset(crate::shortcuts::ShortcutTarget),
     DragSelectionFinished,
     GlobalErrorNotificationElapsed(u64),
     GlobalErrorNotificationPointerEntered(u64),
@@ -513,6 +513,7 @@ pub(crate) enum Message {
     DismissFloating,
     ArchiveCreation(ArchiveCreationMessage),
     Convert(ConvertMessage),
+    Action(crate::app::actions::ActionMessage),
     Checksum(ChecksumMessage),
     ArchiveExtraction(ArchiveExtractionMessage),
     /// 成员密码弹窗的内部流转(输入/提交/Open 重试终态)。
@@ -1001,6 +1002,8 @@ pub(crate) struct FileContextMenuState {
     pub(crate) inside_archive: bool,
     /// 键盘在菜单里停在哪；鼠标移进菜单行就清掉，两种高亮不同时出现。
     pub(crate) keyboard_highlight: Option<MenuHighlight>,
+    /// 打开菜单那一刻适用于这一批的自定义动作，按名字排序。
+    pub(crate) actions: Vec<std::sync::Arc<crate::actions::ActionDefinition>>,
 }
 
 /// 键盘在菜单里的位置：第几行，展开了子菜单时还有子菜单里的第几项。

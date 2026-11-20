@@ -69,7 +69,7 @@ impl Operation<Message> for FocusedTextInputShortcutRoute {
 
     fn finish(&self) -> Outcome<Message> {
         let Some(focused_text_input) = self.focused_text_input() else {
-            return Outcome::Some(Message::FileContentKeyRouted(self.content_key));
+            return Outcome::Some(Message::FileContentKeyRouted(self.content_key.clone()));
         };
         let rename_id: advanced_widget::Id = rename_input_id().into();
 

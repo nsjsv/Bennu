@@ -244,8 +244,8 @@ fn every_default_key_reaches_its_action() {
                 crate::shortcuts::KeyArea::FileBrowser
             };
             assert_eq!(
-                config.shortcuts.action_for(area, press),
-                Some(*action),
+                config.shortcuts.live(|_| false).target_for(area, press),
+                Some((*action).into()),
                 "{}",
                 press.config_value()
             );

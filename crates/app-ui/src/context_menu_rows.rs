@@ -3,6 +3,7 @@
 
 use iced::keyboard;
 
+use crate::app::actions::{ActionMessage, ActionSubject};
 use crate::app::archive_creation::ArchiveCreationMessage;
 use crate::app::checksum::ChecksumMessage;
 use crate::app::convert::ConvertMessage;
@@ -12,7 +13,7 @@ use crate::model::{
     FileContextMenuState, FileDeleteAction, FileEntryMenuEntry, FileGroupingMode,
     FilePropertiesMessage, Message,
 };
-use crate::shortcuts::ShortcutAction;
+use crate::shortcuts::{ShortcutAction, ShortcutTarget};
 use bennu_theme::icons::IconSymbol;
 
 /// 菜单里的几段。段跟着每一项走，不按位置写死：用户在设置里调了顺序，
@@ -36,7 +37,7 @@ pub(crate) struct MenuRow {
     pub(crate) icon: Option<IconSymbol>,
     pub(crate) label: String,
     pub(crate) section: MenuSection,
-    pub(crate) shortcut: Option<ShortcutAction>,
+    pub(crate) shortcut: Option<ShortcutTarget>,
     /// 单选项（分组方式）的当前项。
     pub(crate) checked: bool,
     pub(crate) kind: MenuRowKind,
@@ -101,7 +102,8 @@ fn item_section(item: FileAreaMenuItem) -> MenuSection {
         FileAreaMenuItem::NewEntry
         | FileAreaMenuItem::NewFolderFromSelection
         | FileAreaMenuItem::OpenTerminalHere
-        | FileAreaMenuItem::SendToPhone => MenuSection::NewAndShare,
+        | FileAreaMenuItem::SendToPhone
+        | FileAreaMenuItem::Actions => MenuSection::NewAndShare,
         FileAreaMenuItem::Delete => MenuSection::Delete,
         FileAreaMenuItem::Properties => MenuSection::Properties,
     }
@@ -118,7 +120,7 @@ fn action_row(
         icon: Some(icon),
         label,
         section: item_section(item),
-        shortcut,
+        shortcut: shortcut.map(ShortcutTarget::Builtin),
         checked: false,
         kind: MenuRowKind::Action(message),
     }
@@ -136,6 +138,7 @@ pub(crate) fn file_context_menu_rows(
     let mut rows = Vec::new();
     for entry in menu_entries(menu, context_menus) {
         match entry {
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Actions) => rows.extend(action_rows(menu)),
             FileEntryMenuEntry::Item(item) => {
                 if let Some(row) = item_row(item, menu, alt_held, shift_held) {
                     rows.push(row);
@@ -288,6 +291,47 @@ fn item_row(
     })
 }
 
+/// 自定义动作：不超过这么多个时直接排在菜单里，多了收进"动作"子菜单（和服务菜单一样）。
+const INLINE_ACTION_LIMIT: usize = 4;
+
+fn action_rows(menu: &FileContextMenuState) -> Vec<MenuRow> {
+    let subject = match &menu.target {
+        Some(_) => ActionSubject::Selection,
+        None => ActionSubject::Folder(menu.paste_directory.clone()),
+    };
+    let rows = menu
+        .actions
+        .iter()
+        .map(|definition| MenuRow {
+            icon: Some(IconSymbol::Play),
+            label: definition.name.clone(),
+            section: MenuSection::NewAndShare,
+            shortcut: Some(ShortcutTarget::Action(definition.id.clone())),
+            checked: false,
+            kind: MenuRowKind::Action(Message::Action(ActionMessage::Invoked {
+                action: definition.id.clone(),
+                subject: subject.clone(),
+            })),
+        })
+        .collect::<Vec<_>>();
+    if rows.len() <= INLINE_ACTION_LIMIT {
+        return rows;
+    }
+    let expansion = FileContextMenuExpansion::Group(FileAreaMenuItem::Actions);
+    vec![MenuRow {
+        icon: Some(FileAreaMenuItem::Actions.icon()),
+        label: FileAreaMenuItem::Actions.label(),
+        section: MenuSection::NewAndShare,
+        shortcut: None,
+        checked: false,
+        kind: MenuRowKind::Submenu {
+            expansion,
+            on_press: Message::FileContextMenuExpansionChanged(expansion),
+            members: rows,
+        },
+    }]
+}
+
 /// 复制：按住 Alt 时实时切换为复制路径。
 fn copy_row(alt_held: bool) -> MenuRow {
     if alt_held {
@@ -348,7 +392,7 @@ fn group_row(
         FileAreaMenuItem::Rename => (
             Some(IconSymbol::Pencil),
             FileAreaMenuItem::Rename.label(),
-            Some(ShortcutAction::RenameSelected),
+            Some(ShortcutAction::RenameSelected.into()),
             Message::BeginRename(
                 menu.target
                     .clone()

@@ -371,7 +371,7 @@ fn available_archive_formats() -> Vec<ArchiveFormat> {
     }
 }
 
-fn archive_target_directory(sources: &[PathBuf], current_dir: &Path) -> PathBuf {
+pub(in crate::app) fn archive_target_directory(sources: &[PathBuf], current_dir: &Path) -> PathBuf {
     sources
         .first()
         .and_then(|source| source.parent())
@@ -380,7 +380,10 @@ fn archive_target_directory(sources: &[PathBuf], current_dir: &Path) -> PathBuf 
         .unwrap_or_else(|| current_dir.to_path_buf())
 }
 
-fn default_archive_name(sources: &[PathBuf], single_source_kind: Option<FileKind>) -> String {
+pub(in crate::app) fn default_archive_name(
+    sources: &[PathBuf],
+    single_source_kind: Option<FileKind>,
+) -> String {
     if let [source] = sources {
         if single_source_kind == Some(FileKind::File) {
             if let Some(stem) = source

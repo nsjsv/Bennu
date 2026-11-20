@@ -4,19 +4,24 @@ use iced::{event, Task};
 use super::tabs::TabDirection;
 use super::text_input_shortcuts;
 use super::FileBrowser;
+use crate::actions::ActionId;
 use crate::config::{ViewDensityLevel, ViewDensityStep};
 use crate::model::{
     AdvancedNewFolderMessage, BrowserViewMode, Message, PathSuggestionDirection, PendingOperation,
 };
 use crate::shortcuts::{
     fixed_key, routing_context, CaptureRejection, CaptureSlot, FileBrowserShortcutOwnership,
-    FileContentKey, FixedKey, KeyArea, KeyPress, LetterMode, NamedKey, ShortcutAction,
-    ShortcutCaptureState, ShortcutConfig, ShortcutRoutingContext, TypedLetter,
+    FileContentKey, FixedKey, KeyArea, KeyPress, LetterMode, LiveKeymap, NamedKey, ShortcutAction,
+    ShortcutCaptureState, ShortcutRoutingContext, ShortcutTarget, TypedLetter,
 };
 
 impl FileBrowser {
-    pub(crate) fn shortcut_config(&self) -> &ShortcutConfig {
-        &self.user_config.shortcuts
+    /// 现在实际的键位：用户设的键，加上动作文件夹里现在有哪些动作。
+    pub(crate) fn keymap(&self) -> LiveKeymap<'_, impl Fn(&ActionId) -> bool + '_> {
+        let library = &self.action_library;
+        self.user_config
+            .shortcuts
+            .live(move |id| library.find(id).is_some())
     }
 
     pub(super) fn handle_keyboard_key_pressed(
@@ -97,12 +102,21 @@ impl FileBrowser {
             None => {}
         }
 
-        let Some(action) = self
-            .user_config
-            .shortcuts
-            .action_for(KeyArea::FileBrowser, &press)
-        else {
-            return Task::none();
+        let target = self.keymap().target_for(KeyArea::FileBrowser, &press);
+        let action = match target {
+            None => return Task::none(),
+            Some(ShortcutTarget::Builtin(action)) => action,
+            // 动作作用在选中的项上，和删除、复制这些文件区的键一样先让给文本框。
+            Some(ShortcutTarget::Action(id)) => {
+                return self.route_file_content_key(
+                    FileContentKey::UserAction(id),
+                    routing_context(
+                        &press,
+                        crate::shortcuts::DeclaredContext::FileBrowserContent,
+                    ),
+                    status,
+                )
+            }
         };
         if action == ShortcutAction::Preview && status == event::Status::Captured {
             return self.handle_captured_preview_shortcut();
@@ -169,6 +183,7 @@ impl FileBrowser {
     pub(super) fn invoke_file_content_key(&mut self, content_key: FileContentKey) -> Task<Message> {
         match content_key {
             FileContentKey::Action(action) => self.invoke_shortcut(action),
+            FileContentKey::UserAction(id) => self.invoke_action_from_keyboard(&id),
             FileContentKey::Move(movement) => {
                 self.type_ahead.clear();
                 self.move_file_selection(movement)
@@ -363,10 +378,10 @@ impl FileBrowser {
 
     pub(super) fn start_shortcut_capture(
         &mut self,
-        action: ShortcutAction,
+        target: ShortcutTarget,
         slot: CaptureSlot,
     ) -> Task<Message> {
-        self.shortcut_capture = Some(ShortcutCaptureState::new(action, slot));
+        self.shortcut_capture = Some(ShortcutCaptureState::new(target, slot));
         Task::none()
     }
 
@@ -381,7 +396,7 @@ impl FileBrowser {
         key: &keyboard::Key,
         modifiers: keyboard::Modifiers,
     ) -> Task<Message> {
-        let Some(capture) = self.shortcut_capture else {
+        let Some(capture) = self.shortcut_capture.clone() else {
             return Task::none();
         };
         match key.as_ref() {
@@ -399,12 +414,11 @@ impl FileBrowser {
         let captured = KeyPress::from_iced(key, modifiers)
             .ok_or(CaptureRejection::Unsupported)
             .and_then(|press| {
-                self.user_config
-                    .shortcuts
-                    .keys_after_capture(capture.action, capture.slot, press)
+                self.keymap()
+                    .keys_after_capture(&capture.target, capture.slot, press)
             });
         match captured {
-            Ok(keys) => self.save_shortcut_keys(capture.action, keys),
+            Ok(keys) => self.save_shortcut_keys(capture.target, keys),
             Err(rejection) => {
                 self.shortcut_capture = Some(ShortcutCaptureState {
                     rejection: Some(rejection),
@@ -418,28 +432,28 @@ impl FileBrowser {
     /// 录键提示行上的“删掉这个键”：只对替换某个已有键的录键有效。
     pub(super) fn remove_captured_shortcut_key(&mut self) -> Task<Message> {
         let Some(ShortcutCaptureState {
-            action,
+            target,
             slot: CaptureSlot::Replace(index),
             ..
-        }) = self.shortcut_capture
+        }) = self.shortcut_capture.clone()
         else {
             return Task::none();
         };
-        let mut keys = self.user_config.shortcuts.keys(action).to_vec();
+        let mut keys = self.keymap().keys(target.clone());
         if index < keys.len() {
             keys.remove(index);
         }
-        self.save_shortcut_keys(action, keys)
+        self.save_shortcut_keys(target, keys)
     }
 
-    pub(super) fn reset_shortcut_keys(&mut self, action: ShortcutAction) -> Task<Message> {
-        self.user_config.shortcuts.reset(action);
+    pub(super) fn reset_shortcut_keys(&mut self, target: ShortcutTarget) -> Task<Message> {
+        self.user_config.shortcuts.reset(target);
         self.shortcut_capture = None;
         self.persist_user_preferences_command()
     }
 
-    fn save_shortcut_keys(&mut self, action: ShortcutAction, keys: Vec<KeyPress>) -> Task<Message> {
-        self.user_config.shortcuts.set_keys(action, keys);
+    fn save_shortcut_keys(&mut self, target: ShortcutTarget, keys: Vec<KeyPress>) -> Task<Message> {
+        self.user_config.shortcuts.set_keys(target, keys);
         self.shortcut_capture = None;
         self.persist_user_preferences_command()
     }

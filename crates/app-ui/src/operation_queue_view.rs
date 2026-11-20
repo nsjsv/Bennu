@@ -1,3 +1,4 @@
+use crate::app::actions::ActionRuns;
 use iced::widget::{button, column, container, row, scrollable, svg, Svg};
 use iced::{Alignment, Element, Length};
 
@@ -76,9 +77,11 @@ impl PanelRow<'_> {
     }
 }
 
+/// `action_runs` 给动作里的任务换上"动作名 · 步骤 (2/3)"的标题。
 pub(crate) fn operation_queue_panel<'a>(
     queue: &'a FileOperationQueue,
     transfers: &'a TransferTasks,
+    action_runs: &'a ActionRuns,
     animation_frame: u8,
 ) -> Element<'a, Message> {
     let mut header = row![readable_text(tr!("Tasks"))
@@ -102,7 +105,9 @@ pub(crate) fn operation_queue_panel<'a>(
     } else {
         for row in rows {
             tasks = tasks.push(match row {
-                PanelRow::File(task) => operation_task_row(task, animation_frame),
+                PanelRow::File(task) => {
+                    operation_task_row(task, action_runs.label_for(task.id), animation_frame)
+                }
                 PanelRow::Transfer(task) => transfer_task_row(transfers, task, animation_frame),
             });
         }
@@ -146,11 +151,15 @@ fn panel_rows<'a>(
     rows
 }
 
-fn operation_task_row(task: &FileOperationTask, animation_frame: u8) -> Element<'_, Message> {
+fn operation_task_row<'a>(
+    task: &'a FileOperationTask,
+    action_label: Option<&str>,
+    animation_frame: u8,
+) -> Element<'a, Message> {
     let path_lines = task.operation.path_lines();
+    let title = action_label.map_or_else(|| task.operation.title(), str::to_owned);
     let title = row![
-        readable_text(operation_title_text(task.operation.title(), &path_lines))
-            .width(Length::Fill),
+        readable_text(operation_title_text(title, &path_lines)).width(Length::Fill),
         readable_text(task.status_label()).size(CAPTION_SIZE),
     ]
     .spacing(6)

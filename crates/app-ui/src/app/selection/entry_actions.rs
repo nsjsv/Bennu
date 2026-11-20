@@ -16,10 +16,15 @@ impl FileBrowser {
     pub(in crate::app) fn copy_selected_path_text(&mut self) -> Task<Message> {
         self.context_menu = None;
         let paths = self.active_file_selection();
+        self.copy_paths_text(&paths)
+    }
+
+    /// 动作里的"复制路径"也用这一条。
+    pub(in crate::app) fn copy_paths_text(&self, paths: &[PathBuf]) -> Task<Message> {
         if paths.is_empty() {
             return Task::none();
         }
-        let text = copied_paths_text(&paths);
+        let text = copied_paths_text(paths);
         Task::perform(write_desktop_clipboard_text(text), |write_outcome| {
             Message::PathTextCopied(write_outcome.map_err(|error| error.to_string()))
         })

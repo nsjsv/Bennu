@@ -112,7 +112,7 @@ async fn shift_f5_and_shift_f6_copy_and_move_into_the_other_side() {
 
     // 没分屏时不做事。
     assert_eq!(
-        checked_transfers(browser.invoke_routed_file_content_key(copy)).await,
+        checked_transfers(browser.invoke_routed_file_content_key(copy.clone())).await,
         None
     );
 
@@ -129,11 +129,11 @@ async fn shift_f5_and_shift_f6_copy_and_move_into_the_other_side() {
 
     let expected = vec![right.path().join("report.txt")];
     assert_eq!(
-        checked_transfers(browser.invoke_routed_file_content_key(copy)).await,
+        checked_transfers(browser.invoke_routed_file_content_key(copy.clone())).await,
         Some((crate::model::TransferConflictMode::Copy, expected.clone()))
     );
     assert_eq!(
-        checked_transfers(browser.invoke_routed_file_content_key(move_key)).await,
+        checked_transfers(browser.invoke_routed_file_content_key(move_key.clone())).await,
         Some((crate::model::TransferConflictMode::Move, expected))
     );
     assert!(browser.pending_operation.is_some());

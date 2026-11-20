@@ -256,6 +256,7 @@ impl FileBrowser {
             | SettingsCategory::Files
             | SettingsCategory::Transfer
             | SettingsCategory::Shortcuts
+            | SettingsCategory::Actions
             | SettingsCategory::About => Task::none(),
         }
     }

@@ -5,6 +5,7 @@
 use iced::widget::{button, container, mouse_area, row, Column, Space};
 use iced::{Alignment, Background, Element, Length, Theme};
 
+use crate::actions::{ActionId, ActionLibrary};
 use crate::appearance::{
     context_menu_highlighted_item_button_style, context_menu_item_button_style, context_menu_style,
     muted_text_color,
@@ -12,7 +13,7 @@ use crate::appearance::{
 use crate::config::UserConfig;
 use crate::context_menu_rows::{file_context_menu_rows, MenuRow, MenuSection};
 use crate::model::{FileContextMenuExpansion, FileContextMenuState, Message};
-use crate::shortcuts::ShortcutConfig;
+use crate::shortcuts::LiveKeymap;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::typography::CAPTION_SIZE;
@@ -99,10 +100,12 @@ pub(super) fn file_context_menu_panel(
     menu: &FileContextMenuState,
     keyboard_modifiers: iced::keyboard::Modifiers,
     config: &UserConfig,
+    actions: &ActionLibrary,
 ) -> (
     Element<'static, Message>,
     Option<(Element<'static, Message>, f32)>,
 ) {
+    let keymap = config.shortcuts.live(|id| actions.find(id).is_some());
     let rows = file_context_menu_rows(
         menu,
         &config.context_menus,
@@ -116,10 +119,7 @@ pub(super) fn file_context_menu_panel(
         let highlighted = highlight.is_some_and(|highlight| highlight.row == index);
         // 普通行悬停时收起别的组的子菜单；组行悬停就展开自己。
         let hover = row.expansion().unwrap_or(FileContextMenuExpansion::None);
-        let top = layout.push(
-            row.section,
-            menu_row(row, hover, highlighted, &config.shortcuts),
-        );
+        let top = layout.push(row.section, menu_row(row, hover, highlighted, &keymap));
         if let Some(expansion) = row
             .expansion()
             .filter(|expansion| *expansion == menu.expansion)
@@ -136,7 +136,7 @@ pub(super) fn file_context_menu_panel(
                         member,
                         expansion,
                         member_highlight == Some(member_index),
-                        &config.shortcuts,
+                        &keymap,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -155,7 +155,7 @@ fn menu_row(
     row: &MenuRow,
     hover: FileContextMenuExpansion,
     highlighted: bool,
-    shortcuts: &ShortcutConfig,
+    keymap: &LiveKeymap<'_, impl Fn(&ActionId) -> bool>,
 ) -> Element<'static, Message> {
     let mut content = row![]
         .spacing(6)
@@ -167,7 +167,8 @@ fn menu_row(
     content = content.push(readable_text(row.label.clone()).width(Length::Fill));
     if let Some(key) = row
         .shortcut
-        .and_then(|action| shortcuts.keys(action).first())
+        .clone()
+        .and_then(|target| keymap.keys(target).first().copied())
     {
         content = content.push(readable_text(key.display_label()).size(CAPTION_SIZE).style(
             |theme: &Theme| iced::widget::text::Style {

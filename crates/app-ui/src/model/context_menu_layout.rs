@@ -33,7 +33,8 @@ impl<I: Copy + PartialEq> ContextMenuLayout<I> {
         }
     }
 
-    /// 从存储字符串还原;未知 id 丢弃、缺失项按全集顺序追加且默认可见、重复 id 去重。
+    /// 从存储字符串还原;未知 id 丢弃、重复 id 去重;存储里没有的项(新版本加的)默认可见,
+    /// 插在全集里它前一项的后面,不跑到末尾。
     pub(crate) fn normalized_from_stored(
         stored: &[(String, bool)],
         all: &[I],

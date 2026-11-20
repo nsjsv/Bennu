@@ -31,9 +31,11 @@ pub(crate) enum FileAreaMenuItem {
     Delete,
     Properties,
     SendToPhone,
+    /// 适用于这一批的自定义动作所在的位置：不超过 4 个直接排开，多了收进一个子菜单。
+    Actions,
 }
 
-pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 24] = [
+pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 25] = [
     FileAreaMenuItem::Open,
     FileAreaMenuItem::OpenContainingFolder,
     FileAreaMenuItem::SmartExtractHere,
@@ -56,15 +58,17 @@ pub(crate) const FILE_ENTRY_MENU_ITEMS: [FileAreaMenuItem; 24] = [
     FileAreaMenuItem::CopyPath,
     FileAreaMenuItem::CreateSymlink,
     FileAreaMenuItem::SendToPhone,
+    FileAreaMenuItem::Actions,
     FileAreaMenuItem::Delete,
     FileAreaMenuItem::Properties,
 ];
 
 /// 空白处右键菜单的项全集(条目菜单的子集)。
-pub(crate) const FILE_BLANK_MENU_ITEMS: [FileAreaMenuItem; 3] = [
+pub(crate) const FILE_BLANK_MENU_ITEMS: [FileAreaMenuItem; 4] = [
     FileAreaMenuItem::Paste,
     FileAreaMenuItem::NewEntry,
     FileAreaMenuItem::OpenTerminalHere,
+    FileAreaMenuItem::Actions,
 ];
 
 /// 文件条目菜单的悬停子菜单分组。锚点行单点执行自身动作(纯触发器除外),
@@ -142,6 +146,7 @@ impl FileAreaMenuItem {
             Self::Delete => tr!("Delete"),
             Self::Properties => tr!("Properties"),
             Self::SendToPhone => tr!("Send to Phone"),
+            Self::Actions => tr!("Actions"),
         }
     }
 
@@ -171,6 +176,7 @@ impl FileAreaMenuItem {
             Self::Delete => "delete",
             Self::Properties => "properties",
             Self::SendToPhone => "send_to_phone",
+            Self::Actions => "actions",
         }
     }
 
@@ -200,6 +206,7 @@ impl FileAreaMenuItem {
             "delete" => Self::Delete,
             "properties" => Self::Properties,
             "send_to_phone" => Self::SendToPhone,
+            "actions" => Self::Actions,
             _ => return None,
         })
     }
@@ -230,6 +237,7 @@ impl FileAreaMenuItem {
             Self::CopyPath => IconSymbol::List,
             Self::CreateSymlink => IconSymbol::Link,
             Self::SendToPhone => IconSymbol::Download,
+            Self::Actions => IconSymbol::Play,
             Self::Delete => IconSymbol::Trash,
             Self::Properties => IconSymbol::FileText,
         }

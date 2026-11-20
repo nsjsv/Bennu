@@ -126,6 +126,7 @@ More tutorials live in `docs/`:
 
 - [Matugen color scheme](docs/matugen.md): generate a palette from your wallpaper, hot-reloaded across all windows
 - [Niri floating windows](docs/niri.md): open settings, properties, and preview windows as floating windows
+- [Custom actions](docs/actions.md) (in Chinese): chain conversion, compression, copying, moving and commands into your own context menu entries with shortcuts
 
 ## Building from source
 

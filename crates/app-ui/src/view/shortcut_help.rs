@@ -20,7 +20,11 @@ const KEYS_COLUMN_WIDTH: f32 = 180.0;
 
 pub(super) fn shortcut_help_panel(browser: &FileBrowser) -> Element<'static, Message> {
     let config = browser.user_config();
-    let sections = shortcut_help_sections(&config.shortcuts, config.letter_mode);
+    let sections = shortcut_help_sections(
+        &browser.keymap(),
+        browser.action_library.definitions(),
+        config.letter_mode,
+    );
     // 两栏按行数大致对半分：每一组放进当前较短的那一栏。
     let mut columns = [Column::new().spacing(18), Column::new().spacing(18)];
     let mut heights = [0usize; 2];

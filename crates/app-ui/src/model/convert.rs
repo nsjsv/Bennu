@@ -283,7 +283,32 @@ pub(crate) struct ConversionSettings {
 }
 
 impl ConversionSettings {
-    fn request(&self, source: &Path, output: &OutputLocation) -> ConversionRequest {
+    /// 对话框里这个目标的出厂设置，不看用户上次记住的选项：动作里的转换每次结果都一样。
+    pub(crate) fn factory_default(
+        target: ConversionTarget,
+        encoders: &ConversionEncoderAvailability,
+    ) -> Result<Self, ConvertInputError> {
+        match target {
+            ConversionTarget::Image(target_format) => ImageConvertOptions {
+                target_format,
+                ..ImageConvertOptions::default()
+            }
+            .settings(encoders),
+            ConversionTarget::Video(format) => VideoConvertOptions {
+                target: VideoTarget::Video(format),
+                ..VideoConvertOptions::default()
+            }
+            .settings(encoders),
+            // 从视频里取声音和转音频是同一组设置（缩放、帧率、旋转都用不上）。
+            ConversionTarget::Audio(target_format) => AudioConvertOptions {
+                target_format,
+                ..AudioConvertOptions::default()
+            }
+            .settings(encoders),
+        }
+    }
+
+    pub(crate) fn request(&self, source: &Path, output: &OutputLocation) -> ConversionRequest {
         ConversionRequest {
             source: source.to_path_buf(),
             target: self.target,

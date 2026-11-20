@@ -84,7 +84,7 @@ fn enter_runs_the_same_message_as_clicking_the_row() {
     let rows = rows(&browser);
     let properties = rows
         .iter()
-        .position(|row| row.shortcut == Some(ShortcutAction::FileProperties))
+        .position(|row| row.shortcut == Some(ShortcutAction::FileProperties.into()))
         .expect("the file menu has Properties");
 
     let (_, message) = navigate(
@@ -177,9 +177,9 @@ fn rows_carry_the_shortcut_of_what_they_do() {
         .collect::<Vec<_>>()
     };
     let plain = shortcuts(Modifiers::default());
-    assert!(plain.contains(&ShortcutAction::Copy));
-    assert!(plain.contains(&ShortcutAction::Delete));
+    assert!(plain.contains(&ShortcutAction::Copy.into()));
+    assert!(plain.contains(&ShortcutAction::Delete.into()));
     // 按住 Alt / Shift 时行变成复制路径 / 永久删除，显示的键跟着变。
-    assert!(shortcuts(Modifiers::ALT).contains(&ShortcutAction::CopyPath));
-    assert!(shortcuts(Modifiers::SHIFT).contains(&ShortcutAction::DeletePermanently));
+    assert!(shortcuts(Modifiers::ALT).contains(&ShortcutAction::CopyPath.into()));
+    assert!(shortcuts(Modifiers::SHIFT).contains(&ShortcutAction::DeletePermanently.into()));
 }

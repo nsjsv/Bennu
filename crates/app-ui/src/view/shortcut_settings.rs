@@ -4,8 +4,7 @@ use iced::{Alignment, Element, Length};
 use crate::app::FileBrowser;
 use crate::model::Message;
 use crate::shortcuts::{
-    CaptureRejection, CaptureSlot, LetterMode, ShortcutAction, ShortcutCaptureState,
-    ShortcutConfig, ShortcutGroup,
+    CaptureRejection, CaptureSlot, LetterMode, ShortcutAction, ShortcutCaptureState, ShortcutTarget,
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::SegmentedChoice;
@@ -18,36 +17,56 @@ use super::{themed_icon, IconTone};
 
 const ROW_ICON_SIZE: f32 = 14.0;
 
-/// 每个分组一张卡片；正在录键的动作上面多一行提示。
+/// 每个分组一张卡片，最后是动作文件夹里的动作；正在录键的那一行上面多一行提示。
 pub(super) fn shortcut_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
-    let config = browser.shortcut_config();
-    let capture = browser.shortcut_capture.as_ref();
-    let mut groups: Vec<(ShortcutGroup, Vec<SettingsRow<'static>>)> = Vec::new();
+    let mut groups: Vec<(String, Vec<SettingsRow<'static>>)> = Vec::new();
+    let mut current_group = None;
     for action in ShortcutAction::all().iter().copied() {
-        let rows = match groups.last_mut() {
-            Some((group, rows)) if *group == action.group() => rows,
-            _ => {
-                groups.push((action.group(), Vec::new()));
-                &mut groups.last_mut().expect("group was just pushed").1
-            }
-        };
-        if let Some(capture) = capture.filter(|capture| capture.action == action) {
-            rows.push(capture_feedback_row(capture));
+        if current_group != Some(action.group()) {
+            current_group = Some(action.group());
+            groups.push((action.group().label(), Vec::new()));
         }
-        rows.push(action_row(config, action, capture));
+        let rows = &mut groups.last_mut().expect("group was just pushed").1;
+        push_target_rows(browser, rows, action.into());
+    }
+    let mut action_rows = Vec::new();
+    for definition in browser.action_library.definitions() {
+        push_target_rows(
+            browser,
+            &mut action_rows,
+            ShortcutTarget::Action(definition.id.clone()),
+        );
+    }
+    if !action_rows.is_empty() {
+        groups.push((tr!("Actions"), action_rows));
     }
     let mut sections = vec![letter_mode_section(browser.user_config().letter_mode)];
     sections.extend(
         groups
             .into_iter()
             .enumerate()
-            .map(|(index, (group, rows))| {
+            .map(|(index, (label, rows))| {
                 let description = (index == 0)
                     .then(|| tr!("Click a key to record a new one, or + to add another key."));
-                settings_group(group.label(), description, rows)
+                settings_group(label, description, rows)
             }),
     );
     sections
+}
+
+fn push_target_rows(
+    browser: &FileBrowser,
+    rows: &mut Vec<SettingsRow<'static>>,
+    target: ShortcutTarget,
+) {
+    let capture = browser
+        .shortcut_capture
+        .as_ref()
+        .filter(|capture| capture.target == target);
+    if let Some(capture) = capture {
+        rows.push(capture_feedback_row(browser, capture));
+    }
+    rows.push(target_row(browser, target, capture));
 }
 
 /// 字母键：打字跳转还是 vim 命令。
@@ -70,24 +89,23 @@ fn letter_mode_section(selected: LetterMode) -> Element<'static, Message> {
     )
 }
 
-/// 名称在左，键按钮在右，后面是“加一个键”，改过的行再加“恢复默认”。
-fn action_row(
-    config: &ShortcutConfig,
-    action: ShortcutAction,
+/// 名称在左，键按钮在右，后面是“加一个键”，改过的行再加“恢复默认”（动作是“删掉键”）。
+/// `capture` 是正在给这一行录的键。
+fn target_row(
+    browser: &FileBrowser,
+    target: ShortcutTarget,
     capture: Option<&ShortcutCaptureState>,
 ) -> SettingsRow<'static> {
-    let capturing = capture
-        .filter(|capture| capture.action == action)
-        .map(|capture| capture.slot);
+    let capturing = capture.map(|capture| capture.slot);
     let mut controls = Row::new().spacing(4).align_y(Alignment::Center);
-    for (index, key) in config.keys(action).iter().enumerate() {
+    for (index, key) in browser.keymap().keys(target.clone()).iter().enumerate() {
         let label = if capturing == Some(CaptureSlot::Replace(index)) {
             tr!("Press keys...")
         } else {
             key.display_label()
         };
         controls = controls.push(normal_button(readable_text(label)).on_press(
-            Message::ShortcutCaptureStarted(action, CaptureSlot::Replace(index)),
+            Message::ShortcutCaptureStarted(target.clone(), CaptureSlot::Replace(index)),
         ));
     }
     if capturing == Some(CaptureSlot::Add) {
@@ -96,19 +114,23 @@ fn action_row(
     controls = controls.push(row_icon_button(
         IconSymbol::Plus,
         tr!("Add a Key"),
-        Message::ShortcutCaptureStarted(action, CaptureSlot::Add),
+        Message::ShortcutCaptureStarted(target.clone(), CaptureSlot::Add),
     ));
     // 没改过的行留出同宽的空位，各行的按钮才上下对齐。
-    controls = if config.is_customized(action) {
+    controls = if browser
+        .user_config()
+        .shortcuts
+        .is_customized(target.clone())
+    {
         controls.push(row_icon_button(
             IconSymbol::RotateCcw,
             tr!("Reset"),
-            Message::ShortcutBindingReset(action),
+            Message::ShortcutBindingReset(target.clone()),
         ))
     } else {
         controls.push(Space::new().width(Length::Fixed(CONTROL_HEIGHT)))
     };
-    control_row(action.label(), None, controls)
+    control_row(browser.shortcut_target_label(&target), None, controls)
 }
 
 fn row_icon_button(
@@ -124,8 +146,11 @@ fn row_icon_button(
     .into()
 }
 
-fn capture_feedback_row(capture: &ShortcutCaptureState) -> SettingsRow<'static> {
-    let note = match capture.rejection {
+fn capture_feedback_row(
+    browser: &FileBrowser,
+    capture: &ShortcutCaptureState,
+) -> SettingsRow<'static> {
+    let note = match &capture.rejection {
         None => RowNote::Hint(tr!("Esc cancels.")),
         Some(CaptureRejection::Unsupported) => RowNote::Error(tr!(
             "This key cannot be used. Use a function key, a named key, or a letter or digit with Ctrl or Alt."
@@ -136,10 +161,10 @@ fn capture_feedback_row(capture: &ShortcutCaptureState) -> SettingsRow<'static> 
         Some(CaptureRejection::Reserved) => RowNote::Error(tr!(
             "Movement keys, Esc, Tab and Alt+1…9 are fixed and cannot be reassigned."
         )),
-        Some(CaptureRejection::Conflict { key, action }) => RowNote::Error(tr!(
+        Some(CaptureRejection::Conflict { key, target }) => RowNote::Error(tr!(
             "%1 conflicts with %2.",
             key.display_label(),
-            action.label()
+            browser.shortcut_target_label(target)
         )),
     };
     let mut controls = row![
@@ -154,7 +179,10 @@ fn capture_feedback_row(capture: &ShortcutCaptureState) -> SettingsRow<'static> 
         );
     }
     control_row(
-        tr!("Press the new keys for %1", capture.action.label()),
+        tr!(
+            "Press the new keys for %1",
+            browser.shortcut_target_label(&capture.target)
+        ),
         Some(note),
         controls,
     )

@@ -6,20 +6,23 @@ mod keymap;
 mod letter_layer;
 mod overrides;
 
-pub(crate) use action::{DeclaredContext, ShortcutAction, ShortcutGroup};
+#[cfg(test)]
+pub(crate) use action::ShortcutGroup;
+pub(crate) use action::{DeclaredContext, ShortcutAction};
 pub(crate) use fixed_keys::{
     fixed_key, is_reserved, FixedKey, MoveExtent, MoveStep, SelectionMove,
 };
 pub(crate) use help_sheet::{shortcut_help_sections, HelpSection};
 pub(crate) use key_press::{KeyPress, NamedKey, ShortcutKey};
-pub(crate) use keymap::{KeyArea, ShortcutConfig};
+pub(crate) use keymap::{KeyArea, LiveKeymap, ShortcutConfig, ShortcutTarget};
 pub(crate) use letter_layer::{LetterMode, VimCommand, VimFeed, VimState};
 
-/// 一次落到文件区的按键：可改键的命令、固定的移动键，或字母层的一个字符。经文本焦点探测
-/// 后以 `Message::FileContentKeyRouted` 回到 update。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 一次落到文件区的按键：可改键的命令、绑了键的动作、固定的移动键，或字母层的一个字符。
+/// 经文本焦点探测后以 `Message::FileContentKeyRouted` 回到 update。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FileContentKey {
     Action(ShortcutAction),
+    UserAction(crate::actions::ActionId),
     Move(SelectionMove),
     Letter(TypedLetter),
 }
@@ -96,39 +99,39 @@ pub(crate) enum CaptureSlot {
     Add,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CaptureRejection {
     Unsupported,
     LetterKey,
     Reserved,
     Conflict {
         key: KeyPress,
-        action: ShortcutAction,
+        target: ShortcutTarget,
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShortcutCaptureState {
-    pub(crate) action: ShortcutAction,
+    pub(crate) target: ShortcutTarget,
     pub(crate) slot: CaptureSlot,
     pub(crate) rejection: Option<CaptureRejection>,
 }
 
 impl ShortcutCaptureState {
-    pub(crate) fn new(action: ShortcutAction, slot: CaptureSlot) -> Self {
+    pub(crate) fn new(target: ShortcutTarget, slot: CaptureSlot) -> Self {
         Self {
-            action,
+            target,
             slot,
             rejection: None,
         }
     }
 }
 
-impl ShortcutConfig {
-    /// 录到 `press` 之后这个动作的键列表；不能用时给出原因。
+impl<P: Fn(&crate::actions::ActionId) -> bool> LiveKeymap<'_, P> {
+    /// 录到 `press` 之后这个目标的键列表；不能用时给出原因。
     pub(crate) fn keys_after_capture(
         &self,
-        action: ShortcutAction,
+        target: &ShortcutTarget,
         slot: CaptureSlot,
         press: KeyPress,
     ) -> Result<Vec<KeyPress>, CaptureRejection> {
@@ -138,13 +141,13 @@ impl ShortcutConfig {
         if is_reserved(&press) {
             return Err(CaptureRejection::Reserved);
         }
-        if let Some(other) = self.conflicting_action(action, &press) {
+        if let Some(other) = self.conflicting_target(target, &press) {
             return Err(CaptureRejection::Conflict {
                 key: press,
-                action: other,
+                target: other,
             });
         }
-        let mut keys = self.keys(action).to_vec();
+        let mut keys = self.keys(target.clone());
         match slot {
             CaptureSlot::Replace(index) if index < keys.len() => {
                 keys[index] = press;
@@ -251,18 +254,28 @@ mod tests {
         let slot = CaptureSlot::Replace(0);
 
         assert_eq!(
-            config.keys_after_capture(rename, slot, KeyPress::plain(ShortcutKey::Character('R'))),
+            config.live(|_| false).keys_after_capture(
+                &rename.into(),
+                slot,
+                KeyPress::plain(ShortcutKey::Character('R'))
+            ),
             Err(CaptureRejection::LetterKey)
         );
         assert_eq!(
-            config.keys_after_capture(rename, slot, KeyPress::named(NamedKey::Home)),
+            config.live(|_| false).keys_after_capture(
+                &rename.into(),
+                slot,
+                KeyPress::named(NamedKey::Home)
+            ),
             Err(CaptureRejection::Reserved)
         );
         assert_eq!(
-            config.keys_after_capture(rename, slot, KeyPress::ctrl('D')),
+            config
+                .live(|_| false)
+                .keys_after_capture(&rename.into(), slot, KeyPress::ctrl('D')),
             Err(CaptureRejection::Conflict {
                 key: KeyPress::ctrl('D'),
-                action: ShortcutAction::DuplicateSelected,
+                target: ShortcutAction::DuplicateSelected.into(),
             })
         );
     }
@@ -274,15 +287,23 @@ mod tests {
         let f12 = KeyPress::named(NamedKey::Function(12));
 
         assert_eq!(
-            config.keys_after_capture(redo, CaptureSlot::Replace(1), f12),
+            config
+                .live(|_| false)
+                .keys_after_capture(&redo.into(), CaptureSlot::Replace(1), f12),
             Ok(vec![KeyPress::ctrl_shift('Z'), f12])
         );
         assert_eq!(
-            config.keys_after_capture(redo, CaptureSlot::Add, f12),
+            config
+                .live(|_| false)
+                .keys_after_capture(&redo.into(), CaptureSlot::Add, f12),
             Ok(vec![KeyPress::ctrl_shift('Z'), KeyPress::ctrl('Y'), f12])
         );
         assert_eq!(
-            config.keys_after_capture(redo, CaptureSlot::Replace(1), KeyPress::ctrl_shift('Z')),
+            config.live(|_| false).keys_after_capture(
+                &redo.into(),
+                CaptureSlot::Replace(1),
+                KeyPress::ctrl_shift('Z')
+            ),
             Ok(vec![KeyPress::ctrl_shift('Z')])
         );
     }

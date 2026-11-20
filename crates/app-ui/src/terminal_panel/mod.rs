@@ -18,7 +18,7 @@ use iced::{Point, Task};
 
 use crate::app::FileBrowser;
 use crate::model::Message;
-use crate::shortcuts::{KeyArea, KeyPress};
+use crate::shortcuts::{KeyArea, KeyPress, ShortcutTarget};
 
 use session::SessionId;
 use tabs::TerminalTab;
@@ -476,8 +476,9 @@ impl FileBrowser {
         }
 
         // 宿主保留键:终端作用域的键(开关面板、新建/关闭标签),以及下面的复制、粘贴。
-        if let Some(action) = KeyPress::from_iced(key, modifiers)
-            .and_then(|press| self.shortcut_config().action_for(KeyArea::Terminal, &press))
+        // 动作只在文件区触发，终端里查到的只会是内置的。
+        if let Some(ShortcutTarget::Builtin(action)) = KeyPress::from_iced(key, modifiers)
+            .and_then(|press| self.keymap().target_for(KeyArea::Terminal, &press))
         {
             return Some(self.invoke_shortcut(action));
         }

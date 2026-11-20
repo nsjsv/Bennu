@@ -7,6 +7,7 @@ use super::action::ShortcutAction;
 use super::fixed_keys::is_reserved;
 use super::key_press::KeyPress;
 use super::keymap::ShortcutConfig;
+use crate::actions::ActionId;
 
 /// 0.4.6 写进存储的全部条目和当时的默认键。冻结不改：只用来认出旧数据里哪些是默认值。
 const LEGACY_DEFAULTS: [(&str, &str); 30] = [
@@ -58,12 +59,9 @@ impl ShortcutConfig {
         entries: impl IntoIterator<Item = (&'a str, &'a [String])>,
     ) -> LoadedShortcuts {
         let mut overrides = BTreeMap::new();
+        let mut action_keys = BTreeMap::new();
         let mut skipped = 0;
         for (action_key, values) in entries {
-            let Some(action) = ShortcutAction::from_config_key(action_key) else {
-                skipped += 1;
-                continue;
-            };
             let mut keys = Vec::with_capacity(values.len());
             for value in values {
                 match KeyPress::from_config_value(value).filter(bindable) {
@@ -72,23 +70,31 @@ impl ShortcutConfig {
                     None => skipped += 1,
                 }
             }
-            overrides.insert(action, keys);
+            if let Some(action) = ShortcutAction::from_config_key(action_key) {
+                overrides.insert(action, keys);
+            } else if let Some(id) = ActionId::from_config_key(action_key) {
+                action_keys.insert(id, keys);
+            } else {
+                skipped += 1;
+            }
         }
         LoadedShortcuts {
-            config: Self::from_overrides(overrides),
+            config: Self::from_overrides(overrides, action_keys),
             skipped,
         }
     }
 
+    /// 动作文件暂时不在时它的键也照样存着，文件回来键就回来。
     pub(crate) fn to_stored(&self) -> Vec<(String, Vec<String>)> {
+        let stored_keys = |keys: &[KeyPress]| keys.iter().map(KeyPress::config_value).collect();
         self.overrides()
             .iter()
-            .map(|(action, keys)| {
-                (
-                    action.config_key().to_owned(),
-                    keys.iter().map(KeyPress::config_value).collect(),
-                )
-            })
+            .map(|(action, keys)| (action.config_key().to_owned(), stored_keys(keys)))
+            .chain(
+                self.action_key_entries()
+                    .iter()
+                    .map(|(id, keys)| (id.config_key(), stored_keys(keys))),
+            )
             .collect()
     }
 
@@ -119,7 +125,7 @@ impl ShortcutConfig {
             }
         }
         LoadedShortcuts {
-            config: Self::from_overrides(overrides),
+            config: Self::from_overrides(overrides, BTreeMap::new()),
             skipped,
         }
     }
@@ -147,7 +153,10 @@ mod tests {
         assert_eq!(loaded.skipped, 0);
         // 旧默认 Ctrl+Shift+N 不再跟着“用选中项新建文件夹”。
         assert_eq!(
-            loaded.config.keys(ShortcutAction::NewFolderFromSelection),
+            loaded
+                .config
+                .live(|_| false)
+                .keys(ShortcutAction::NewFolderFromSelection),
             [KeyPress::ctrl('G')]
         );
     }
@@ -159,7 +168,10 @@ mod tests {
 
         assert_eq!(loaded.skipped, 0);
         assert_eq!(
-            loaded.config.keys(ShortcutAction::FocusPathInput),
+            loaded
+                .config
+                .live(|_| false)
+                .keys(ShortcutAction::FocusPathInput),
             [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
         );
         assert!(!loaded.config.is_customized(ShortcutAction::Refresh));
@@ -202,6 +214,7 @@ mod tests {
         assert_eq!(loaded.config, config);
         assert!(loaded
             .config
+            .live(|_| false)
             .keys(ShortcutAction::RenameSelected)
             .is_empty());
     }
@@ -213,8 +226,47 @@ mod tests {
 
         assert_eq!(loaded.skipped, 2);
         assert_eq!(
-            loaded.config.keys(ShortcutAction::RenameSelected),
+            loaded
+                .config
+                .live(|_| false)
+                .keys(ShortcutAction::RenameSelected),
             [KeyPress::ctrl('J')]
         );
+    }
+
+    #[test]
+    fn action_keys_are_stored_with_a_prefix_and_read_back() {
+        let mut config = ShortcutConfig::default();
+        let audio =
+            crate::shortcuts::ShortcutTarget::Action(ActionId::from_file_stem("extract-audio"));
+        config.set_keys(audio.clone(), vec![KeyPress::ctrl_shift('E')]);
+
+        let stored = config.to_stored();
+        assert_eq!(
+            stored,
+            [(
+                "action:extract-audio".to_owned(),
+                vec!["Ctrl+Shift+E".to_owned()]
+            )]
+        );
+
+        let loaded = ShortcutConfig::from_stored(
+            stored
+                .iter()
+                .map(|(key, values)| (key.as_str(), values.as_slice())),
+        );
+        assert_eq!(loaded.skipped, 0);
+        assert_eq!(
+            loaded.config.live(|_| true).keys(audio),
+            [KeyPress::ctrl_shift('E')]
+        );
+        // 只有前缀、没有名字的条目读不懂。
+        let unknown = [("action:".to_owned(), vec!["Ctrl+E".to_owned()])];
+        let loaded = ShortcutConfig::from_stored(
+            unknown
+                .iter()
+                .map(|(key, values)| (key.as_str(), values.as_slice())),
+        );
+        assert_eq!(loaded.skipped, 1);
     }
 }

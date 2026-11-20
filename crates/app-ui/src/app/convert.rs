@@ -110,7 +110,7 @@ impl FileBrowser {
 
 /// 名字定不下来的视频后缀（`.ts`）要读开头内容，放到后台线程：网络挂载卡住也不冻界面。
 /// 大小顺手在同一趟里读，给分区小标题用；读不到按 0 算，不挡转换。
-async fn classify_convert_sources(paths: Vec<PathBuf>) -> Vec<ConvertSource> {
+pub(in crate::app) async fn classify_convert_sources(paths: Vec<PathBuf>) -> Vec<ConvertSource> {
     tokio::task::spawn_blocking(move || {
         paths
             .into_iter()

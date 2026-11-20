@@ -72,7 +72,10 @@ network_connections = [
     assert_eq!(parsed.startup_custom_directory, PathBuf::from("/workspace"));
     assert!(!parsed.save_view_state);
     assert_eq!(
-        parsed.shortcuts.keys(ShortcutAction::FocusPathInput),
+        parsed
+            .shortcuts
+            .live(|_| false)
+            .keys(ShortcutAction::FocusPathInput),
         [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
     );
     assert_eq!(parsed.sidebar_favorites.as_ref().map(Vec::len), Some(2));
@@ -329,7 +332,10 @@ fn user_preferences_round_trip_through_sqlite() {
         Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")))
     );
     assert_eq!(
-        loaded.shortcuts.keys(ShortcutAction::FocusPathInput),
+        loaded
+            .shortcuts
+            .live(|_| false)
+            .keys(ShortcutAction::FocusPathInput),
         [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
     );
 }
@@ -639,7 +645,10 @@ network_connections = [
     assert_eq!(loaded.network_connections.len(), 1);
     assert_eq!(loaded.network_connections[0].connection.id.as_str(), "good");
     assert_eq!(
-        loaded.shortcuts.keys(ShortcutAction::FocusPathInput),
+        loaded
+            .shortcuts
+            .live(|_| false)
+            .keys(ShortcutAction::FocusPathInput),
         [KeyPress::from_config_value("Ctrl+Alt+L").unwrap()]
     );
 

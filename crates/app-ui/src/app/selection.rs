@@ -4,6 +4,7 @@ use std::time::Instant;
 use file_core::{is_supported_archive_path, EntryNameKind, FileKind};
 use iced::Task;
 
+use super::actions::ActionSubject;
 use super::panes::BrowserPaneView;
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 
@@ -440,8 +441,8 @@ impl FileBrowser {
         let can_create_symlink = self.selection_all_paths_local();
         if self.tab().location == BrowserLocation::Trash {
             self.open_trash_context_menu(Some(path), position);
-        } else if self.file_area_menu_is_visible(true, target_kind, can_batch_rename) {
-            self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
+        } else {
+            self.open_file_area_menu(FileContextMenuState {
                 place: self.file_menu_place(),
                 target: Some(path.clone()),
                 target_kind,
@@ -457,7 +458,8 @@ impl FileBrowser {
                 selection_archives: self.archive_selection_paths(),
                 inside_archive: self.current_directory_is_inside_archive(),
                 keyboard_highlight: None,
-            }));
+                actions: self.applicable_actions(&ActionSubject::Selection),
+            });
         }
         Task::batch([
             expansion_command,
@@ -498,8 +500,9 @@ impl FileBrowser {
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
-        if self.file_area_menu_is_visible(false, FileMenuTargetKind::File, false) {
-            self.context_menu = Some(ContextMenuState::FileArea(FileContextMenuState {
+        {
+            let actions = self.applicable_actions(&ActionSubject::Folder(directory.clone()));
+            self.open_file_area_menu(FileContextMenuState {
                 place: FileMenuPlace::Folder,
                 target: None,
                 target_kind: FileMenuTargetKind::File,
@@ -515,7 +518,8 @@ impl FileBrowser {
                 selection_archives: Vec::new(),
                 inside_archive: self.current_directory_is_inside_archive(),
                 keyboard_highlight: None,
-            }));
+                actions,
+            });
         }
         Task::batch([expansion_command, rename_command])
     }
@@ -538,24 +542,16 @@ impl FileBrowser {
     }
 
     /// 与 view 层 entry/blank 面板选择同一谓词,配置后无可见面板时菜单不进入状态。
-    pub(super) fn file_area_menu_is_visible(
-        &self,
-        has_target: bool,
-        target_kind: FileMenuTargetKind,
-        can_batch_rename: bool,
-    ) -> bool {
-        let menus = &self.user_config.context_menus;
-        if has_target {
-            !menus
-                .file_entry_menu_entries(
-                    self.file_menu_place(),
-                    target_kind,
-                    can_batch_rename,
-                    true,
-                )
-                .is_empty()
-        } else {
-            !menus.file_blank_items().is_empty()
+    /// 一行都没有的菜单不打开：用户可能在设置里把能显示的项都关了，动作位置也可能没有匹配的动作。
+    fn open_file_area_menu(&mut self, menu: FileContextMenuState) {
+        let rows = crate::context_menu_rows::file_context_menu_rows(
+            &menu,
+            &self.user_config.context_menus,
+            self.keyboard_modifiers,
+            self.user_config.file_grouping,
+        );
+        if !rows.is_empty() {
+            self.context_menu = Some(ContextMenuState::FileArea(menu));
         }
     }
 

@@ -78,6 +78,16 @@ pub(crate) struct ActionDefinition {
     /// 至少一步；`Trash` 只会是最后一步。
     pub(crate) steps: Vec<ActionStep>,
     pub(crate) notice: ActionNotice,
+    /// 写了 `[watch]` 的动作也是一条规则：自己跑。
+    pub(crate) watch: Option<ActionWatch>,
+}
+
+/// 规则：监视一个文件夹（不进子文件夹），新出现或改过、写完了的文件对得上 `query` 就对它自动跑
+/// 这个动作。`query` 是超级输入框 `f:` 的写法，用的时候再读（时间筛选按那时算）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActionWatch {
+    pub(crate) query: String,
+    pub(crate) folder: PathBuf,
 }
 
 /// 一步拿到"当前这批文件"，把结果交给下一步。

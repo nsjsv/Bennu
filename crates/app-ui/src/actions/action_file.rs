@@ -1,7 +1,7 @@
 //! 一个动作文件 → `ActionDefinition`。所有校验都在这里做一次，错误带行号；写错的文件整份不用，
 //! 不会只执行一半。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use file_core::mime::MimeDatabase;
 use file_core::{ArchiveExtractionPlacement, ArchiveFormat};
@@ -9,7 +9,7 @@ use serde::Deserialize;
 use toml::Spanned;
 
 use super::convert_format::ConvertFormat;
-use super::definition::{ActionDefinition, ActionId, ActionStep, TrashScope};
+use super::definition::{ActionDefinition, ActionId, ActionStep, ActionWatch, TrashScope};
 use super::notice::{ActionNotice, NoticeTemplate};
 use super::template::{CommandTemplate, PathTemplate};
 use super::type_filter::{TypeFilter, TypePattern};
@@ -29,6 +29,14 @@ struct RawAction {
     steps: Option<Vec<Spanned<RawStep>>>,
     /// `"none"` 或者 `[notify]` 表。两种写法类型不同，按值自己分，不交给 serde 猜。
     notify: Option<Spanned<toml::Value>>,
+    watch: Option<Spanned<RawWatch>>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawWatch {
+    query: Option<Spanned<String>>,
+    folder: Option<Spanned<String>>,
 }
 
 #[derive(Deserialize)]
@@ -125,14 +133,69 @@ pub(super) fn parse_action_file(
     if trimmed_name.is_empty() {
         return Err(source.mistake(&name, tr!("The name cannot be empty")));
     }
+    let steps = parse_steps(&source, raw.steps)?;
     Ok(ActionDefinition {
         id,
         name: trimmed_name.to_owned(),
         file: file.to_path_buf(),
         types: parse_types(&source, raw.types, types)?,
-        steps: parse_steps(&source, raw.steps)?,
+        watch: parse_watch(&source, raw.watch, &steps)?,
+        steps,
         notice: parse_notice(&source, raw.notify)?,
     })
+}
+
+/// `[watch]`：查询（`f:` 的写法，可以只有筛选；不写是什么都算）和监视的文件夹。自己跑的动作里不能
+/// 有移到回收站、执行命令：没人看着时不能删东西、不能跑任意程序。
+fn parse_watch(
+    source: &Source<'_>,
+    raw: Option<Spanned<RawWatch>>,
+    steps: &[ActionStep],
+) -> Result<Option<ActionWatch>, FileMistake> {
+    let Some(watch) = raw else {
+        return Ok(None);
+    };
+    let Some(folder) = &watch.get_ref().folder else {
+        return Err(source.mistake(
+            &watch,
+            tr!("watch needs the folder to watch (folder = \"~/…\")"),
+        ));
+    };
+    let folder_text = folder.get_ref().trim();
+    let folder_path = match folder_text.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') => {
+            file_core::app_dirs::home_dir().join(rest.trim_start_matches('/'))
+        }
+        _ if folder_text.starts_with('/') => PathBuf::from(folder_text),
+        _ => {
+            return Err(source.mistake(folder, tr!("The watched folder has to start with / or ~/")))
+        }
+    };
+    let query = watch
+        .get_ref()
+        .query
+        .as_ref()
+        .map(|query| query.get_ref().trim().to_owned())
+        .unwrap_or_default();
+    if let (Some(at), Err(reason)) = (
+        &watch.get_ref().query,
+        crate::super_box::read_find_query(&query),
+    ) {
+        return Err(source.mistake(at, reason));
+    }
+    if steps
+        .iter()
+        .any(|step| matches!(step, ActionStep::Trash(_) | ActionStep::Run(_)))
+    {
+        return Err(source.mistake(
+            &watch,
+            tr!("An action that runs by itself cannot move to the trash or run commands"),
+        ));
+    }
+    Ok(Some(ActionWatch {
+        query,
+        folder: folder_path,
+    }))
 }
 
 fn parse_types(

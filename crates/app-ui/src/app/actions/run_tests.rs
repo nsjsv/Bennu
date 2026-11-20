@@ -12,6 +12,7 @@ fn action(steps: Vec<ActionStep>) -> RunPlan {
         steps,
         notice: ActionNotice::Silent,
         then: None,
+        rule: None,
     }
 }
 

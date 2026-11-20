@@ -10,6 +10,7 @@ fn finished(notice: ActionNotice, stop: Option<RunStop>, failures: &[&str]) -> F
             steps: Vec::new(),
             notice,
             then: None,
+            rule: None,
         },
         results: vec![
             PathBuf::from("/music/音频/a.m4a"),

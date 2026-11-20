@@ -4,6 +4,7 @@
 mod editor;
 mod library_loading;
 mod notify;
+mod rules;
 mod run;
 mod service_menu_launch;
 mod steps;
@@ -15,6 +16,7 @@ use iced::Task;
 
 pub(crate) use editor::EditorMessage;
 pub(crate) use library_loading::action_library_subscription;
+pub(crate) use rules::Rules;
 pub(crate) use run::{ActionRuns, RunPlan};
 pub(crate) use steps::PreparedStep;
 
@@ -54,6 +56,17 @@ pub(crate) enum ActionMessage {
     /// 用默认程序打开一个动作文件（编辑页、写错的文件）。
     FileOpenRequested(PathBuf),
     Editor(EditorMessage),
+    /// 规则监视的文件夹里有变化。
+    RuleFolderChanged {
+        rule: ActionId,
+        changes: file_core::watch::DirectoryEntryChanges,
+    },
+    /// 规则看到的一个文件写完了（等了一会儿没再变）。
+    RuleFileSettled {
+        rule: ActionId,
+        path: PathBuf,
+        file: rules::SettledFile,
+    },
 }
 
 /// 按了动作的快捷键、它却不适用时，底栏显示一会儿的说明。不弹窗：不打断正在做的事。
@@ -68,6 +81,12 @@ const HINT_DURATION: Duration = Duration::from_secs(3);
 impl FileBrowser {
     pub(super) fn handle_action_message(&mut self, message: ActionMessage) -> Task<Message> {
         match message {
+            ActionMessage::RuleFolderChanged { rule, changes } => {
+                self.accept_rule_folder_changes(rule, changes)
+            }
+            ActionMessage::RuleFileSettled { rule, path, file } => {
+                self.accept_rule_file_settled(rule, path, file)
+            }
             ActionMessage::LibraryLoaded(library) => {
                 self.action_library = library;
                 Task::none()

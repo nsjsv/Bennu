@@ -33,6 +33,8 @@ pub(crate) struct RunPlan {
     pub(crate) notice: ActionNotice,
     /// 各步都做完后把结果交给它启动（管道的最后一段是服务菜单时）。
     pub(crate) then: Option<Arc<ServiceMenuAction>>,
+    /// 规则自己跑的：做出来的文件记成这条规则处理过的。
+    pub(crate) rule: Option<crate::actions::ActionId>,
 }
 
 impl From<&ActionDefinition> for RunPlan {
@@ -42,6 +44,7 @@ impl From<&ActionDefinition> for RunPlan {
             steps: definition.steps.clone(),
             notice: definition.notice.clone(),
             then: None,
+            rule: None,
         }
     }
 }
@@ -350,6 +353,9 @@ impl FileBrowser {
             failures: run.failures,
             stop: run.stop,
         };
+        if let Some(rule) = &finished.plan.rule {
+            self.rules.remember_results(rule, &finished.results);
+        }
         let mut tasks = vec![self.action_notification_command(&finished)];
         if finished.stop.is_none() {
             self.select_results_here(&finished.results);

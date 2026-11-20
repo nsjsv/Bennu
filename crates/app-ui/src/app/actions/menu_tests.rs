@@ -18,6 +18,7 @@ fn definition(stem: &str, types: TypeFilter) -> crate::actions::ActionDefinition
         types,
         steps: vec![ActionStep::CopyPaths],
         notice: ActionNotice::Silent,
+        watch: None,
     }
 }
 

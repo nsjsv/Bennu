@@ -131,3 +131,49 @@ fn mistakes_point_at_their_line() {
         assert_eq!(mistake.line, line, "{text}: {}", mistake.reason);
     }
 }
+
+#[test]
+fn a_watch_table_makes_the_action_a_rule() {
+    let action = parse(
+        r#"
+name = "整理截图"
+[watch]
+query = "截图 类型:图片"
+folder = "~/图片/截图"
+[[steps]]
+move_to = "{dir}/{date}"
+"#,
+    )
+    .unwrap();
+    let watch = action.watch.expect("a rule");
+    assert_eq!(watch.query, "截图 类型:图片");
+    assert_eq!(
+        watch.folder,
+        file_core::app_dirs::home_dir().join("图片/截图")
+    );
+    assert!(parse("name = \"a\"\n[[steps]]\ncopy_paths = true\n")
+        .unwrap()
+        .watch
+        .is_none());
+}
+
+#[test]
+fn a_rule_cannot_trash_run_commands_or_watch_a_relative_folder() {
+    let rule =
+        |watch: &str, step: &str| format!("name = \"a\"\n[watch]\n{watch}\n[[steps]]\n{step}\n");
+    let folder = "folder = \"/tmp/w\"";
+    assert!(parse(&rule(folder, "copy_paths = true")).is_ok());
+    for step in ["trash = \"current\"", "run = \"echo {file}\""] {
+        assert!(parse(&rule(folder, step)).is_err(), "{step}");
+    }
+    assert!(parse(&rule("folder = \"下载\"", "copy_paths = true")).is_err());
+    assert!(
+        parse(&rule("query = \"x\"", "copy_paths = true")).is_err(),
+        "no folder"
+    );
+    let bad_query = mistake(&rule(
+        "query = \"类型:不存在\"\nfolder = \"/tmp/w\"",
+        "copy_paths = true",
+    ));
+    assert!(bad_query.reason.contains("不存在"));
+}

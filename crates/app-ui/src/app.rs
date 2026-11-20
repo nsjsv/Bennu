@@ -442,6 +442,7 @@ pub(crate) struct FileBrowser {
     /// 动作文件夹最近一次读出来的内容；第一次读完之前是空的。
     pub(crate) action_library: crate::actions::ActionLibrary,
     pub(crate) action_runs: actions::ActionRuns,
+    pub(crate) rules: actions::Rules,
     pub(crate) action_hint: Option<actions::ActionHint>,
     list_directory_summary_cache: crate::model::ListDirectorySummaryCache,
     user_preferences_save_in_flight: bool,
@@ -837,6 +838,7 @@ impl FileBrowser {
             operation_history: FileOperationHistory::new(),
             action_library: crate::actions::ActionLibrary::empty(),
             action_runs: actions::ActionRuns::default(),
+            rules: actions::Rules::default(),
             action_hint: None,
             list_directory_summary_cache: crate::model::ListDirectorySummaryCache::default(),
             user_preferences_save_in_flight: false,
@@ -998,6 +1000,7 @@ impl FileBrowser {
 
         subscriptions.push(self.terminal_output_subscription());
         subscriptions.push(actions::action_library_subscription(self.active_language()));
+        subscriptions.extend(self.rule_watch_subscriptions());
 
         let remote_preview_progress_is_indeterminate = matches!(
             self.preview_engine.preview.as_ref(),

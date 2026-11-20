@@ -123,6 +123,7 @@ async fn an_action_runs_on_the_current_folder() {
             PathTemplate::parse("{dir}/归档").unwrap(),
         )],
         notice: ActionNotice::Silent,
+        watch: None,
     }]);
 
     type_and_run(&mut browser, "sjgd").await;

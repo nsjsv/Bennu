@@ -60,6 +60,7 @@ fn tidy_action(folder: &str) -> Arc<ActionDefinition> {
         types: TypeFilter::Anything,
         steps: vec![ActionStep::MoveTo(PathTemplate::parse(folder).unwrap())],
         notice: ActionNotice::Silent,
+        watch: None,
     })
 }
 

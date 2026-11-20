@@ -1,6 +1,18 @@
 //! 自定义动作：动作文件的错误说明、设置页、菜单、通知。
 
 pub(super) const ENTRIES: &[(&str, &str)] = &[
+    // 规则（[watch]）
+    ("Rule “%1” stopped", "规则“%1”停下了"),
+    (
+        "More than %1 files came in a minute; it runs again after Bennu restarts",
+        "一分钟里来了超过 %1 个文件；重启 Bennu 后再接着跑",
+    ),
+    ("watch needs the folder to watch (folder = \"~/…\")", "watch 要写监视的文件夹（folder = \"~/…\"）"),
+    ("The watched folder has to start with / or ~/", "监视的文件夹要以 / 或 ~/ 开头"),
+    (
+        "An action that runs by itself cannot move to the trash or run commands",
+        "自己跑的动作里不能有移到回收站和执行命令",
+    ),
     // 执行命令这一步
     ("Run Command", "执行命令"),
     ("Could not start %1: %2", "没能启动 %1：%2"),

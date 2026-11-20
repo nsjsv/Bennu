@@ -105,6 +105,7 @@ impl FileBrowser {
             steps: Vec::new(),
             notice: ActionNotice::Standard,
             then: None,
+            rule: None,
         };
         for (stage, label) in pipe.stages.iter().zip(&pipe.labels) {
             match stage {

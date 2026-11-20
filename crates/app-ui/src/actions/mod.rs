@@ -20,6 +20,9 @@ pub(crate) mod type_filter;
 pub(crate) use action_file::{read_step, StepKey, COMPRESS_FORMATS};
 pub(crate) use convert_format::{ConvertFormat, CONVERT_FORMATS};
 pub(crate) use definition::{ActionDefinition, ActionId, ActionStep, TrashScope};
+/// 规则的测试要自己造带 `[watch]` 的动作。
+#[cfg(test)]
+pub(crate) use definition::ActionWatch;
 pub(crate) use library::{
     action_folder, ensure_action_folder, ActionFileProblem, ActionLibrary, ActionSources,
     ApplicableActions,

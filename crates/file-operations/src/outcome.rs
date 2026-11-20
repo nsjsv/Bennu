@@ -44,9 +44,20 @@ impl CompletedPathMigration {
     }
 }
 
+/// 一条成功执行的命令输出的末尾（各自最多 [`crate::COMMAND_OUTPUT_TAIL_BYTES`]）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandOutput {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileOperationOutcome {
     NoHistory,
+    /// 执行命令都成功了：最后一条的输出（超级输入框要显示它）。Bennu 不知道命令做了什么，不进撤销。
+    CommandsRan {
+        output: CommandOutput,
+    },
     Rename {
         from: PathBuf,
         to: PathBuf,
@@ -314,6 +325,7 @@ impl FileOperationOutcome {
                 })
                 .collect(),
             Self::NoHistory
+            | Self::CommandsRan { .. }
             | Self::CreateDirectory { .. }
             | Self::CreateDirectories { .. }
             | Self::CreateEmptyFile { .. }

@@ -372,6 +372,7 @@ fn produced_paths(outcome: &FileOperationOutcome) -> Vec<PathBuf> {
             .map(|transfer| transfer.target.clone())
             .collect(),
         FileOperationOutcome::NoHistory
+        | FileOperationOutcome::CommandsRan { .. }
         | FileOperationOutcome::Rename { .. }
         | FileOperationOutcome::BatchRename { .. }
         | FileOperationOutcome::CreateDirectory { .. }

@@ -282,6 +282,7 @@ mod tests {
             },
             QueuedFileOperation::CreateEmptyFile {
                 parent: PathBuf::from("/tmp"),
+                name: "a.txt".to_owned(),
             },
         ] {
             assert!(file_operation_notification_text(

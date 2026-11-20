@@ -630,10 +630,12 @@ fn create_directory_operation(path: &Path) -> Option<QueuedFileOperation> {
 // 原反推函数已删:嵌套链无法从目录列表反推,redo 直接重放原叶子路径
 // (见 redo_operation 的 CreateDirectories 分支)。
 
+/// 重做时按原来的名字再建（被占用时照常编号）。
 fn create_empty_file_operation(path: &Path) -> Option<QueuedFileOperation> {
-    path.parent()
-        .map(Path::to_path_buf)
-        .map(|parent| QueuedFileOperation::CreateEmptyFile { parent })
+    Some(QueuedFileOperation::CreateEmptyFile {
+        parent: path.parent()?.to_path_buf(),
+        name: path.file_name()?.to_string_lossy().into_owned(),
+    })
 }
 
 fn forward_transfers(transfers: &[CompletedTransfer]) -> Vec<QueuedTransfer> {

@@ -74,8 +74,10 @@ pub enum QueuedFileOperation {
         names: Vec<String>,
         gather_sources: Vec<PathBuf>,
     },
+    /// 空文件，名字被占用时续编号（右键菜单的“新建文件”用 [`new_file_name`]）。
     CreateEmptyFile {
         parent: PathBuf,
+        name: String,
     },
     Trash {
         paths: Vec<PathBuf>,
@@ -232,7 +234,7 @@ impl QueuedFileOperation {
             Self::CreateDirectories { parent, names, .. } => {
                 names.first().map(|name| parent.join(name))
             }
-            Self::CreateEmptyFile { parent } => Some(parent.join(new_file_name())),
+            Self::CreateEmptyFile { parent, name } => Some(parent.join(name)),
             // 收纳文件夹在入队侧已按命名规则确定路径,完成后照常进入重命名态。
             Self::GatherSelectionIntoNewFolder { directory, .. } => Some(directory.clone()),
             _ => None,

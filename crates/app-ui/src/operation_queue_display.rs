@@ -4,7 +4,7 @@ use file_core::{ConversionRequest, TrashRestoreEntry};
 
 use crate::formatting::format_file_size;
 use file_operations::{
-    new_directory_name, new_file_name, CurrentFileProgress, FileOperationStatus, FileOperationTask,
+    new_directory_name, CurrentFileProgress, FileOperationStatus, FileOperationTask,
     QueuedFileOperation, QueuedTransfer,
 };
 
@@ -51,7 +51,7 @@ impl OperationPathLines for QueuedFileOperation {
                     names.len(),
                 ),
             },
-            Self::CreateEmptyFile { parent } => created_entry_path_lines(parent, &new_file_name()),
+            Self::CreateEmptyFile { parent, name } => created_entry_path_lines(parent, name),
             Self::Trash { paths } | Self::DeletePermanently { paths } => {
                 path_lines_from_paths(paths)
             }

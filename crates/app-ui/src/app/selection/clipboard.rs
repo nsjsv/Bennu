@@ -277,7 +277,10 @@ impl FileBrowser {
         self.renaming = None;
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
-        self.enqueue_file_operation(QueuedFileOperation::CreateEmptyFile { parent: directory })
+        self.enqueue_file_operation(QueuedFileOperation::CreateEmptyFile {
+            parent: directory,
+            name: file_operations::new_file_name(),
+        })
     }
 
     pub(in crate::app) fn paste_pending(&mut self) -> Task<Message> {

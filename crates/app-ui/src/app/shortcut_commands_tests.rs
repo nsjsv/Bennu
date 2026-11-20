@@ -179,8 +179,10 @@ fn new_folder_and_new_file_go_into_the_current_folder() {
         operations.as_slice(),
         [
             QueuedFileOperation::CreateDirectory { parent: folder_parent },
-            QueuedFileOperation::CreateEmptyFile { parent: file_parent },
-        ] if folder_parent == Path::new("/workspace") && file_parent == Path::new("/workspace")
+            QueuedFileOperation::CreateEmptyFile { parent: file_parent, name },
+        ] if folder_parent == Path::new("/workspace")
+            && file_parent == Path::new("/workspace")
+            && *name == file_operations::new_file_name()
     ));
 }
 

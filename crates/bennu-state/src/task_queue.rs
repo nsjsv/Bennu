@@ -90,6 +90,9 @@ pub enum StoredOperation {
     },
     CreateEmptyFile {
         parent: StoredPath,
+        /// 旧记录没有这一项；新建文件不会从记录里恢复执行，只用来显示。
+        #[serde(default)]
+        name: String,
     },
     Trash {
         paths: Vec<StoredPath>,

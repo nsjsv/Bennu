@@ -34,8 +34,9 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
                 .map(|path| StoredPath::from_path(path))
                 .collect(),
         },
-        QueuedFileOperation::CreateEmptyFile { parent } => StoredOperation::CreateEmptyFile {
+        QueuedFileOperation::CreateEmptyFile { parent, name } => StoredOperation::CreateEmptyFile {
             parent: StoredPath::from_path(parent),
+            name: name.clone(),
         },
         QueuedFileOperation::Trash { paths } => StoredOperation::Trash {
             paths: paths

@@ -18,8 +18,8 @@ use file_core::{
 
 use crate::FileOperationProgressUpdate;
 use crate::{
-    new_directory_name, new_file_name, FileOperationEvent, FileOperationEventSender,
-    QueuedFileOperation, QueuedTransfer, RunningFileOperation,
+    new_directory_name, FileOperationEvent, FileOperationEventSender, QueuedFileOperation,
+    QueuedTransfer, RunningFileOperation,
 };
 use crate::{
     CompletedTransfer, FileOperationCompletion, FileOperationHistoryEligibility,
@@ -98,8 +98,8 @@ pub async fn run_file_operation(
             run_queued_create_directories(parent, names, gather_sources, controls, task_id, output)
                 .await
         }
-        QueuedFileOperation::CreateEmptyFile { parent } => {
-            run_queued_create_empty_file(parent, controls, task_id, output).await
+        QueuedFileOperation::CreateEmptyFile { parent, name } => {
+            run_queued_create_empty_file(parent.join(name), controls, task_id, output).await
         }
         QueuedFileOperation::Trash { paths } => {
             return run_queued_trash(paths, controls, task_id, output).await;
@@ -405,7 +405,7 @@ async fn run_queued_create_directory(
 }
 
 async fn run_queued_create_empty_file(
-    parent: PathBuf,
+    preferred: PathBuf,
     mut controls: FileOperationControls,
     task_id: u64,
     output: &FileOperationEventSender,
@@ -414,7 +414,7 @@ async fn run_queued_create_empty_file(
         .wait_until_running()
         .await
         .map_err(|error| error.to_string())?;
-    let path = create_empty_file_at_available_name(parent.join(new_file_name()))
+    let path = create_empty_file_at_available_name(preferred)
         .await
         .map_err(|error| error.to_string())?;
     send_file_operation_progress(

@@ -500,6 +500,11 @@ pub(crate) enum Message {
         status: event::Status,
     },
     FileContentKeyRouted(FileContentKey),
+    /// 找到的重复文件（多出来的副本）：还在这个文件夹里就选中。
+    DuplicatesFound {
+        folder: PathBuf,
+        copies: Vec<PathBuf>,
+    },
     /// 字母层停了 1 秒：打字跳转的缓冲、vim 待定的第一个键和 `/` 跳转到期作废（底栏那段字
     /// 跟着消失）。
     LetterInputDeadlinePassed,

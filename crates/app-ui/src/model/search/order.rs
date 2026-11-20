@@ -36,6 +36,15 @@ impl SearchWorkspaceState {
         }
     }
 
+    /// 直接按这一列排（“找大文件”从大到小）。
+    pub(crate) fn sort_by(&mut self, field: SearchSortField, direction: SearchSortDirection) {
+        self.choose_order(SearchOrder::Field {
+            field,
+            direction,
+            directories_first: false,
+        });
+    }
+
     pub(super) fn choose_order(&mut self, order: SearchOrder) {
         self.chosen_order = Some(ChosenSearchOrder {
             input: self.input.trim().to_owned(),

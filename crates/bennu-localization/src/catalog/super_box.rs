@@ -104,6 +104,14 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("More than %1 items; narrow it down", "超过 %1 项了，缩小一下范围"),
     ("%1 items → %2", "%1 项 → %2"),
     ("Enter runs it · Ctrl+S saves it as an action", "回车执行 · Ctrl+S 存成动作"),
+    // 清理
+    ("Find Large Files Here", "在这里找大文件"),
+    ("Select Duplicate Files", "选中重复的文件"),
+    ("No duplicate files here", "这里没有重复的文件"),
+    (
+        "Selected %1 duplicate files; the oldest copy of each is left",
+        "选中了 %1 个重复的文件，每组留下了最早的一份",
+    ),
     // 计算、改名、发送
     ("This cannot be worked out", "算不出来"),
     ("Enter copies it", "回车复制"),

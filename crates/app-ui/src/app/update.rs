@@ -574,6 +574,9 @@ impl FileBrowser {
                     keyboard_command
                 }
             }
+            Message::DuplicatesFound { folder, copies } => {
+                self.accept_duplicates_found(folder, copies)
+            }
             Message::FileContentKeyRouted(content_key) => {
                 self.invoke_routed_file_content_key(content_key)
             }

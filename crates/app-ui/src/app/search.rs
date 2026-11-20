@@ -27,6 +27,9 @@ use crate::model::{
 
 const SEARCH_INPUT_STABILIZATION_DELAY: Duration = Duration::from_millis(120);
 
+/// “找大文件”从多大算起：写法同搜索页的自定义大小。
+const LARGE_FILE_SIZE: &str = "100m";
+
 impl FileBrowser {
     /// 活动标签上的搜索（标签在搜索结果里时）。
     pub(crate) fn active_search(&self) -> Option<&SearchWorkspaceState> {
@@ -251,6 +254,33 @@ impl FileBrowser {
         search
             .root
             .select_scope(SearchDirectoryScope::AllIndexedLocations);
+        Task::batch([entered, self.restart_active_search()])
+    }
+
+    /// “在这里找大文件”：当前文件夹（含子文件夹）里 100 MB 以上的，从大到小。
+    pub(super) fn find_large_files_here(&mut self) -> Task<Message> {
+        let entered = match self.ensure_active_search() {
+            Ok(entered) => entered,
+            Err(message) => {
+                self.show_global_error(message);
+                return Task::none();
+            }
+        };
+        let Some(search) = self.active_search_mut() else {
+            return entered;
+        };
+        let mut filters = crate::model::SearchFilterPresetState::default();
+        filters.select_size_preset(crate::model::SearchSizePreset::Custom);
+        filters.custom_size_min = LARGE_FILE_SIZE.to_owned();
+        search.replace_input_immediately(String::new());
+        search.filters = filters;
+        search
+            .root
+            .select_scope(SearchDirectoryScope::CurrentFolder);
+        search.sort_by(
+            file_search::SearchSortField::Size,
+            file_search::SearchSortDirection::Descending,
+        );
         Task::batch([entered, self.restart_active_search()])
     }
 

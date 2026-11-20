@@ -95,6 +95,16 @@ pub(super) const ACTIONS: &[ActionSpec] = &[
         context: App,
         keys: &[KeyPress::ctrl('F')],
     },
+    // 没有默认键：在超级输入框、F1 里找。
+    ActionSpec {
+        action: ShortcutAction::FindLargeFiles,
+        config_key: "find_large_files",
+        label: || tr!("Find Large Files Here"),
+        group: G::Navigation,
+        scope: Browser,
+        context: App,
+        keys: &[],
+    },
     ActionSpec {
         action: ShortcutAction::Refresh,
         config_key: "refresh",
@@ -313,6 +323,15 @@ pub(super) const ACTIONS: &[ActionSpec] = &[
         scope: Browser,
         context: Content,
         keys: &[KeyPress::ctrl_shift('A')],
+    },
+    ActionSpec {
+        action: ShortcutAction::SelectDuplicates,
+        config_key: "select_duplicates",
+        label: || tr!("Select Duplicate Files"),
+        group: G::Selection,
+        scope: Browser,
+        context: Content,
+        keys: &[],
     },
     ActionSpec {
         action: ShortcutAction::NewTab,

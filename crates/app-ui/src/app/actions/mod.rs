@@ -154,11 +154,14 @@ impl FileBrowser {
         let Some(name) = self.action_library.name(action) else {
             return Task::none();
         };
+        let text = tr!("“%1” does not apply to the selected items", name);
+        self.show_hint(text)
+    }
+
+    /// 底栏显示一会儿说明，不弹窗：动作不适用、选中了几个重复的文件。
+    pub(crate) fn show_hint(&mut self, text: String) -> Task<Message> {
         let until = Instant::now() + HINT_DURATION;
-        self.action_hint = Some(ActionHint {
-            text: tr!("“%1” does not apply to the selected items", name),
-            until,
-        });
+        self.action_hint = Some(ActionHint { text, until });
         // 计时器要在运行时里建，放进 async 块里，等任务真正开始跑时才建。
         Task::perform(async { tokio::time::sleep(HINT_DURATION).await }, |()| {
             Message::Action(ActionMessage::HintExpired)

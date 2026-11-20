@@ -23,6 +23,7 @@ mod directory_metadata_demand;
 mod directory_metadata_in_flight;
 mod directory_recovery;
 mod displayed_directory_totals;
+mod duplicate_selection;
 mod entry_changes;
 mod entry_hover_recalc;
 mod events;

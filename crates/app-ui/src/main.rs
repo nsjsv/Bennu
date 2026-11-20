@@ -38,6 +38,7 @@ mod commands;
 mod config;
 mod context_menu_rows;
 mod directory_summary;
+mod duplicates;
 mod file_drag_hit_test_bounds;
 mod file_drag_hit_test_marker;
 mod file_entry_presentation;

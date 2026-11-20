@@ -564,10 +564,6 @@ impl FileBrowser {
             return Some(Task::none());
         }
 
-        if self.super_box.take().is_some() {
-            return Some(Task::none());
-        }
-
         if self.destructive_action_confirmation.is_some() {
             self.destructive_action_confirmation = None;
             return Some(Task::none());
@@ -642,6 +638,11 @@ impl FileBrowser {
 
         if self.open_with.is_some() {
             self.open_with = None;
+            return Some(Task::none());
+        }
+
+        // 超级输入框排在别的对话框下面（它们会盖住它）：先关上面的。
+        if self.super_box.take().is_some() {
             return Some(Task::none());
         }
 

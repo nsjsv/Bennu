@@ -8,7 +8,7 @@ use iced::{Alignment, Element, Length, Theme};
 use crate::app::{super_box_input_id, SuperBoxMessage};
 use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
-use crate::super_box::{BoxMode, BoxRow, NewEntry, SuperBox};
+use crate::super_box::{BoxMode, BoxRow, FindStatus, NewEntry, RunState, SuperBox};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::{normal_button, text_field, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
@@ -30,7 +30,16 @@ fn message(message: SuperBoxMessage) -> Message {
     Message::SuperBox(message)
 }
 
-pub(super) fn super_box_panel<'a>(super_box: &'a SuperBox, home: &Path) -> Element<'a, Message> {
+/// 输出不超过这么多行就直接排开，再多就放进滚动区。
+const OUTPUT_LINES_WITHOUT_SCROLLING: usize = 12;
+const OUTPUT_SCROLL_HEIGHT: f32 = 240.0;
+
+/// `selected` 是主窗口里选中了几项（命令模式说明它们会作为参数）。
+pub(super) fn super_box_panel<'a>(
+    super_box: &'a SuperBox,
+    home: &Path,
+    selected: usize,
+) -> Element<'a, Message> {
     let mode = super_box.mode();
     let mode_button = iced::widget::tooltip(
         normal_button(readable_text(mode.label())).on_press(message(SuperBoxMessage::ModePressed)),
@@ -40,7 +49,6 @@ pub(super) fn super_box_panel<'a>(super_box: &'a SuperBox, home: &Path) -> Eleme
     let input = text_field(&placeholder(mode), super_box.input())
         .id(super_box_input_id())
         .on_input(|text| message(SuperBoxMessage::InputChanged(text)))
-        .on_submit(message(SuperBoxMessage::Submitted))
         .width(Length::Fill);
     let mut content = Column::new()
         .push(
@@ -54,7 +62,7 @@ pub(super) fn super_box_panel<'a>(super_box: &'a SuperBox, home: &Path) -> Eleme
     }
     let rows = super_box.rows();
     if rows.is_empty() {
-        content = content.push(muted(empty_hint(mode, super_box.input())));
+        content = content.push(muted(empty_hint(super_box)));
     }
     for (index, row) in rows.iter().enumerate() {
         content = content.push(result_row(
@@ -63,7 +71,11 @@ pub(super) fn super_box_panel<'a>(super_box: &'a SuperBox, home: &Path) -> Eleme
             row,
             super_box.selected() == Some(index),
             home,
+            selected,
         ));
+    }
+    if let Some(run) = super_box.run() {
+        content = content.push(run_panel(&run.command, &run.state));
     }
     container(content)
         .padding(8)
@@ -75,17 +87,29 @@ pub(super) fn super_box_panel<'a>(super_box: &'a SuperBox, home: &Path) -> Eleme
 fn placeholder(mode: BoxMode) -> String {
     match mode {
         BoxMode::Search => tr!("Find a feature, action, setting or favorite"),
+        BoxMode::Files => tr!("Find files in the index"),
         BoxMode::Path => tr!("Go to a path; ~ is your home folder"),
         BoxMode::New => tr!("Name of the new file; end it with / for a folder"),
+        BoxMode::Shell => tr!("A command for your shell"),
     }
 }
 
-/// 没有结果时的一行：框是空的就说这个模式能做什么，打了字就说没找到。
-fn empty_hint(mode: BoxMode, input: &str) -> String {
-    if !input.trim().is_empty() {
-        return tr!("Nothing matches");
+/// 没有结果时的一行：框是空的就说这个模式能做什么，打了字就说正在找或者没找到。
+fn empty_hint(super_box: &SuperBox) -> String {
+    let mode = super_box.mode();
+    if !super_box.input().trim().is_empty() {
+        return match super_box.find_status() {
+            FindStatus::Searching => tr!("Searching…"),
+            FindStatus::Idle | FindStatus::Unavailable(_) => tr!("Nothing matches"),
+        };
     }
     match mode {
+        BoxMode::Files => tr!(
+            "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page."
+        ),
+        BoxMode::Shell => tr!(
+            "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Ctrl+Enter runs it in the terminal panel."
+        ),
         BoxMode::Search => tr!(
             "Type to find what to do. Tab switches to going to a path or making a new item; g: and n: do it too."
         ),
@@ -100,6 +124,7 @@ fn result_row<'a>(
     row: &'a BoxRow,
     selected: bool,
     home: &Path,
+    selected_items: usize,
 ) -> Element<'a, Message> {
     let (icon, title, detail, hint) = match row {
         BoxRow::Entry(entry_index) => {
@@ -109,6 +134,27 @@ fn result_row<'a>(
                 hint = format!("{hint} · {key}");
             }
             (None, entry.title.clone(), entry.detail.clone(), Some(hint))
+        }
+        BoxRow::Found(found_index) => {
+            let hit = super_box.found(*found_index);
+            let icon = match hit.kind {
+                file_search::SearchFileKind::Directory => IconSymbol::Folder,
+                _ => IconSymbol::File,
+            };
+            let folder = hit.path.parent().map(|parent| short_path(parent, home));
+            (Some(icon), hit.display_name.clone(), folder, None)
+        }
+        BoxRow::Run(command) => {
+            let hint = match selected_items {
+                0 => tr!("Ctrl+Enter runs it in the terminal"),
+                count => tr!("The %1 selected items are its arguments", count),
+            };
+            (
+                Some(IconSymbol::Terminal),
+                tr!("Run %1", command),
+                None,
+                Some(hint),
+            )
         }
         BoxRow::History(text) => (Some(IconSymbol::RotateCcw), text.clone(), None, None),
         BoxRow::JumpTo(path) => (
@@ -168,6 +214,46 @@ fn result_row<'a>(
     )
     .on_enter(message(SuperBoxMessage::RowHovered(index)))
     .into()
+}
+
+/// 命令的结果：正在跑时可以停；跑完是退出码和输出的末尾（标准输出在前，标准错误在后）。
+fn run_panel<'a>(command: &str, state: &'a RunState) -> Element<'a, Message> {
+    let body: Element<'a, Message> = match state {
+        RunState::Running => row![
+            readable_text(tr!("Running %1", command)).width(Length::Fill),
+            normal_button(readable_text(tr!("Stop")))
+                .on_press(message(SuperBoxMessage::StopPressed)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into(),
+        RunState::Failed(reason) => return error_text(reason.clone()),
+        RunState::Finished(output) => {
+            let mut finished = Column::new()
+                .push(muted(tr!("Finished, exit status 0")))
+                .spacing(4);
+            if !output.text.trim().is_empty() {
+                // 借用框里的字，不每帧复制；输出里常有中文文件名，按复杂文字排版。
+                let text = iced::widget::text(output.text.as_str())
+                    .shaping(iced::widget::text::Shaping::Advanced)
+                    .size(CAPTION_SIZE)
+                    .font(iced::Font::MONOSPACE);
+                // 短的直接排开；长的放进固定高度的滚动区，停在最后面（看末尾）。
+                finished = if output.lines <= OUTPUT_LINES_WITHOUT_SCROLLING {
+                    finished.push(text)
+                } else {
+                    finished.push(
+                        iced::widget::scrollable(text)
+                            .anchor_bottom()
+                            .height(Length::Fixed(OUTPUT_SCROLL_HEIGHT))
+                            .width(Length::Fill),
+                    )
+                };
+            }
+            finished.into()
+        }
+    };
+    container(body).padding([4, 8]).into()
 }
 
 /// 主目录下的路径写成 `~/…`，太长时从中间省略。

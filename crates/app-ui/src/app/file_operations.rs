@@ -247,6 +247,7 @@ impl FileBrowser {
         completion: FileOperationCompletion,
     ) -> Task<Message> {
         let completed_operation = self.operation_queue.operation(task_id).cloned();
+        self.super_box_task_ended(task_id, &completion);
         let queue_outcome = queue_finish_from_completion(&completion);
         let Some(terminal_status) = self.operation_queue.finish(task_id, queue_outcome) else {
             return Task::none();
@@ -695,16 +696,27 @@ impl FileBrowser {
         &mut self,
         operation: QueuedFileOperation,
     ) -> Task<Message> {
+        self.enqueue_file_operation_with_id(operation).1
+    }
+
+    /// 同 [`Self::enqueue_file_operation`]，另外交回任务号（被拒时为 None），等它结束的调用方用。
+    pub(super) fn enqueue_file_operation_with_id(
+        &mut self,
+        operation: QueuedFileOperation,
+    ) -> (Option<u64>, Task<Message>) {
         self.retract_global_error(GlobalErrorSource::FileOperationEnqueue);
-        if let FileOperationEnqueueOutcome::Rejected { error } =
-            self.operation_queue.enqueue(operation)
-        {
-            self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
-        }
-        Task::batch([
+        let task_id = match self.operation_queue.enqueue(operation) {
+            FileOperationEnqueueOutcome::Queued { task_id } => Some(task_id),
+            FileOperationEnqueueOutcome::Rejected { error } => {
+                self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
+                None
+            }
+        };
+        let follow_up = Task::batch([
             self.continue_file_operation_persistence(),
             self.launch_ready_driver(),
-        ])
+        ]);
+        (task_id, follow_up)
     }
     fn focus_after_file_operation_removal(
         &mut self,

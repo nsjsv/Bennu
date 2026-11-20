@@ -23,12 +23,32 @@ async fn send(browser: &mut FileBrowser, message: SuperBoxMessage) {
     drive(browser, task).await;
 }
 
+async fn press(
+    browser: &mut FileBrowser,
+    key: iced::keyboard::key::Named,
+    modifiers: iced::keyboard::Modifiers,
+) {
+    let task = browser
+        .super_box_key(&iced::keyboard::Key::Named(key), modifiers)
+        .expect("the box takes the key");
+    drive(browser, task).await;
+}
+
+async fn enter(browser: &mut FileBrowser) {
+    press(
+        browser,
+        iced::keyboard::key::Named::Enter,
+        iced::keyboard::Modifiers::empty(),
+    )
+    .await;
+}
+
 async fn type_and_run(browser: &mut FileBrowser, text: &str) {
     if browser.super_box.is_none() {
         drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
     }
     send(browser, SuperBoxMessage::InputChanged(text.to_owned())).await;
-    send(browser, SuperBoxMessage::Submitted).await;
+    enter(browser).await;
 }
 
 #[test]
@@ -201,11 +221,230 @@ async fn a_history_row_fills_the_box_instead_of_running() {
         .super_box_history
         .record_submission("n:不要马上建.txt");
     drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
-    send(&mut browser, SuperBoxMessage::ModePressed).await;
-    send(&mut browser, SuperBoxMessage::ModePressed).await;
-    send(&mut browser, SuperBoxMessage::Submitted).await;
+    // 搜索 → 文件 → 路径 → 新建。
+    for _ in 0..3 {
+        send(&mut browser, SuperBoxMessage::ModePressed).await;
+    }
+    enter(&mut browser).await;
     let super_box = browser.super_box.as_ref().unwrap();
     assert_eq!(super_box.mode(), BoxMode::New);
     assert_eq!(super_box.input(), "不要马上建.txt");
     assert!(!root.join("不要马上建.txt").exists());
+}
+
+/// 列出这个文件夹（选中项要在列表里），shell 用 /bin/sh。
+async fn browser_listing(directory: &Path) -> FileBrowser {
+    let mut browser = browser_in(directory);
+    browser.user_config.terminal_shell = "/bin/sh".to_owned();
+    let load = browser.navigate_to(
+        directory.to_path_buf(),
+        crate::model::NavigationMode::RecordHistory,
+    );
+    drive(&mut browser, load).await;
+    browser
+}
+
+fn run_state(browser: &FileBrowser) -> crate::super_box::RunState {
+    browser
+        .super_box
+        .as_ref()
+        .and_then(SuperBox::run)
+        .map(|run| run.state.clone())
+        .expect("a command ran")
+}
+
+#[tokio::test]
+async fn a_command_gets_the_selection_as_arguments_and_shows_its_output() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let tricky = root.join("a $(touch pwned) `touch pwned2`.txt");
+    std::fs::write(&tricky, b"x").unwrap();
+    let mut browser = browser_listing(&root).await;
+    browser.select_path(tricky.clone());
+
+    type_and_run(
+        &mut browser,
+        "s:printf '%s' \"$1\" > got.txt; echo \"$0 has $#\"; echo careful >&2",
+    )
+    .await;
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("got.txt")).unwrap(),
+        tricky.to_str().unwrap()
+    );
+    assert!(!root.join("pwned").exists() && !root.join("pwned2").exists());
+    match run_state(&browser) {
+        crate::super_box::RunState::Finished(output) => {
+            assert_eq!(output.text, "bennu has 1\ncareful");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        browser.user_config.super_box_history.entries()[0],
+        "s:printf '%s' \"$1\" > got.txt; echo \"$0 has $#\"; echo careful >&2"
+    );
+    assert_eq!(
+        browser.operation_history.undo_depth(),
+        0,
+        "commands are not undone"
+    );
+}
+
+#[tokio::test]
+async fn a_failing_command_says_why_in_the_box() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    type_and_run(&mut browser, "s:echo broken >&2; exit 3").await;
+    match run_state(&browser) {
+        crate::super_box::RunState::Failed(reason) => {
+            assert!(
+                reason.contains('3') && reason.contains("broken"),
+                "{reason}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn closing_the_box_lets_the_command_finish() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    send(
+        &mut browser,
+        SuperBoxMessage::InputChanged("s:sleep 0.2; touch late".to_owned()),
+    )
+    .await;
+    let enter_key = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
+    let queued = browser
+        .super_box_key(&enter_key, iced::keyboard::Modifiers::empty())
+        .unwrap();
+    drop(browser.update(Message::DismissFloating));
+    assert!(browser.super_box.is_none());
+    drive(&mut browser, queued).await;
+    assert!(root.join("late").exists());
+}
+
+#[tokio::test]
+async fn ctrl_enter_takes_the_words_and_filters_to_the_search_page() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    send(
+        &mut browser,
+        SuperBoxMessage::InputChanged("f:季度报告 type:pdf".to_owned()),
+    )
+    .await;
+    let enter = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
+    let task = browser
+        .super_box_key(&enter, iced::keyboard::Modifiers::CTRL)
+        .unwrap();
+    drive(&mut browser, task).await;
+
+    assert!(browser.super_box.is_none());
+    let search = browser.active_search().expect("the search page is open");
+    assert_eq!(search.input, "季度报告");
+    assert_eq!(
+        search.filters.selected_entry_types,
+        [crate::model::SearchEntryTypePreset::Pdf]
+    );
+    assert_eq!(
+        search.root.selected_scope(),
+        crate::model::SearchDirectoryScope::AllIndexedLocations
+    );
+}
+
+#[tokio::test]
+async fn a_dialog_that_pops_up_over_the_box_gets_the_keys_and_closes_first() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    send(
+        &mut browser,
+        SuperBoxMessage::InputChanged("s:make".to_owned()),
+    )
+    .await;
+    // 后台事件弹出的对话框（这里是打开失败后的“打开方式”）盖在框上面。
+    drop(browser.update(Message::OpenFileFinished(
+        root.join("a.txt"),
+        Err("no application".to_owned()),
+    )));
+    assert!(browser.open_with.is_some());
+
+    let tab = iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab);
+    assert!(
+        browser
+            .super_box_key(&tab, iced::keyboard::Modifiers::empty())
+            .is_none(),
+        "the hidden box does not take the keys"
+    );
+    assert_eq!(
+        browser.super_box.as_ref().map(SuperBox::mode),
+        Some(BoxMode::Shell)
+    );
+
+    drop(browser.update(Message::DismissFloating));
+    assert!(
+        browser.open_with.is_none(),
+        "the dialog on top closes first"
+    );
+    assert!(browser.super_box.is_some(), "the box comes back");
+    drop(browser.update(Message::DismissFloating));
+    assert!(browser.super_box.is_none());
+}
+
+/// Ctrl+Enter 只做一件事：有结果时也不先执行选中的结果（虚拟机里查到过先跑普通回车）。
+#[tokio::test]
+async fn ctrl_enter_does_not_also_run_the_selected_result() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("找到的")).unwrap();
+    let mut browser = browser_listing(&root).await;
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    send(
+        &mut browser,
+        SuperBoxMessage::InputChanged("f:找到".to_owned()),
+    )
+    .await;
+    let generation = browser.super_box.as_ref().unwrap().generation();
+    let hit = file_search::SearchHit {
+        path: root.join("找到的"),
+        display_name: "找到的".to_owned(),
+        kind: file_search::SearchFileKind::Directory,
+        size: 0,
+        modified_ms: None,
+        accessed_ms: None,
+        created_ms: None,
+        rank: 1.0,
+        snippet: None,
+        match_source: file_search::MatchSource::Name,
+    };
+    drop(browser.accept_super_box_found(
+        generation,
+        crate::model::IndexedSearchOutcome::Batch(file_search::SearchResultBatch {
+            query_id: generation,
+            hits: vec![hit],
+            next_cursor: None,
+            finished: true,
+        }),
+    ));
+    assert!(matches!(
+        browser.super_box.as_ref().unwrap().selected_row(),
+        Some(crate::super_box::BoxRow::Found(0))
+    ));
+
+    press(
+        &mut browser,
+        iced::keyboard::key::Named::Enter,
+        iced::keyboard::Modifiers::CTRL,
+    )
+    .await;
+
+    assert!(browser.active_search().is_some(), "the search page is open");
+    assert_eq!(browser.user_config.super_box_history.entries(), ["f:找到"]);
 }

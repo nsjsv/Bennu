@@ -78,7 +78,8 @@ pub(crate) use properties::{
 };
 mod search;
 pub(crate) use search::{
-    directory_fallback_search_command, search_command, search_with_scope_root_check_command,
+    directory_fallback_search_command, search_command, search_once,
+    search_with_scope_root_check_command,
 };
 mod search_service;
 mod search_service_endpoint;

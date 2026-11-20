@@ -186,11 +186,11 @@ pub(crate) mod search;
 pub(crate) use search::{
     DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, InputHistory,
     LastSearchScope, SearchDateField, SearchDatePreset, SearchDirectoryScope,
-    SearchEntryTypePreset, SearchFilterMenu, SearchFilterPick, SearchHistory,
-    SearchHistoryInteraction, SearchHitDetail, SearchInputFocus, SearchInputFocusCheckOrigin,
-    SearchInputFocusCheckRequest, SearchInputStabilizationRequest, SearchInputStabilizationSubject,
-    SearchResultCompletion, SearchRunId, SearchSizePreset, SearchWorkspaceSessionId,
-    SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
+    SearchEntryTypePreset, SearchFilterMenu, SearchFilterPick, SearchFilterPresetState,
+    SearchHistory, SearchHistoryInteraction, SearchHitDetail, SearchInputFocus,
+    SearchInputFocusCheckOrigin, SearchInputFocusCheckRequest, SearchInputStabilizationRequest,
+    SearchInputStabilizationSubject, SearchResultCompletion, SearchRunId, SearchSizePreset,
+    SearchWorkspaceSessionId, SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
 };
 mod search_service;
 pub(crate) use search_service::{

@@ -1,0 +1,125 @@
+//! 超级输入框查索引：停顿一下再查，查的时候可以取消，结果按 `generation` 交回框；回车打开结果，
+//! Ctrl+Enter 把词和筛选带进搜索页。
+
+use std::time::Duration;
+
+use file_search::{
+    SearchFileKind, SearchHit, SearchMatchMode, SearchOrder, SearchQuery, SearchScope,
+};
+use iced::Task;
+use tokio_util::sync::CancellationToken;
+
+use super::super_box::SuperBoxMessage;
+use super::FileBrowser;
+use crate::model::{IndexedSearchOutcome, Message, NavigationMode};
+use crate::super_box::{BoxLookup, BoxMode};
+
+/// 打字停这么久才查：连着打的时候不发一串查询。
+const FIND_PAUSE: Duration = Duration::from_millis(150);
+
+impl FileBrowser {
+    /// 先等一会儿；等完了输入还没变才真的查（`FindSettled`）。
+    pub(super) fn schedule_super_box_find(&self, lookup: BoxLookup) -> Task<Message> {
+        Task::perform(tokio::time::sleep(FIND_PAUSE), move |()| {
+            Message::SuperBox(SuperBoxMessage::FindSettled(Box::new(lookup.clone())))
+        })
+    }
+
+    pub(super) fn run_super_box_find(&mut self, lookup: BoxLookup) -> Task<Message> {
+        let BoxLookup::Find {
+            generation,
+            query,
+            text_scope,
+            limit,
+        } = lookup
+        else {
+            return Task::none();
+        };
+        let Some(super_box) = self
+            .super_box
+            .as_mut()
+            .filter(|super_box| super_box.generation() == generation)
+        else {
+            return Task::none();
+        };
+        let cancellation = CancellationToken::new();
+        super_box.track_find(cancellation.clone());
+        let query = SearchQuery {
+            query_id: generation,
+            terms: query.terms,
+            text_scope,
+            match_mode: SearchMatchMode::Plain,
+            scope: SearchScope::Global,
+            recursive: true,
+            filters: query.search_filters,
+            order: SearchOrder::Relevance,
+            limit,
+            cursor: None,
+        };
+        Task::perform(
+            crate::commands::search_once(query, cancellation),
+            move |outcome| {
+                Message::SuperBox(SuperBoxMessage::FoundLoaded {
+                    generation,
+                    outcome: Box::new(outcome),
+                })
+            },
+        )
+    }
+
+    pub(super) fn accept_super_box_found(
+        &mut self,
+        generation: u64,
+        outcome: IndexedSearchOutcome,
+    ) -> Task<Message> {
+        let found = match outcome {
+            IndexedSearchOutcome::Batch(batch) => Ok(batch.hits),
+            // 换了新的查询、框关了：结果没人要。
+            IndexedSearchOutcome::Cancelled => return Task::none(),
+            IndexedSearchOutcome::TransportUnavailable(_)
+            | IndexedSearchOutcome::ProviderUnavailable(_) => Err(tr!(
+                "The search service is not running; start it on the Search settings page"
+            )),
+            IndexedSearchOutcome::SnapshotExpired => Err(tr!("The index changed; type again")),
+            IndexedSearchOutcome::InvalidQuery(reason) | IndexedSearchOutcome::Fatal(reason) => {
+                Err(reason)
+            }
+        };
+        let Some(mut super_box) = self.super_box.take() else {
+            return Task::none();
+        };
+        // 搜索模式本来就有别的结果：服务没在跑时不列也不提示。
+        let found = match (found, super_box.mode()) {
+            (Err(_), BoxMode::Search) => Ok(Vec::new()),
+            (found, _) => found,
+        };
+        self.with_super_box_context(|context| super_box.accept_found(generation, found, context));
+        self.super_box = Some(super_box);
+        Task::none()
+    }
+
+    /// 回车：文件夹打开，文件用默认程序打开。
+    pub(super) fn open_super_box_found(&mut self, hit: SearchHit) -> Task<Message> {
+        match hit.kind {
+            SearchFileKind::Directory => self.navigate_to(hit.path, NavigationMode::RecordHistory),
+            _ => crate::commands::open_file_command(hit.path, self.terminal_emulator),
+        }
+    }
+
+    /// Ctrl+Enter（文件模式）：关框，在搜索页里接着找。
+    pub(super) fn continue_super_box_find_in_search_page(&mut self) -> Task<Message> {
+        let Some(super_box) = self.super_box.as_ref() else {
+            return Task::none();
+        };
+        let Ok(query) = crate::super_box::read_find_query(super_box.input()) else {
+            return Task::none();
+        };
+        let remember = super_box.history_text();
+        self.super_box = None;
+        let remembered = self.remember_super_box_input(remember);
+        Task::batch([
+            remembered,
+            self.open_search_with(query.terms, query.filters),
+        ])
+    }
+}

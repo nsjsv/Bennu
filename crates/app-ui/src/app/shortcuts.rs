@@ -232,6 +232,13 @@ impl FileBrowser {
 
     /// 主窗口上必须先处理完的对话框（确认、冲突、解压、批量重命名……）开着。
     pub(crate) fn main_window_dialog_is_open(&self) -> bool {
+        self.super_box.is_some() || self.dialog_above_super_box_is_open()
+    }
+
+    /// 超级输入框以外的对话框。它们排在框的上面（画面上盖住框，见主视图的浮层顺序），有的是后台
+    /// 事件弹出来的（收到的传输、打开失败后的“打开方式”），框开着时也会出现：这时键给它们，
+    /// 框等它们关掉再回来。
+    pub(crate) fn dialog_above_super_box_is_open(&self) -> bool {
         self.destructive_action_confirmation.is_some()
             || self.incoming_transfer.is_some()
             || !self.incoming_messages.is_empty()
@@ -246,7 +253,6 @@ impl FileBrowser {
             || self.advanced_new_folder.is_some()
             || self.network_connection_editor.is_some()
             || self.open_with.is_some()
-            || self.super_box.is_some()
             || self.shortcut_help_open
     }
 

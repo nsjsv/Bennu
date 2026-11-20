@@ -229,6 +229,31 @@ impl FileBrowser {
         self.restart_active_search()
     }
 
+    /// 超级输入框的 Ctrl+Enter：在当前标签页打开搜索页，带上框里的词和筛选，范围是全部索引
+    /// （框里查的就是全部）。
+    pub(super) fn open_search_with(
+        &mut self,
+        terms: String,
+        filters: crate::model::SearchFilterPresetState,
+    ) -> Task<Message> {
+        let entered = match self.ensure_active_search() {
+            Ok(entered) => entered,
+            Err(message) => {
+                self.show_global_error(message);
+                return Task::none();
+            }
+        };
+        let Some(search) = self.active_search_mut() else {
+            return entered;
+        };
+        search.replace_input_immediately(terms);
+        search.filters = filters;
+        search
+            .root
+            .select_scope(SearchDirectoryScope::AllIndexedLocations);
+        Task::batch([entered, self.restart_active_search()])
+    }
+
     pub(super) fn select_search_directory_scope(
         &mut self,
         scope: SearchDirectoryScope,

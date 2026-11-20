@@ -1,23 +1,22 @@
 //! 超级输入框接到文件管理器上：打开时拼候选，按键和打字交给模型，执行选中的那一行；
-//! 路径补全和路径检查在后台。框的规则在 `crate::super_box`。
+//! 路径补全和路径检查在后台。查索引在 `super_box_find.rs`，执行命令在 `super_box_shell.rs`。
+//! 框的规则在 `crate::super_box`。
 
 use std::path::PathBuf;
 
 use iced::Task;
 
 use super::FileBrowser;
-use crate::model::{Message, NavigationMode, SettingsCategory};
+use crate::model::{IndexedSearchOutcome, Message, NavigationMode, SettingsCategory};
 use crate::shortcuts::{ShortcutAction, ShortcutScope, ShortcutTarget};
 use crate::super_box::{
-    BoxContext, BoxEntry, BoxRow, BoxTarget, EntryKind, JumpLookup, NewEntry, SuperBox,
+    BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, NewEntry, SuperBox,
 };
 use file_operations::QueuedFileOperation;
 
 #[derive(Debug, Clone)]
 pub(crate) enum SuperBoxMessage {
     InputChanged(String),
-    /// 输入框里按了回车。
-    Submitted,
     RowPressed(usize),
     RowHovered(usize),
     /// 点了输入框左边的模式按钮：切到下一种。
@@ -32,6 +31,14 @@ pub(crate) enum SuperBoxMessage {
         path: PathBuf,
         is_directory: Result<bool, String>,
     },
+    /// 打字停了一会儿，该查索引了（输入还没变才查）。
+    FindSettled(Box<BoxLookup>),
+    FoundLoaded {
+        generation: u64,
+        outcome: Box<IndexedSearchOutcome>,
+    },
+    /// 命令模式的停止按钮。
+    StopPressed,
 }
 
 pub(crate) fn super_box_input_id() -> iced::widget::Id {
@@ -49,7 +56,12 @@ impl FileBrowser {
                     self.update_super_box(|super_box, context| super_box.next_mode(context));
                 Task::batch([lookup, iced::widget::operation::focus(super_box_input_id())])
             }
-            SuperBoxMessage::Submitted => self.run_selected_super_box_row(),
+            SuperBoxMessage::FindSettled(lookup) => self.run_super_box_find(*lookup),
+            SuperBoxMessage::FoundLoaded {
+                generation,
+                outcome,
+            } => self.accept_super_box_found(generation, *outcome),
+            SuperBoxMessage::StopPressed => self.stop_super_box_command(),
             SuperBoxMessage::RowPressed(index) => {
                 if let Some(super_box) = &mut self.super_box {
                     super_box.select(index);
@@ -115,14 +127,21 @@ impl FileBrowser {
         ])
     }
 
-    /// 框开着时它自己的键：上下选、Tab 换模式、Esc 和打开它的那个键关掉它。其余的键只给输入框
-    /// （输入框自己收键盘事件），一个都不往文件区的快捷键、字母跳转那边走。
+    /// 框开着时它自己的键：上下选、Tab 换模式、回车执行、Ctrl+Enter 换一种执行法、Esc 和打开它的
+    /// 那个键关掉它。其余的键只给输入框（输入框自己收键盘事件），一个都不往文件区的快捷键、字母
+    /// 跳转那边走。
+    ///
+    /// 回车只在这里处理，输入框不设 `on_submit`：输入框的回车和这里的按键是两条消息，先后不定，
+    /// 靠“Ctrl 按着没有”去挡其中一条挡不住（虚拟机里 Ctrl+Enter 先跑了普通回车）。
     pub(super) fn super_box_key(
         &mut self,
         key: &iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
     ) -> Option<Task<Message>> {
         use iced::keyboard::key::Named;
+        if self.dialog_above_super_box_is_open() {
+            return None;
+        }
         let super_box = self.super_box.as_mut()?;
         match key.as_ref() {
             iced::keyboard::Key::Named(Named::ArrowDown) => super_box.select_next(),
@@ -138,6 +157,16 @@ impl FileBrowser {
                 );
             }
             iced::keyboard::Key::Named(Named::Escape) => self.super_box = None,
+            iced::keyboard::Key::Named(Named::Enter) if modifiers.control() => {
+                return Some(match super_box.mode() {
+                    BoxMode::Files => self.continue_super_box_find_in_search_page(),
+                    BoxMode::Shell => self.run_super_box_command_in_terminal(),
+                    BoxMode::Search | BoxMode::Path | BoxMode::New => Task::none(),
+                });
+            }
+            iced::keyboard::Key::Named(Named::Enter) => {
+                return Some(self.run_selected_super_box_row());
+            }
             _ => {
                 let toggles =
                     crate::shortcuts::KeyPress::from_iced(key, modifiers).is_some_and(|press| {
@@ -212,7 +241,10 @@ impl FileBrowser {
     }
 
     /// 按当前标签页给框算结果行要的情况。
-    fn with_super_box_context<R>(&self, compute: impl FnOnce(&BoxContext<'_>) -> R) -> R {
+    pub(super) fn with_super_box_context<R>(
+        &self,
+        compute: impl FnOnce(&BoxContext<'_>) -> R,
+    ) -> R {
         let target = self.keyboard_target_directory();
         let cannot_create = match &target {
             None => Some(tr!("New items cannot be made here")),
@@ -240,15 +272,17 @@ impl FileBrowser {
     /// 改框，路径模式要补全时在后台列子文件夹。
     fn update_super_box(
         &mut self,
-        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Option<JumpLookup>,
+        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Option<BoxLookup>,
     ) -> Task<Message> {
         let Some(mut super_box) = self.super_box.take() else {
             return Task::none();
         };
         let lookup = self.with_super_box_context(|context| change(&mut super_box, context));
         self.super_box = Some(super_box);
-        let Some(JumpLookup { generation, path }) = lookup else {
-            return Task::none();
+        let (generation, path) = match lookup {
+            None => return Task::none(),
+            Some(find @ BoxLookup::Find { .. }) => return self.schedule_super_box_find(find),
+            Some(BoxLookup::Jump { generation, path }) => (generation, path),
         };
         // 路径已经是完整的，“当前文件夹”用不上。
         Task::perform(
@@ -317,6 +351,13 @@ impl FileBrowser {
                 let remember = self.remember_super_box_input(history);
                 Task::batch([remember, self.enqueue_file_operation(operation)])
             }
+            BoxRow::Found(index) => {
+                let hit = super_box.found(index).clone();
+                self.super_box = None;
+                let remember = self.remember_super_box_input(history);
+                Task::batch([remember, self.open_super_box_found(hit)])
+            }
+            BoxRow::Run(command) => self.run_super_box_command(command),
             BoxRow::Problem(_) => Task::none(),
         }
     }
@@ -365,7 +406,7 @@ impl FileBrowser {
         Task::batch([self.remember_super_box_input(history), navigation])
     }
 
-    fn remember_super_box_input(&mut self, text: String) -> Task<Message> {
+    pub(super) fn remember_super_box_input(&mut self, text: String) -> Task<Message> {
         if self.user_config.super_box_history.record_submission(&text) {
             self.persist_user_preferences_command()
         } else {

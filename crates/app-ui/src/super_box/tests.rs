@@ -42,6 +42,8 @@ fn prefixes_switch_modes_with_either_colon() {
     assert_eq!(split_prefix("g:~/下载"), Some((BoxMode::Path, "~/下载")));
     assert_eq!(split_prefix("G：  /tmp"), Some((BoxMode::Path, "/tmp")));
     assert_eq!(split_prefix("n: 笔记.md"), Some((BoxMode::New, "笔记.md")));
+    assert_eq!(split_prefix("f:报告"), Some((BoxMode::Files, "报告")));
+    assert_eq!(split_prefix("s: ls -l"), Some((BoxMode::Shell, "ls -l")));
     assert_eq!(split_prefix("x: 别的"), None);
     assert_eq!(split_prefix("g"), None);
     assert_eq!(split_prefix("go:"), None);
@@ -55,8 +57,17 @@ fn tab_goes_round_the_modes_both_ways() {
         mode = mode.next();
         seen.push(mode);
     }
-    assert_eq!(seen, [BoxMode::Path, BoxMode::New, BoxMode::Search]);
-    assert_eq!(BoxMode::Search.previous(), BoxMode::New);
+    assert_eq!(
+        seen,
+        [
+            BoxMode::Files,
+            BoxMode::Path,
+            BoxMode::New,
+            BoxMode::Shell,
+            BoxMode::Search
+        ]
+    );
+    assert_eq!(BoxMode::Search.previous(), BoxMode::Shell);
     for mode in BoxMode::ALL {
         assert_eq!(mode.next().previous(), mode);
         assert_eq!(BoxMode::from_config_value(mode.config_value()), Some(mode));
@@ -194,7 +205,7 @@ fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
     assert_eq!(super_box.input(), "~/下载");
     assert_eq!(
         lookup,
-        Some(JumpLookup {
+        Some(BoxLookup::Jump {
             generation: super_box.generation(),
             path: "/home/me/下载".to_owned()
         })
@@ -227,6 +238,9 @@ fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
     super_box.set_input("新建".to_owned(), &context);
     assert_eq!(super_box.rows(), [BoxRow::Entry(0)]);
     super_box.next_mode(&context);
+    assert_eq!(super_box.mode(), BoxMode::Files);
+    assert!(super_box.rows().is_empty(), "nothing found yet");
+    super_box.next_mode(&context);
     assert_eq!(super_box.input(), "新建");
     assert!(matches!(super_box.rows(), [BoxRow::JumpTo(_)]));
     super_box.next_mode(&context);
@@ -234,8 +248,10 @@ fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
         super_box.rows(),
         [BoxRow::Create(NewEntry::File("新建".to_owned()))]
     );
+    super_box.next_mode(&context);
+    assert_eq!(super_box.rows(), [BoxRow::Run("新建".to_owned())]);
     super_box.previous_mode(&context);
-    assert_eq!(super_box.mode(), BoxMode::Path);
+    assert_eq!(super_box.mode(), BoxMode::New);
 }
 
 #[test]
@@ -264,13 +280,14 @@ fn stale_suggestions_are_dropped_and_problems_cannot_be_selected() {
     let taken = |name: &str| name == "已有";
     let context = context(&taken);
     let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), &context);
-    let first = super_box.set_input("~/d".to_owned(), &context).unwrap();
+    let Some(BoxLookup::Jump {
+        generation: first, ..
+    }) = super_box.set_input("~/d".to_owned(), &context)
+    else {
+        panic!("a path lookup");
+    };
     super_box.set_input("~/do".to_owned(), &context);
-    super_box.accept_suggestions(
-        first.generation,
-        vec![PathBuf::from("/home/me/desktop")],
-        &context,
-    );
+    super_box.accept_suggestions(first, vec![PathBuf::from("/home/me/desktop")], &context);
     assert_eq!(super_box.rows().len(), 1, "the older lookup is ignored");
     super_box.accept_suggestions(
         super_box.generation(),
@@ -321,4 +338,178 @@ fn the_history_keeps_a_hundred_distinct_entries() {
     assert_eq!(history.entries().len(), 100);
     assert_eq!(history.entries()[0], "g:/tmp/120");
     assert_eq!(history.entries()[1], "g:/tmp/149");
+}
+
+fn find(text: &str) -> super::find::FindQuery {
+    super::find::read_find_query(text).unwrap_or_else(|reason| panic!("{reason}"))
+}
+
+#[test]
+fn filters_are_read_from_anywhere_in_both_languages() {
+    use crate::model::{SearchDatePreset, SearchEntryTypePreset, SearchSizePreset};
+    let query = find("报告 类型:图片,video time:7d 季度 size:>10m");
+    assert_eq!(query.terms, "报告 季度");
+    assert_eq!(
+        query.filters.selected_entry_types,
+        [SearchEntryTypePreset::Images, SearchEntryTypePreset::Video]
+    );
+    assert_eq!(query.filters.date_preset, SearchDatePreset::PastSevenDays);
+    assert_eq!(query.filters.size_preset, SearchSizePreset::Custom);
+    assert_eq!(query.filters.custom_size_min, "10m");
+    // 算出来的查询条件就是搜索页对同一个筛选状态算出来的那份。
+    let page = query
+        .filters
+        .query_filters_at(chrono::Local::now())
+        .unwrap();
+    assert_eq!(page.entry_type_rules, query.search_filters.entry_type_rules);
+    assert_eq!(page.size, query.search_filters.size);
+    assert!(query.search_filters.modified.is_some());
+
+    let wide = find("类型：文件夹 时间:今天 大小:1m-1g");
+    assert_eq!(wide.terms, "");
+    assert_eq!(
+        wide.filters.selected_entry_types,
+        [SearchEntryTypePreset::Folders]
+    );
+    assert_eq!(wide.filters.date_preset, SearchDatePreset::Today);
+    assert_eq!(
+        (
+            wide.filters.custom_size_min.as_str(),
+            wide.filters.custom_size_max.as_str()
+        ),
+        ("1m", "1g")
+    );
+    // 不是筛选名的冒号是要找的词。
+    assert_eq!(find("C:报告 note:1").terms, "C:报告 note:1");
+}
+
+#[test]
+fn a_wrong_filter_says_what_can_be_written() {
+    use super::find::read_find_query;
+    assert!(read_find_query("x type:pictures").is_err());
+    assert!(read_find_query("x time:soon").is_err());
+    assert!(read_find_query("x size:big").is_err());
+    assert!(
+        read_find_query("x size:>lots").is_err(),
+        "the search page's size reader refuses it"
+    );
+}
+
+#[test]
+fn the_selection_reaches_the_shell_as_arguments() {
+    let items = [PathBuf::from("/w/a b.txt"), PathBuf::from("/w/$(x)")];
+    let posix = shell_invocation(Path::new("/bin/bash"), "ls \"$@\"", &items, Path::new("/w"));
+    assert_eq!(posix.program, "/bin/bash");
+    assert_eq!(
+        posix.arguments,
+        ["-c", "ls \"$@\"", "bennu", "/w/a b.txt", "/w/$(x)"]
+    );
+    assert_eq!(posix.working_directory, PathBuf::from("/w"));
+    let fish = shell_invocation(
+        Path::new("/usr/bin/fish"),
+        "ls $argv",
+        &items,
+        Path::new("/w"),
+    );
+    assert_eq!(fish.arguments, ["-c", "ls $argv", "/w/a b.txt", "/w/$(x)"]);
+}
+
+fn hit(name: &str) -> file_search::SearchHit {
+    file_search::SearchHit {
+        path: PathBuf::from("/home/me").join(name),
+        display_name: name.to_owned(),
+        kind: file_search::SearchFileKind::File,
+        size: 0,
+        modified_ms: None,
+        accessed_ms: None,
+        created_ms: None,
+        rank: 1.0,
+        snippet: None,
+        match_source: file_search::MatchSource::Name,
+    }
+}
+
+#[test]
+fn index_results_follow_the_other_entries_and_stale_ones_are_dropped() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let entries = vec![feature("Search", "search")];
+    let mut super_box = SuperBox::open(BoxMode::Search, entries, Vec::new(), &context);
+    let Some(BoxLookup::Find {
+        generation: first,
+        text_scope,
+        limit,
+        ..
+    }) = super_box.set_input("sea".to_owned(), &context)
+    else {
+        panic!("searching also asks the index");
+    };
+    assert_eq!(text_scope, file_search::SearchTextScope::NameOnly);
+    assert_eq!(limit, 5);
+    super_box.set_input("sear".to_owned(), &context);
+    super_box.accept_found(first, Ok(vec![hit("old.txt")]), &context);
+    assert_eq!(
+        super_box.rows(),
+        [BoxRow::Entry(0)],
+        "the older result is ignored"
+    );
+    super_box.accept_found(
+        super_box.generation(),
+        Ok(vec![hit("seashell.md")]),
+        &context,
+    );
+    assert_eq!(super_box.rows(), [BoxRow::Entry(0), BoxRow::Found(0)]);
+
+    super_box.set_input("f:sea type:pdf".to_owned(), &context);
+    assert_eq!(super_box.find_status(), &FindStatus::Searching);
+    super_box.accept_found(
+        super_box.generation(),
+        Err("not running".to_owned()),
+        &context,
+    );
+    assert_eq!(
+        super_box.rows(),
+        [BoxRow::Problem("not running".to_owned())]
+    );
+}
+
+#[test]
+fn a_command_run_belongs_to_its_task() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
+    super_box.set_input("make".to_owned(), &context);
+    assert_eq!(super_box.history_text(), "s:make");
+    super_box.start_run(7, "make".to_owned());
+    super_box.finish_run(8, RunState::Failed("other".to_owned()));
+    assert_eq!(super_box.run().unwrap().state, RunState::Running);
+    super_box.finish_run(7, RunState::finished(&Default::default()));
+    assert!(matches!(
+        super_box.run().unwrap().state,
+        RunState::Finished(_)
+    ));
+
+    let nowhere = BoxContext {
+        current_dir: None,
+        ..super::tests::context(&taken)
+    };
+    super_box.set_input("make".to_owned(), &nowhere);
+    assert!(matches!(super_box.rows(), [BoxRow::Problem(_)]));
+}
+
+#[test]
+fn the_shown_output_is_the_last_lines_with_errors_after() {
+    let output = file_operations::CommandOutput {
+        stdout: (0..300)
+            .map(|line| format!("line {line}\n"))
+            .collect::<String>()
+            .into_bytes(),
+        stderr: b"warning: careful\n".to_vec(),
+    };
+    let RunState::Finished(shown) = RunState::finished(&output) else {
+        panic!("finished");
+    };
+    assert_eq!(shown.lines, 200);
+    assert!(shown.text.starts_with("line 101\n"));
+    assert!(shown.text.ends_with("line 299\nwarning: careful"));
 }

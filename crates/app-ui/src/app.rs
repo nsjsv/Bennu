@@ -83,6 +83,8 @@ mod split_resize;
 mod startup;
 mod startup_settings;
 mod super_box;
+mod super_box_find;
+mod super_box_shell;
 mod tabs;
 #[cfg(test)]
 mod task_driving_tests;

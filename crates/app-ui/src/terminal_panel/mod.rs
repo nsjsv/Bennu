@@ -136,6 +136,10 @@ impl TerminalPanelState {
             || !self.tab_shift_animations.is_empty()
     }
 
+    pub(crate) fn is_expanded(&self) -> bool {
+        self.expanded
+    }
+
     pub(crate) fn is_focused(&self) -> bool {
         self.expanded && self.focused && self.active_session_id.is_some()
     }

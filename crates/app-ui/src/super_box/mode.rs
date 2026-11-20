@@ -1,36 +1,52 @@
-//! 框的模式和前缀。前缀是切换模式的快捷写法：`g:` 切到路径、`n:` 切到新建，前缀本身不留在框里。
+//! 框的模式和前缀。前缀是切换模式的快捷写法：`f:` 文件、`g:` 路径、`n:` 新建、`s:` 命令，
+//! 前缀本身不留在框里。
 //! 历史里存的是“前缀 + 字”，和手打前缀是同一种写法。
 
 /// Tab 按这个顺序往后切，到头绕回。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BoxMode {
-    /// 找功能、动作、设置、收藏。
+    /// 找功能、动作、设置、收藏（最后也列索引里名字对上的文件）。
     Search,
+    /// 搜索索引，可以写筛选。
+    Files,
     /// 跳到一个路径。
     Path,
     /// 在当前文件夹新建文件或文件夹。
     New,
+    /// 交给用户的 shell 执行一条命令。
+    Shell,
 }
 
 impl BoxMode {
-    pub(crate) const ALL: [Self; 3] = [Self::Search, Self::Path, Self::New];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Search,
+        Self::Files,
+        Self::Path,
+        Self::New,
+        Self::Shell,
+    ];
 
     /// 设置页“默认模式”能选的：新建要先有名字，不适合当打开时的样子。
-    pub(crate) const DEFAULT_CHOICES: [Self; 2] = [Self::Search, Self::Path];
+    pub(crate) const DEFAULT_CHOICES: [Self; 4] =
+        [Self::Search, Self::Files, Self::Path, Self::Shell];
 
     pub(crate) fn label(self) -> String {
         match self {
             Self::Search => tr!("Search"),
+            Self::Files => tr!("Files"),
             Self::Path => tr!("Path"),
             Self::New => tr!("New"),
+            Self::Shell => tr!("Command"),
         }
     }
 
     fn prefix(self) -> Option<char> {
         match self {
             Self::Search => None,
+            Self::Files => Some('f'),
             Self::Path => Some('g'),
             Self::New => Some('n'),
+            Self::Shell => Some('s'),
         }
     }
 
@@ -47,8 +63,10 @@ impl BoxMode {
     pub(crate) fn config_value(self) -> &'static str {
         match self {
             Self::Search => "search",
+            Self::Files => "files",
             Self::Path => "path",
             Self::New => "new",
+            Self::Shell => "shell",
         }
     }
 

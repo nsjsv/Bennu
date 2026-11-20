@@ -243,9 +243,12 @@ impl FileBrowser {
                 return Some(match super_box.mode() {
                     BoxMode::Files => self.continue_super_box_find_in_search_page(),
                     BoxMode::Shell => self.run_super_box_command_in_terminal(),
-                    BoxMode::Search | BoxMode::Path | BoxMode::New | BoxMode::Rename => {
-                        Task::none()
-                    }
+                    BoxMode::Search
+                    | BoxMode::Path
+                    | BoxMode::New
+                    | BoxMode::Rename
+                    | BoxMode::Calculate
+                    | BoxMode::Send => Task::none(),
                 });
             }
             iced::keyboard::Key::Named(Named::Enter) => {

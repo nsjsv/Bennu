@@ -46,6 +46,10 @@ fn prefixes_switch_modes_with_either_colon() {
     assert_eq!(split_prefix("n: 笔记.md"), Some((BoxMode::New, "笔记.md")));
     assert_eq!(split_prefix("f:报告"), Some((BoxMode::Files, "报告")));
     assert_eq!(split_prefix("s: ls -l"), Some((BoxMode::Shell, "ls -l")));
+    assert_eq!(split_prefix("=1+2"), Some((BoxMode::Calculate, "1+2")));
+    assert_eq!(split_prefix("＝ 2^10"), Some((BoxMode::Calculate, "2^10")));
+    assert_eq!(split_prefix("@手机"), Some((BoxMode::Send, "手机")));
+    assert_eq!(split_prefix("＠YM"), Some((BoxMode::Send, "YM")));
     assert_eq!(split_prefix("x: 别的"), None);
     assert_eq!(split_prefix("g"), None);
     assert_eq!(split_prefix("go:"), None);
@@ -67,6 +71,8 @@ fn shift_tab_goes_round_the_modes() {
             BoxMode::New,
             BoxMode::Rename,
             BoxMode::Shell,
+            BoxMode::Calculate,
+            BoxMode::Send,
             BoxMode::Search
         ]
     );
@@ -223,6 +229,8 @@ fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
         Some(&BoxRow::JumpTo(PathBuf::from("/home/me/下载")))
     );
 
+    super_box.set_input(String::new(), &context);
+    super_box.set_input(String::new(), &context);
     super_box.set_input("n:素材/".to_owned(), &context);
     assert_eq!(super_box.mode(), BoxMode::New);
     assert_eq!(
@@ -241,6 +249,54 @@ fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
     search.set_input("/tmp".to_owned(), &context);
     assert_eq!(search.mode(), BoxMode::Path);
     assert_eq!(search.input(), "/tmp");
+}
+
+#[test]
+fn a_tag_is_typed_only_while_there_is_none() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    // 默认模式是路径：没有胶囊时 `=` `@` 照样是计算、发送。
+    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), Vec::new(), &context);
+    super_box.set_input("=2^10".to_owned(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Calculate);
+    assert_eq!(super_box.rows(), [BoxRow::Answer("1024".to_owned())]);
+    assert_eq!(super_box.history_text(), "=2^10");
+    super_box.set_input(String::new(), &context);
+    super_box.set_input(String::new(), &context);
+    super_box.set_input("@YM".to_owned(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Send);
+    assert_eq!(super_box.input(), "YM");
+
+    // 有了胶囊，标签的写法就是这个模式的字。
+    let mut path = SuperBox::open(
+        BoxMode::Search,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &context,
+    );
+    path.set_input("g:".to_owned(), &context);
+    path.set_input("@YM".to_owned(), &context);
+    assert_eq!(path.mode(), BoxMode::Path);
+    assert_eq!(
+        path.rows()[0],
+        BoxRow::JumpTo(PathBuf::from("/home/me/work/@YM"))
+    );
+    path.set_input("s:ls".to_owned(), &context);
+    assert_eq!(path.mode(), BoxMode::Path);
+    let mut new = SuperBox::open(
+        BoxMode::Search,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &context,
+    );
+    new.set_input("n:".to_owned(), &context);
+    new.set_input("=草稿".to_owned(), &context);
+    assert_eq!(
+        new.rows(),
+        [BoxRow::Create(NewEntry::File("=草稿".to_owned()))]
+    );
 }
 
 #[test]
@@ -269,6 +325,16 @@ fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
     );
     super_box.next_mode(&context);
     assert_eq!(super_box.rows(), [BoxRow::Run("新建".to_owned())]);
+    super_box.next_mode(&context);
+    assert!(
+        matches!(super_box.rows(), [BoxRow::Problem(_)]),
+        "not a sum"
+    );
+    super_box.next_mode(&context);
+    assert!(
+        matches!(super_box.rows(), [BoxRow::Problem(_)]),
+        "nothing selected to send"
+    );
     super_box.next_mode(&context);
     assert_eq!(super_box.mode(), BoxMode::Search, "it wraps round");
 }
@@ -328,7 +394,9 @@ fn only_a_typed_tag_shows_a_pill_and_tab_in_an_empty_box_lists_the_tags() {
                 BoxMode::Files,
                 BoxMode::Path,
                 BoxMode::New,
-                BoxMode::Rename
+                BoxMode::Rename,
+                BoxMode::Calculate,
+                BoxMode::Send
             ],
             chosen: None
         })

@@ -144,7 +144,6 @@ mod tests {
         std::fs::create_dir(root.join("Documents")).unwrap();
         let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
         browser.tab_mut().location = crate::model::BrowserLocation::Directory(root.clone());
-        drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
         let tab = Key::Named(Named::Tab);
 
         for (typed, suggestion, completed) in [
@@ -152,6 +151,9 @@ mod tests {
             ("s:cd Doc", "uments/", "cd Documents/"),
             ("s:ech", "o", "echo "),
         ] {
+            // 每次新开一个框：有了胶囊就不能再打别的标签。
+            browser.super_box = None;
+            drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
             let changed = browser.update(Message::SuperBox(SuperBoxMessage::InputChanged(
                 typed.to_owned(),
             )));

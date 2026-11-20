@@ -31,14 +31,6 @@ impl SuperBox {
             return self.pipe_rows(pipe);
         }
         match self.mode {
-            BoxMode::Search if calculate::expression(text).is_some() => {
-                let expression = calculate::expression(text).unwrap_or_default();
-                match calculate::calculate(expression) {
-                    Some(answer) => vec![BoxRow::Answer(answer)],
-                    None => vec![BoxRow::Problem(tr!("This cannot be worked out"))],
-                }
-            }
-            BoxMode::Search if text.starts_with('@') => send_rows(&text[1..], context),
             BoxMode::Search => matching::ranked(&self.entries, text)
                 .into_iter()
                 .map(BoxRow::Entry)
@@ -113,6 +105,11 @@ impl SuperBox {
                     "Commands run in a folder; open one first"
                 ))],
             },
+            BoxMode::Calculate => match calculate::calculate(text) {
+                Some(answer) => vec![BoxRow::Answer(answer)],
+                None => vec![BoxRow::Problem(tr!("This cannot be worked out"))],
+            },
+            BoxMode::Send => send_rows(text, context),
         }
     }
 
@@ -147,7 +144,7 @@ impl SuperBox {
     }
 }
 
-/// `@`：名字里有打的字的设备；没选中东西、没有能发的设备时说明。
+/// 发送模式：名字里有打的字的设备；没选中东西、没有能发的设备时说明。
 fn send_rows(name: &str, context: &BoxContext<'_>) -> Vec<BoxRow> {
     if context.selected.is_empty() {
         return vec![BoxRow::Problem(tr!("Select what to send first"))];

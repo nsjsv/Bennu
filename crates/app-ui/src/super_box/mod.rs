@@ -346,18 +346,20 @@ impl SuperBox {
         self.generation
     }
 
-    /// 打了字。开头是前缀就切模式（框里显示成前面的胶囊）、去掉前缀；搜索模式里以 `/` `~` 开头也切到
-    /// 路径。
+    /// 打了字。没有胶囊时开头是标签就切模式（框里显示成前面的胶囊）、去掉标签；有了胶囊，打的都是
+    /// 这个模式的字（`g:@abc` 是路径 `@abc`，`n:=草稿` 是新建 `=草稿`）。搜索模式里以 `/` `~` 开头
+    /// 也切到路径。
     pub(crate) fn set_input(&mut self, text: String, context: &BoxContext<'_>) -> Vec<BoxLookup> {
+        let untagged = !self.shows_tag(self.mode);
         let (mode, text) = match mode::split_prefix(&text) {
-            Some((mode, rest)) => (mode, rest.to_owned()),
+            Some((mode, rest)) if untagged => (mode, rest.to_owned()),
             // 已经空了又按退格：删掉前面的胶囊，回到默认模式。输入框空着按退格也照样报一次“变成
             // 空的”，只认这一条消息；全局按键和它先后不定，不能靠按键判断。
-            None if text.is_empty() && self.input.is_empty() => (self.default_mode, text),
-            None if self.mode == BoxMode::Search && text.starts_with(['/', '~']) => {
+            _ if text.is_empty() && self.input.is_empty() => (self.default_mode, text),
+            _ if self.mode == BoxMode::Search && text.starts_with(['/', '~']) => {
                 (BoxMode::Path, text)
             }
-            None => (self.mode, text),
+            _ => (self.mode, text),
         };
         self.mode = mode;
         self.input = text;
@@ -507,8 +509,6 @@ impl SuperBox {
             return None;
         }
         match self.mode {
-            // `=` 是式子、`@` 是设备，不查索引。
-            BoxMode::Search if text.starts_with(['=', '＝', '@']) => None,
             // 搜索模式只按名字找几个，排在别的结果后面。
             BoxMode::Search => Some(BoxLookup::Find {
                 generation,
@@ -525,7 +525,12 @@ impl SuperBox {
                     text_scope: SearchTextScope::NameAndContent,
                     limit: MOST_ROWS,
                 }),
-            BoxMode::Path | BoxMode::Shell | BoxMode::New | BoxMode::Rename => None,
+            BoxMode::Path
+            | BoxMode::Shell
+            | BoxMode::New
+            | BoxMode::Rename
+            | BoxMode::Calculate
+            | BoxMode::Send => None,
         }
     }
 

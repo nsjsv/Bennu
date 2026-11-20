@@ -4,7 +4,7 @@ use super::task_driving_tests::drive;
 use super::{FileBrowser, SuperBoxMessage};
 use crate::model::{BrowserLocation, Message, NavigationMode};
 use crate::shortcuts::ShortcutAction;
-use crate::super_box::BoxRow;
+use crate::super_box::{BoxMode, BoxRow};
 
 /// 列出这个文件夹（改名要知道这里已经有哪些名字），窗口在前台。
 async fn browser_listing(directory: &Path) -> FileBrowser {
@@ -49,7 +49,7 @@ async fn one_selected_item_is_renamed_and_its_name_is_the_suggestion() {
         browser.super_box.as_ref().unwrap().suggestion(),
         Some("草稿.txt")
     );
-    type_in_box(&mut browser, "r:定稿.txt").await;
+    type_in_box(&mut browser, "定稿.txt").await;
     enter(&mut browser).await;
 
     assert!(browser.super_box.is_none());
@@ -100,6 +100,31 @@ async fn a_sum_is_worked_out_and_not_remembered() {
     enter(&mut browser).await;
     assert!(browser.super_box.is_none());
     assert!(browser.user_config.super_box_history.entries().is_empty());
+}
+
+#[tokio::test]
+async fn sums_and_sending_do_not_depend_on_the_default_mode() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    std::fs::write(root.join("a.txt"), b"x").unwrap();
+    let mut browser = browser_listing(&root).await;
+    browser.user_config.super_box_mode = BoxMode::Path;
+    browser.select_path(root.join("a.txt"));
+
+    type_in_box(&mut browser, "=2^10").await;
+    assert_eq!(
+        browser.super_box.as_ref().unwrap().rows(),
+        [BoxRow::Answer("1024".to_owned())]
+    );
+    browser.super_box = None;
+    type_in_box(&mut browser, "＠YM").await;
+    let super_box = browser.super_box.as_ref().unwrap();
+    assert_eq!(super_box.mode(), BoxMode::Send);
+    assert!(
+        matches!(super_box.rows(), [BoxRow::Problem(_)]),
+        "no device in tests: {:?}",
+        super_box.rows()
+    );
 }
 
 #[tokio::test]

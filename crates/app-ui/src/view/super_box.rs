@@ -244,8 +244,8 @@ fn tab_list_strip(list: &TabList) -> Element<'_, Message> {
         ),
         TabList::Tags { tags, chosen } => (
             tags.iter()
-                .map(|mode| match mode.prefix() {
-                    Some(prefix) => format!("{} {prefix}:", mode.label()),
+                .map(|mode| match mode.tag() {
+                    Some(tag) => format!("{} {tag}", mode.label()),
                     None => mode.label(),
                 })
                 .collect(),
@@ -280,6 +280,8 @@ fn placeholder(mode: BoxMode) -> String {
         BoxMode::New => tr!("Name of the new file; end it with / for a folder"),
         BoxMode::Rename => tr!("New name; {n} numbers several items"),
         BoxMode::Shell => tr!("A command for your shell"),
+        BoxMode::Calculate => tr!("A sum or a unit conversion"),
+        BoxMode::Send => tr!("Which device to send the selected items to"),
     }
 }
 
@@ -300,12 +302,18 @@ fn empty_hint(super_box: &SuperBox) -> String {
             "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Tab completes, → takes the faded suggestion. Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there."
         ),
         BoxMode::Search => tr!(
-            "Type to find what to do. Start with f:, g:, n: or s: to find files, go to a path, make a new item or run a command; Tab in an empty box lists them. *.mp4 | an action runs actions on files."
+            "Type to find what to do. Start with f:, g:, n:, s:, = or @ to find files, go to a path, make a new item, run a command, work out a sum or send the selection; Tab in an empty box lists them. *.mp4 | an action runs actions on files."
         ),
         BoxMode::Path => tr!(
             "Type a path, or start with / or ~ in search. Tab completes it, → takes the faded suggestion."
         ),
         BoxMode::New => tr!("Type a name; end it with / to make a folder"),
+        BoxMode::Calculate => tr!(
+            "Type a sum: + - * / ^, brackets, % and units, for example 2^10 or 1 GiB to MB. Enter copies the answer."
+        ),
+        BoxMode::Send => tr!(
+            "Type part of a device's name. Enter sends the selected items to it."
+        ),
         BoxMode::Rename => tr!(
             "Type the new name. With several items selected it is a pattern: {n} is the number, {name}, {stem} and {ext} the old name, for example photo-{n}.{ext}."
         ),

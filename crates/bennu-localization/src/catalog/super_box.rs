@@ -39,8 +39,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "输入路径；在搜索模式里以 / 或 ~ 开头也行。Tab 补全，→ 接受淡色的建议。",
     ),
     (
-        "Type to find what to do. Start with f:, g:, n: or s: to find files, go to a path, make a new item or run a command; Tab in an empty box lists them. *.mp4 | an action runs actions on files.",
-        "打字找要做的事。以 f:、g:、n:、s: 开头是找文件、跳到路径、新建、执行命令；框空着按 Tab 列出它们。*.mp4 | 动作 对文件执行动作。",
+        "Type to find what to do. Start with f:, g:, n:, s:, = or @ to find files, go to a path, make a new item, run a command, work out a sum or send the selection; Tab in an empty box lists them. *.mp4 | an action runs actions on files.",
+        "打字找要做的事。以 f:、g:、n:、s:、=、@ 开头是找文件、跳到路径、新建、执行命令、计算、发送选中的项；框空着按 Tab 列出它们。*.mp4 | 动作 对文件执行动作。",
     ),
     ("Go to %1", "跳到 %1"),
     ("New file “%1”", "新建文件“%1”"),
@@ -118,6 +118,12 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "选中了 %1 个重复的文件，每组留下了最早的一份",
     ),
     // 计算、改名、发送
+    ("Calculate", "计算"),
+    ("A sum or a unit conversion", "式子或单位换算"),
+    (
+        "Type a sum: + - * / ^, brackets, % and units, for example 2^10 or 1 GiB to MB. Enter copies the answer.",
+        "输入式子：+ - * / ^、括号、%、单位都行，比如 2^10、1 GiB to MB。回车复制结果。",
+    ),
     ("This cannot be worked out", "算不出来"),
     ("Enter copies it", "回车复制"),
     ("Select the items to rename first", "先选中要改名的项"),
@@ -131,6 +137,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     ("%1 items in all", "一共 %1 项"),
     ("%1 selected", "选中了 %1 项"),
+    ("Which device to send the selected items to", "把选中的项发给哪台设备"),
+    (
+        "Type part of a device's name. Enter sends the selected items to it.",
+        "输入设备名字的一部分，回车把选中的项发给它。",
+    ),
     ("Select what to send first", "先选中要发送的项"),
     (
         "No device to send to: turn on transfers, or wait for a device nearby",

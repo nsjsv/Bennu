@@ -1,9 +1,12 @@
 //! 路径模板（复制到、移动到）和命令模板（执行命令）。读文件时就解析好：未知变量、开头不对、
 //! 命令切不开、`{file}` 和 `{files}` 混用都在那时报错；运行时只把值填进去，从不重新切分，
-//! 所以文件名里的空格、引号、`;`、`$()` 都只是参数里的普通字符。
+//! 所以文件名里的空格、引号、`;`、`$()` 都只是参数里的普通字符。只有一个参数本身是交给
+//! 别的程序的一行命令时（`sh -c '… {file}'`），那个程序会再解析一遍，见 `handed_on`。
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+
+use super::handed_on::{unsafe_character, UnsafeName};
 
 /// 一次运行里所有模板共用的值。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -198,7 +201,12 @@ impl PathTemplate {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Argument {
     Files,
-    Pieces(Vec<Segment<Variable>>),
+    Pieces {
+        pieces: Vec<Segment<Variable>>,
+        /// 文字里有空白、又用了按项算的变量：这个参数是交给别的程序的一行命令
+        /// （`sh -c 'ffmpeg -i {file}'`），值要按 `handed_on` 的规则检查。
+        handed_on: bool,
+    },
 }
 
 /// 一条命令执行几次。
@@ -235,14 +243,16 @@ impl CommandTemplate {
             if pieces.contains(&Segment::Variable(Variable::Files)) {
                 return Err(TemplateError(tr!("{files} must be an argument on its own")));
             }
-            arguments.push(Argument::Pieces(pieces));
+            let handed_on = uses_item_variable(&pieces)
+                && pieces.iter().any(
+                    |piece| matches!(piece, Segment::Text(text) if text.contains(char::is_whitespace)),
+                );
+            arguments.push(Argument::Pieces { pieces, handed_on });
         }
         let uses_files = arguments.contains(&Argument::Files);
         let uses_item = arguments.iter().any(|argument| match argument {
             Argument::Files => false,
-            Argument::Pieces(pieces) => pieces.iter().any(
-                |piece| matches!(piece, Segment::Variable(variable) if variable.is_per_item()),
-            ),
+            Argument::Pieces { pieces, .. } => uses_item_variable(pieces),
         });
         let invocations = match (uses_item, uses_files) {
             (true, true) => {
@@ -265,8 +275,12 @@ impl CommandTemplate {
         &self.text
     }
 
-    /// 要执行的每一次：程序和它的参数。
-    pub(crate) fn invocations(&self, items: &[PathBuf], run: &RunValues) -> Vec<Vec<OsString>> {
+    /// 要执行的每一次：程序和它的参数。有一项的名字不能交给另一层命令行时一次都不执行。
+    pub(crate) fn invocations(
+        &self,
+        items: &[PathBuf],
+        run: &RunValues,
+    ) -> Result<Vec<Vec<OsString>>, UnsafeName> {
         let invocation = |item: Option<&Path>| {
             let mut words = Vec::with_capacity(self.arguments.len());
             for argument in &self.arguments {
@@ -274,19 +288,44 @@ impl CommandTemplate {
                     Argument::Files => {
                         words.extend(items.iter().map(|item| item.as_os_str().to_owned()))
                     }
-                    Argument::Pieces(pieces) => words.push(fill(pieces, item, run)),
+                    Argument::Pieces { pieces, handed_on } => {
+                        if let (true, Some(item)) = (*handed_on, item) {
+                            check_handed_on(pieces, item)?;
+                        }
+                        words.push(fill(pieces, item, run));
+                    }
                 }
             }
-            words
+            Ok(words)
         };
         match self.invocations {
             Invocations::EachItem => items
                 .iter()
                 .map(|item| invocation(Some(item.as_path())))
                 .collect(),
-            Invocations::AllItems | Invocations::Once => vec![invocation(None)],
+            Invocations::AllItems | Invocations::Once => Ok(vec![invocation(None)?]),
         }
     }
+}
+
+fn uses_item_variable(pieces: &[Segment<Variable>]) -> bool {
+    pieces
+        .iter()
+        .any(|piece| matches!(piece, Segment::Variable(variable) if variable.is_per_item()))
+}
+
+fn check_handed_on(pieces: &[Segment<Variable>], item: &Path) -> Result<(), UnsafeName> {
+    for piece in pieces {
+        if let Segment::Variable(variable) = piece {
+            if let Some(character) = unsafe_character(&variable.item_value(item)) {
+                return Err(UnsafeName {
+                    path: item.to_path_buf(),
+                    character,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 use std::ffi::OsStr;
 
 use super::*;
+use crate::actions::handed_on::UnsafeName;
 
 fn run() -> RunValues {
     RunValues {
@@ -71,7 +72,7 @@ fn per_item_variables_run_once_per_item() {
         PathBuf::from("/v/a b.mp4"),
         PathBuf::from("/v/$(rm -rf ~);x.mkv"),
     ];
-    let invocations = command.invocations(&items, &run());
+    let invocations = command.invocations(&items, &run()).unwrap();
     assert_eq!(invocations.len(), 2);
     assert_eq!(
         arguments(&invocations[0]),
@@ -93,7 +94,7 @@ fn per_item_variables_run_once_per_item() {
 fn files_expands_into_one_argument_per_item() {
     let command = CommandTemplate::parse("kdeconnect-cli --share {files} --date {date}").unwrap();
     let items = [PathBuf::from("/a/1.png"), PathBuf::from("/a/two words.png")];
-    let invocations = command.invocations(&items, &run());
+    let invocations = command.invocations(&items, &run()).unwrap();
     assert_eq!(invocations.len(), 1);
     assert_eq!(
         arguments(&invocations[0]),
@@ -111,9 +112,46 @@ fn files_expands_into_one_argument_per_item() {
 #[test]
 fn commands_without_item_variables_run_once() {
     let command = CommandTemplate::parse("git pull --ff-only").unwrap();
-    let invocations = command.invocations(&[PathBuf::from("/a"), PathBuf::from("/b")], &run());
+    let invocations = command
+        .invocations(&[PathBuf::from("/a"), PathBuf::from("/b")], &run())
+        .unwrap();
     assert_eq!(invocations.len(), 1);
     assert_eq!(arguments(&invocations[0]), ["git", "pull", "--ff-only"]);
+}
+
+#[test]
+fn a_name_inside_a_command_line_for_another_shell_is_checked_first() {
+    let command = CommandTemplate::parse("sh -c 'ffmpeg -i {file} {stem}.wav'").unwrap();
+    let hostile = PathBuf::from("/v/$(id).mp4");
+    assert_eq!(
+        command.invocations(std::slice::from_ref(&hostile), &run()),
+        Err(UnsafeName {
+            path: hostile,
+            character: '$',
+        })
+    );
+    // 普通名字照常交下去；一个词里的变量（没有空白）不算交给别的命令行。
+    let ordinary = PathBuf::from("/v/my clip (1) it's.mp4");
+    let invocations = command
+        .invocations(std::slice::from_ref(&ordinary), &run())
+        .unwrap();
+    assert_eq!(
+        arguments(&invocations[0]),
+        [
+            "sh",
+            "-c",
+            "ffmpeg -i /v/my clip (1) it's.mp4 my clip (1) it's.wav"
+        ]
+    );
+    let plain = CommandTemplate::parse("ffmpeg -i {file} --out={dir}/{stem}.wav").unwrap();
+    assert!(plain
+        .invocations(&[PathBuf::from("/v/a;b&c.mp4")], &run())
+        .is_ok());
+    // 安全的写法：名字作为单独的参数交给 sh。
+    let positional = CommandTemplate::parse("sh -c 'ffmpeg -i \"$1\"' _ {file}").unwrap();
+    assert!(positional
+        .invocations(&[PathBuf::from("/v/$(id).mp4")], &run())
+        .is_ok());
 }
 
 #[test]
@@ -136,6 +174,8 @@ fn non_utf8_file_names_pass_through_byte_for_byte() {
 
     let command = CommandTemplate::parse("stat {file}").unwrap();
     let item = PathBuf::from(OsStr::from_bytes(b"/a/caf\xe9.txt"));
-    let invocations = command.invocations(std::slice::from_ref(&item), &run());
+    let invocations = command
+        .invocations(std::slice::from_ref(&item), &run())
+        .unwrap();
     assert_eq!(invocations[0][1].as_bytes(), b"/a/caf\xe9.txt");
 }

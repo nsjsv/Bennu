@@ -80,8 +80,11 @@ pub(crate) async fn prepare_step(
     let prepared = match step {
         ActionStep::Convert(format) => prepare_convert(format, input).await,
         ActionStep::Run(command) => {
-            let invocations = command
-                .invocations(&input, &context.values)
+            let invocations = match command.invocations(&input, &context.values) {
+                Ok(invocations) => invocations,
+                Err(refused) => return PreparedStep::Failed(refused.reason()),
+            };
+            let invocations = invocations
                 .into_iter()
                 .filter_map(|mut words| {
                     let arguments = words.split_off(1);

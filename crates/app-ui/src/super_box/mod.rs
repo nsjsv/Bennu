@@ -83,6 +83,18 @@ pub(crate) enum BoxLookup {
     },
 }
 
+/// Tab 列出来、再按 Tab 一个个换的东西；打字就收起。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TabList {
+    /// 补不动时的名字。
+    Names(Choices),
+    /// 框空着按 Tab：能打的标签（默认模式以外的模式）。
+    Tags {
+        tags: Vec<BoxMode>,
+        chosen: Option<usize>,
+    },
+}
+
 /// 索引查询的情况。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FindStatus {
@@ -157,6 +169,8 @@ const FOUND_IN_SEARCH: usize = 5;
 /// 不能复制：它拿着在途查询的取消钥匙，框没了查询就跟着取消。
 #[derive(Debug)]
 pub(crate) struct SuperBox {
+    /// 设置里的默认模式：不打标签直接打字就是它，它不显示胶囊。
+    default_mode: BoxMode,
     mode: BoxMode,
     input: String,
     entries: Vec<BoxEntry>,
@@ -164,8 +178,7 @@ pub(crate) struct SuperBox {
     history: Vec<String>,
     /// 这次输入的补全候选；路径模式的子文件夹行也从这里来。
     listing: Listing,
-    /// Tab 补不动时列出来的候选。
-    choices: Option<Choices>,
+    tab_list: Option<TabList>,
     /// 框里的字后面淡淡显示的建议，→ 接受。
     suggestion: Option<String>,
     found: Vec<SearchHit>,
@@ -188,12 +201,13 @@ impl SuperBox {
         context: &BoxContext<'_>,
     ) -> Self {
         let mut opened = Self {
+            default_mode: mode,
             mode,
             input: String::new(),
             entries,
             history,
             listing: Listing::default(),
-            choices: None,
+            tab_list: None,
             suggestion: None,
             found: Vec::new(),
             find_status: FindStatus::Idle,
@@ -244,8 +258,13 @@ impl SuperBox {
         self.rows.get(self.selected?)
     }
 
-    pub(crate) fn choices(&self) -> Option<&Choices> {
-        self.choices.as_ref()
+    pub(crate) fn tab_list(&self) -> Option<&TabList> {
+        self.tab_list.as_ref()
+    }
+
+    /// 这个模式要不要显示胶囊：默认模式不用（直接打字就是它）。
+    pub(crate) fn shows_tag(&self, mode: BoxMode) -> bool {
+        mode != self.default_mode
     }
 
     pub(crate) fn suggestion(&self) -> Option<&str> {
@@ -269,9 +288,9 @@ impl SuperBox {
     ) -> Option<BoxLookup> {
         let (mode, text) = match mode::split_prefix(&text) {
             Some((mode, rest)) => (mode, rest.to_owned()),
-            // 已经空了又按退格：删掉前面的胶囊，回到搜索。输入框空着按退格也照样报一次“变成空的”，
-            // 只认这一条消息；全局按键和它先后不定，不能靠按键判断。
-            None if text.is_empty() && self.input.is_empty() => (BoxMode::Search, text),
+            // 已经空了又按退格：删掉前面的胶囊，回到默认模式。输入框空着按退格也照样报一次“变成
+            // 空的”，只认这一条消息；全局按键和它先后不定，不能靠按键判断。
+            None if text.is_empty() && self.input.is_empty() => (self.default_mode, text),
             None if self.mode == BoxMode::Search && text.starts_with(['/', '~']) => {
                 (BoxMode::Path, text)
             }
@@ -279,22 +298,41 @@ impl SuperBox {
         };
         self.mode = mode;
         self.input = text;
-        self.choices = None;
+        self.tab_list = None;
         self.changed(context)
     }
 
     /// Shift+Tab：换下一种模式，到头绕回。
     pub(crate) fn next_mode(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
         self.mode = self.mode.next();
-        self.choices = None;
+        self.tab_list = None;
         self.changed(context)
     }
 
-    /// Tab：补最后那个词。候选已经列出来了才补（列得很快，打字时就在列）；列出了候选再按就一个个换。
+    /// Tab：框空着就列出能打的标签；有字就补最后那个词（候选已经列出来了才补，打字时就在列）。
+    /// 列出来以后再按 Tab 一个个换。
     pub(crate) fn complete(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
-        if let Some(choices) = self.choices.as_mut() {
-            self.input = choices.next();
-            return self.changed(context);
+        match self.tab_list.as_mut() {
+            Some(TabList::Names(choices)) => {
+                self.input = choices.next();
+                return self.changed(context);
+            }
+            Some(TabList::Tags { tags, chosen }) => {
+                let next = chosen.map_or(0, |chosen| (chosen + 1) % tags.len());
+                *chosen = Some(next);
+                self.mode = tags[next];
+                return self.changed(context);
+            }
+            None => {}
+        }
+        if self.input.is_empty() {
+            let tags: Vec<_> = BoxMode::ALL
+                .into_iter()
+                .filter(|mode| self.shows_tag(*mode))
+                .collect();
+            let chosen = tags.iter().position(|mode| *mode == self.mode);
+            self.tab_list = Some(TabList::Tags { tags, chosen });
+            return None;
         }
         let word = complete::word(self.mode, &self.input)?;
         match complete::complete(&word, &self.input, &self.listing) {
@@ -303,7 +341,11 @@ impl SuperBox {
                 self.changed(context)
             }
             complete::Completed::Choices(candidates) => {
-                self.choices = Some(Choices::new(word, self.input.clone(), candidates));
+                self.tab_list = Some(TabList::Names(Choices::new(
+                    word,
+                    self.input.clone(),
+                    candidates,
+                )));
                 None
             }
             complete::Completed::Nothing => None,
@@ -314,7 +356,7 @@ impl SuperBox {
     pub(crate) fn accept_suggestion(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
         let suggestion = self.suggestion.take()?;
         self.input.push_str(&suggestion);
-        self.choices = None;
+        self.tab_list = None;
         self.changed(context)
     }
 

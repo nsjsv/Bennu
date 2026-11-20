@@ -40,7 +40,8 @@ impl BoxMode {
         }
     }
 
-    fn prefix(self) -> Option<char> {
+    /// 打在开头切到这个模式的标签的字母（搜索没有）。
+    pub(crate) fn prefix(self) -> Option<char> {
         match self {
             Self::Search => None,
             Self::Files => Some('f'),

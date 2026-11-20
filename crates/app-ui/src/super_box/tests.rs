@@ -269,10 +269,46 @@ fn an_empty_box_lists_five_of_all_history_and_three_of_a_mode() {
         rows(BoxMode::Search),
         ["g:/a", "新建", "g:/b", "s:ls", "g:/c"].map(|entry| BoxRow::History(entry.to_owned()))
     );
+    // 默认模式就是路径时，打开也没有胶囊：一样是混在一起的 5 条。
+    assert_eq!(rows(BoxMode::Path), rows(BoxMode::Search));
+    let mut tagged = SuperBox::open(BoxMode::Search, Vec::new(), history.clone(), &context);
+    tagged.set_input("g:".to_owned(), &context);
     assert_eq!(
-        rows(BoxMode::Path),
+        tagged.rows(),
         ["g:/a", "g:/b", "g:/c"].map(|entry| BoxRow::History(entry.to_owned()))
     );
+}
+
+#[test]
+fn only_a_typed_tag_shows_a_pill_and_tab_in_an_empty_box_lists_the_tags() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    // 默认模式是命令：直接打字就是命令，没有胶囊。
+    let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
+    assert!(!super_box.shows_tag(super_box.mode()));
+    super_box.set_input("g:".to_owned(), &context);
+    assert!(super_box.shows_tag(super_box.mode()));
+    // 退格删掉胶囊，回到默认模式。
+    super_box.set_input(String::new(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Shell);
+
+    super_box.complete(&context);
+    assert_eq!(
+        super_box.tab_list(),
+        Some(&TabList::Tags {
+            tags: vec![BoxMode::Search, BoxMode::Files, BoxMode::Path, BoxMode::New],
+            chosen: None
+        })
+    );
+    super_box.complete(&context);
+    assert_eq!(super_box.mode(), BoxMode::Search);
+    super_box.complete(&context);
+    super_box.complete(&context);
+    assert_eq!(super_box.mode(), BoxMode::Path);
+    // 打字就收起，接着在这个模式里打。
+    super_box.set_input("~/".to_owned(), &context);
+    assert!(super_box.tab_list().is_none());
+    assert_eq!(super_box.mode(), BoxMode::Path);
 }
 
 #[test]
@@ -325,15 +361,21 @@ fn tab_completes_and_then_goes_through_the_choices() {
     );
     super_box.complete(&context);
     assert_eq!(super_box.input(), "cd Do", "nothing more is shared");
-    assert_eq!(super_box.choices().unwrap().candidates.len(), 2);
+    let Some(TabList::Names(choices)) = super_box.tab_list() else {
+        panic!("names are listed");
+    };
+    assert_eq!(choices.candidates.len(), 2);
     super_box.complete(&context);
     assert_eq!(super_box.input(), "cd Documents/");
     super_box.complete(&context);
     assert_eq!(super_box.input(), "cd Downloads/");
-    assert_eq!(super_box.choices().unwrap().chosen, Some(1));
+    assert!(matches!(
+        super_box.tab_list(),
+        Some(TabList::Names(choices)) if choices.chosen == Some(1)
+    ));
     // 打字就收起。
     super_box.set_input("cd Downloads/x".to_owned(), &context);
-    assert!(super_box.choices().is_none());
+    assert!(super_box.tab_list().is_none());
 
     super_box.set_input("cd Doc".to_owned(), &context);
     list(&mut super_box, vec![candidate("Documents", true)], &context);

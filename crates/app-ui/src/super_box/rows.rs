@@ -3,9 +3,9 @@
 use super::{complete, find, matching, mode, targets};
 use super::{BoxContext, BoxMode, BoxRow, FindStatus, SuperBox, FOUND_IN_SEARCH, MOST_ROWS};
 
-/// 框是空的、没有模式胶囊时列几条历史（各种模式混在一起）。
-const HISTORY_IN_SEARCH: usize = 5;
-/// 有模式胶囊时列几条这个模式的历史。
+/// 框是空的、没有胶囊（默认模式）时列几条历史（各种模式混在一起）。
+const HISTORY_MIXED: usize = 5;
+/// 有胶囊时列几条这个模式的历史。
 const HISTORY_IN_MODE: usize = 3;
 
 impl SuperBox {
@@ -13,12 +13,13 @@ impl SuperBox {
         let text = self.input.trim();
         if text.is_empty() {
             let history = self.history.iter();
-            let history: Vec<_> = match self.mode {
-                BoxMode::Search => history.take(HISTORY_IN_SEARCH).collect(),
-                mode => history
-                    .filter(|entry| mode::read_history(entry).0 == mode)
+            let history: Vec<_> = if self.shows_tag(self.mode) {
+                history
+                    .filter(|entry| mode::read_history(entry).0 == self.mode)
                     .take(HISTORY_IN_MODE)
-                    .collect(),
+                    .collect()
+            } else {
+                history.take(HISTORY_MIXED).collect()
             };
             return history
                 .into_iter()

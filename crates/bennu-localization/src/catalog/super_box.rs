@@ -39,8 +39,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "输入路径；在搜索模式里以 / 或 ~ 开头也行。Tab 补全，→ 接受淡色的建议。",
     ),
     (
-        "Type to find what to do. Shift+Tab switches to files, a path, a new item or a command; f:, g:, n: and s: do it too.",
-        "打字找要做的事。按 Shift+Tab 切到文件、路径、新建或命令，打 f:、g:、n:、s: 也行。",
+        "Type to find what to do. Start with f:, g:, n: or s: to find files, go to a path, make a new item or run a command; Tab in an empty box lists them.",
+        "打字找要做的事。以 f:、g:、n:、s: 开头是找文件、跳到路径、新建、执行命令；框空着按 Tab 列出它们。",
     ),
     ("Go to %1", "跳到 %1"),
     ("New file “%1”", "新建文件“%1”"),

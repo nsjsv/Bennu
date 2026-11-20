@@ -233,6 +233,9 @@ pub async fn run_file_operation(
         QueuedFileOperation::Convert { requests } => {
             run_queued_convert(requests, controls, task_id, output).await
         }
+        QueuedFileOperation::RunCommands { invocations } => {
+            run_commands::run_queued_commands(invocations, controls, task_id, output).await
+        }
     };
 
     FileOperationCompletion::from_result(result)
@@ -631,6 +634,7 @@ mod convert;
 mod entry_gathering;
 mod extract_members;
 mod recoverable;
+mod run_commands;
 mod step_pacer;
 
 #[cfg(test)]

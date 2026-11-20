@@ -156,6 +156,11 @@ pub enum StoredOperation {
         sources: Vec<StoredPath>,
         output_extensions: Vec<String>,
     },
+    /// 动作里执行的外部命令。只留给人看的命令行，程序退出后绝不重跑：
+    /// 命令做了什么 Bennu 不知道，重跑可能做第二遍。
+    RunCommands {
+        commands: Vec<String>,
+    },
 }
 
 impl StoredOperation {
@@ -180,6 +185,7 @@ impl StoredOperation {
             Self::ExtractArchive { .. } => "extract_archive",
             Self::ExtractArchiveMembers { .. } => "extract_archive_members",
             Self::Convert { .. } => "convert",
+            Self::RunCommands { .. } => "run_commands",
         }
     }
 }

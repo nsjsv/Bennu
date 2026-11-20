@@ -1815,6 +1815,7 @@ version = "0.4.6"
 dependencies = [
  "bennu-localization",
  "bennu-state",
+ "bennu-subprocess",
  "file-core",
  "libc",
  "rusqlite",

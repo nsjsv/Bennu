@@ -275,6 +275,14 @@ impl FileBrowser {
                     );
                 }
             }
+            // 命令改了什么不知道，按它在哪个文件夹里执行算。
+            QueuedFileOperation::RunCommands { invocations } => {
+                for invocation in invocations {
+                    self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
+                        &invocation.working_directory,
+                    );
+                }
+            }
             QueuedFileOperation::GatherSelectionIntoNewFolder { directory, sources } => {
                 self.invalidate_list_directory_summary_subtree_and_ancestor_chain(directory);
                 for source in sources {

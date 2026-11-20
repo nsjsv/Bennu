@@ -155,7 +155,8 @@ fn operation_supports_desktop_notification(operation: &QueuedFileOperation) -> b
         | QueuedFileOperation::CreateArchive { .. }
         | QueuedFileOperation::ExtractArchive { .. }
         | QueuedFileOperation::ExtractArchiveMembers { .. }
-        | QueuedFileOperation::Convert { .. } => true,
+        | QueuedFileOperation::Convert { .. }
+        | QueuedFileOperation::RunCommands { .. } => true,
         QueuedFileOperation::Rename { .. }
         | QueuedFileOperation::CreateDirectory { .. }
         | QueuedFileOperation::CreateDirectories { .. }

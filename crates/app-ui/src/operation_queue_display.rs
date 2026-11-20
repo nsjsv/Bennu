@@ -86,6 +86,23 @@ impl OperationPathLines for QueuedFileOperation {
                 sources, target, ..
             } => path_lines_from_archive(sources, target),
             Self::Convert { requests } => path_lines_from_conversions(requests),
+            Self::RunCommands { invocations } => match invocations.as_slice() {
+                [] => FileOperationPathLines::empty(),
+                [first, ..] => FileOperationPathLines {
+                    file_name: Path::new(&first.program)
+                        .file_name()
+                        .unwrap_or(&first.program)
+                        .to_string_lossy()
+                        .into_owned(),
+                    original_path: std::iter::once(&first.program)
+                        .chain(&first.arguments)
+                        .map(|word| word.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                    directory_path: path_full_text(&first.working_directory),
+                    total_items: invocations.len(),
+                },
+            },
             Self::ExtractArchive { request } => {
                 path_lines_from_extracted_archive(&request.archive, &request.landing_directory)
             }

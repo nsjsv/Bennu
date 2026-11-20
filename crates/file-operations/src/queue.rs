@@ -140,6 +140,18 @@ pub enum QueuedFileOperation {
     Convert {
         requests: Vec<ConversionRequest>,
     },
+    /// 动作里的"执行命令"：依次执行，不经过 shell。不走恢复日志，程序退出后不会重跑。
+    RunCommands {
+        invocations: Vec<CommandInvocation>,
+    },
+}
+
+/// 一次命令执行：程序、参数（已经切好、填好）、在哪个文件夹里执行。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandInvocation {
+    pub program: OsString,
+    pub arguments: Vec<OsString>,
+    pub working_directory: PathBuf,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,6 +221,7 @@ impl QueuedFileOperation {
                 tr_in!(language, "Extract Archive")
             }
             Self::Convert { .. } => tr_in!(language, "Convert Format"),
+            Self::RunCommands { .. } => tr_in!(language, "Run Command"),
         }
     }
 

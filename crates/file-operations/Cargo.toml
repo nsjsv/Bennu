@@ -11,7 +11,10 @@ license.workspace = true
 [dependencies]
 bennu-localization = { path = "../bennu-localization" }
 bennu-state = { path = "../bennu-state" }
+bennu-subprocess = { path = "../bennu-subprocess" }
 file-core = { path = "../file-core" }
+# 执行命令这一步对整个进程组发 SIGSTOP / SIGCONT / SIGTERM / SIGKILL。
+libc = "0.2"
 serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

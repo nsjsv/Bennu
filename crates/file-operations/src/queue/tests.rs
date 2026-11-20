@@ -1471,3 +1471,26 @@ fn archive_tasks_offer_pause_but_format_conversion_does_not() {
     }
     .supports_pause());
 }
+
+/// 执行命令的任务只存给人看的命令行：程序退出后既不算可恢复，也还原不出能再跑的操作。
+#[test]
+fn stored_commands_are_never_run_again() {
+    let operation = QueuedFileOperation::RunCommands {
+        invocations: vec![CommandInvocation {
+            program: "ffmpeg".into(),
+            arguments: vec!["-i".into(), "a b.mp4".into()],
+            working_directory: PathBuf::from("/videos"),
+        }],
+    };
+    assert!(!operation.uses_recovery_journal());
+
+    let stored = queued_operation_to_stored(&operation);
+    assert_eq!(
+        stored,
+        StoredOperation::RunCommands {
+            commands: vec!["ffmpeg -i a b.mp4".to_owned()],
+        }
+    );
+    assert!(!stored_operation_is_resumable(&stored));
+    assert!(queued_operation_from_stored(stored).is_none());
+}

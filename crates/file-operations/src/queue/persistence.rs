@@ -152,6 +152,18 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
             destination: StoredPath::from_path(destination),
             password_required: password.is_some(),
         },
+        QueuedFileOperation::RunCommands { invocations } => StoredOperation::RunCommands {
+            commands: invocations
+                .iter()
+                .map(|invocation| {
+                    std::iter::once(&invocation.program)
+                        .chain(&invocation.arguments)
+                        .map(|word| word.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect(),
+        },
         QueuedFileOperation::Convert { requests } => StoredOperation::Convert {
             sources: requests
                 .iter()

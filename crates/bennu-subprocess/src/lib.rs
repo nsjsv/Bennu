@@ -39,6 +39,26 @@ pub async fn read_bounded_child_output(
     })
 }
 
+/// 读到 EOF，只留最后 `maximum_bytes` 字节。出错的原因通常在输出的最后（ffmpeg、编译器、
+/// 脚本里的 `set -e` 都是），所以失败说明要的是结尾，而不是开头。
+pub async fn read_child_output_tail(
+    mut reader: impl AsyncRead + Unpin,
+    maximum_bytes: usize,
+) -> std::io::Result<Vec<u8>> {
+    let mut tail = std::collections::VecDeque::with_capacity(maximum_bytes.min(8_192));
+    let mut buffer = [0_u8; 8_192];
+    loop {
+        let bytes_read = reader.read(&mut buffer).await?;
+        if bytes_read == 0 {
+            break;
+        }
+        tail.extend(&buffer[..bytes_read]);
+        let excess = tail.len().saturating_sub(maximum_bytes);
+        tail.drain(..excess);
+    }
+    Ok(tail.into())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -47,7 +67,7 @@ mod tests {
 
     use tokio::io::{AsyncRead, AsyncWriteExt, ReadBuf};
 
-    use super::read_bounded_child_output;
+    use super::{read_bounded_child_output, read_child_output_tail};
 
     struct FailingReader;
 
@@ -87,6 +107,23 @@ mod tests {
 
         assert_eq!(output.bytes, b"0123");
         assert!(output.exceeded_limit);
+    }
+
+    #[tokio::test]
+    async fn the_tail_keeps_the_last_bytes_while_draining_everything() {
+        let (mut sender, receiver) = tokio::io::duplex(3);
+        let send = tokio::spawn(async move {
+            sender.write_all(b"0123456789").await.expect("write output");
+        });
+
+        let tail = read_child_output_tail(receiver, 4).await.expect("tail");
+        send.await.expect("writer task");
+
+        assert_eq!(tail, b"6789");
+        assert_eq!(
+            read_child_output_tail(b"ab".as_slice(), 4).await.unwrap(),
+            b"ab"
+        );
     }
 
     #[tokio::test]

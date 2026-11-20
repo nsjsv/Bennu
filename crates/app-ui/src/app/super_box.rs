@@ -10,8 +10,10 @@ use super::FileBrowser;
 use crate::model::{IndexedSearchOutcome, Message, NavigationMode, SettingsCategory};
 use crate::shortcuts::{ShortcutAction, ShortcutScope, ShortcutTarget};
 use crate::super_box::{
-    BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, NewEntry, SuperBox,
+    BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, NewEntry, RunEnd,
+    SuperBox,
 };
+use crate::terminal_panel::session::SessionId;
 use file_operations::QueuedFileOperation;
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,14 @@ pub(crate) enum SuperBoxMessage {
     },
     /// 命令模式的停止按钮。
     StopPressed,
+    /// 按了停止一会儿了：还没结束就强行结束。
+    StopGraceEnded(SessionId),
+    /// 命令模式的“转到终端”按钮。
+    ShowInTerminalPressed,
+    CommandEnded {
+        session: SessionId,
+        end: RunEnd,
+    },
     PastRunsLoaded(Result<Vec<crate::super_box::PastRun>, String>),
     /// 记命令结果没写进状态库时是原因。
     PastRunSaved(Option<String>),
@@ -65,6 +75,17 @@ impl FileBrowser {
                 outcome,
             } => self.accept_super_box_found(generation, *outcome),
             SuperBoxMessage::StopPressed => self.stop_super_box_command(),
+            SuperBoxMessage::StopGraceEnded(session) => {
+                self.kill_super_box_command(session);
+                Task::none()
+            }
+            SuperBoxMessage::ShowInTerminalPressed => {
+                self.show_running_super_box_command();
+                Task::none()
+            }
+            SuperBoxMessage::CommandEnded { session, end } => {
+                self.accept_super_box_command_end(session, end)
+            }
             SuperBoxMessage::PastRunsLoaded(loaded) => {
                 self.accept_past_super_box_runs(loaded);
                 Task::none()

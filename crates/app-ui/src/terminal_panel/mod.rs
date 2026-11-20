@@ -4,6 +4,7 @@
 //! 面板内是多个终端标签,同一时刻只渲染激活标签的网格。
 
 pub(crate) mod emulator;
+mod hidden;
 pub(crate) mod input;
 pub(crate) mod session;
 pub(crate) mod tabs;
@@ -80,6 +81,8 @@ pub(crate) struct TerminalPanelState {
     height_animation: Option<HeightAnimation>,
     resize_drag: Option<PanelResizeDrag>,
     pub(crate) tabs: Vec<TerminalTab>,
+    /// 超级输入框执行的命令：有终端、还没显示出来的标签（见 `hidden.rs`）。
+    pub(crate) hidden_tabs: Vec<TerminalTab>,
     pub(crate) active_session_id: Option<SessionId>,
     next_session_id: SessionId,
     /// 终端网格持有键盘焦点(点击面板获得;点击地址栏等输入会话自动让路)。
@@ -101,6 +104,7 @@ impl TerminalPanelState {
             height_animation: None,
             resize_drag: None,
             tabs: Vec::new(),
+            hidden_tabs: Vec::new(),
             active_session_id: None,
             next_session_id: 1,
             focused: false,
@@ -113,6 +117,12 @@ impl TerminalPanelState {
 
     pub(crate) fn height(&self) -> f32 {
         self.height
+    }
+
+    fn take_session_id(&mut self) -> SessionId {
+        let session_id = self.next_session_id;
+        self.next_session_id += 1;
+        session_id
     }
 
     pub(crate) fn is_resizing(&self) -> bool {
@@ -254,7 +264,11 @@ impl FileBrowser {
             return;
         }
         self.terminal_panel.follow_target_snapshot = Some(directory.clone());
-        let Some(active_tab) = self.terminal_panel.active_tab_mut() else {
+        let Some(active_tab) = self
+            .terminal_panel
+            .active_tab_mut()
+            .filter(|tab| tab.program == tabs::TabProgram::Shell)
+        else {
             return;
         };
         active_tab.directory = directory.clone();
@@ -284,7 +298,7 @@ impl FileBrowser {
     }
 
     /// 用户在设置里选的 shell;未选(空)时跟随系统登录 shell。
-    fn terminal_panel_shell(&self) -> String {
+    pub(crate) fn terminal_panel_shell(&self) -> String {
         if self.user_config().terminal_shell.is_empty() {
             session::shell_for_user()
         } else {
@@ -412,9 +426,23 @@ impl FileBrowser {
                     if active_session_id != Some(session) {
                         tab.has_unread_output = true;
                     }
+                } else if let Some(tab) = self
+                    .terminal_panel
+                    .hidden_tabs
+                    .iter_mut()
+                    .find(|tab| tab.session.id == session)
+                {
+                    tab.session.emulator.feed(&bytes);
+                    // 全屏界面要用户来操作：转到终端。
+                    if tab.session.emulator.is_full_screen() {
+                        self.show_super_box_command(session);
+                    }
                 }
             }
             TerminalPanelMessage::ProcessExited { session } => {
+                if let Some(ended) = self.take_hidden_terminal_session(session) {
+                    return self.super_box_command_ended(ended);
+                }
                 // 已断开的会话留着"已断开"提示和已有输出，由用户自己关；正常退出照旧关标签。
                 let disconnected =
                     self.terminal_panel.tabs.iter().any(|tab| {
@@ -530,15 +558,18 @@ impl FileBrowser {
         Some(Task::none())
     }
 
-    /// 终端面板的输出订阅;每个标签一份,后台标签持续积累输出。
+    /// 终端面板的输出订阅;每个标签一份(不显示的也有),后台标签持续积累输出。
     /// 同一会话重订阅时克隆读端继续读;运行时按 session_id 去重,
-    /// 重复构造的 recipe(连同其读端)会被丢弃。
+    /// 重复构造的 recipe(连同其读端)会被丢弃——不显示的标签移进标签条时输出不断。
     pub(crate) fn terminal_output_subscription(&self) -> iced::Subscription<Message> {
-        if self.terminal_panel.tabs.is_empty() {
-            return iced::Subscription::none();
-        }
-        let mut recipes = Vec::with_capacity(self.terminal_panel.tabs.len());
-        for tab in &self.terminal_panel.tabs {
+        let tabs = || {
+            self.terminal_panel
+                .tabs
+                .iter()
+                .chain(&self.terminal_panel.hidden_tabs)
+        };
+        let mut recipes = Vec::with_capacity(tabs().count());
+        for tab in tabs() {
             let Ok(reader) = tab.session.clone_reader() else {
                 tracing::error!("内嵌终端输出订阅失败: 读端不可用");
                 continue;

@@ -13,6 +13,7 @@ use super::{FileBrowser, MIN_PANEL_HEIGHT, TERMINAL_TAB_DRAG_ACTIVATION_DISTANCE
 use crate::animation::elapsed_fraction;
 use crate::model::Message;
 use bennu_theme::animation::ease_out_cubic;
+use file_operations::CommandInvocation;
 
 /// 单个终端标签:一个 PTY 会话 + 标签条展示所需的元数据。
 pub(crate) struct TerminalTab {
@@ -21,6 +22,16 @@ pub(crate) struct TerminalTab {
     pub(crate) directory: PathBuf,
     /// 非激活期间收到过输出,标签标题旁显示小圆点。
     pub(crate) has_unread_output: bool,
+    pub(crate) program: TabProgram,
+}
+
+/// 标签里跑的是什么。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TabProgram {
+    /// 交互 shell：跟着文件区换目录。
+    Shell,
+    /// 超级输入框执行的一条命令：不跟着换目录，往它的输入里打 `cd` 会打进程序里。
+    Command,
 }
 
 /// 终端标签拖拽状态;phase 语义与主区 [`crate::model::TabDragState`] 一致。
@@ -150,14 +161,16 @@ impl FileBrowser {
         let tab_strip_visible =
             super::view::tab_strip_visible_for_tab_count(self.terminal_panel.tabs.len() + 1);
         let rows = super::terminal_panel_canvas_rows(rows_height, tab_strip_visible);
-        let shell = self.terminal_panel_shell();
-        let session_id = self.terminal_panel.next_session_id;
-        self.terminal_panel.next_session_id += 1;
+        let shell = CommandInvocation {
+            program: self.terminal_panel_shell().into(),
+            arguments: Vec::new(),
+            working_directory: directory.clone(),
+        };
+        let session_id = self.terminal_panel.take_session_id();
 
         match super::session::spawn_terminal_session(
             session_id,
             &shell,
-            &directory,
             super::emulator_dimensions(columns, rows),
         ) {
             Ok(spawned) => {
@@ -165,6 +178,7 @@ impl FileBrowser {
                     session: spawned,
                     directory: directory.clone(),
                     has_unread_output: false,
+                    program: TabProgram::Shell,
                 });
                 self.terminal_panel.active_session_id = Some(session_id);
                 // 新 shell 已在目标目录,快照同步,避免紧接着注入一次 cd。

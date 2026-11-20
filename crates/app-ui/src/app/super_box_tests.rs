@@ -8,7 +8,10 @@ use crate::actions::{
 use crate::app::task_driving_tests::drive;
 use crate::config;
 use crate::model::BrowserLocation;
-use crate::super_box::BoxMode;
+use crate::super_box::{BoxMode, Exit, RunEnd, RunState};
+use crate::terminal_panel::session::SessionId;
+use crate::terminal_panel::TerminalPanelMessage;
+use iced::futures::{Stream, StreamExt};
 
 /// 窗口在前台：普通操作的完成通知不弹。
 fn browser_in(directory: &Path) -> FileBrowser {
@@ -253,6 +256,59 @@ fn run_state(browser: &FileBrowser) -> crate::super_box::RunState {
         .expect("a command ran")
 }
 
+fn exited(browser: &FileBrowser) -> (Exit, String) {
+    match run_state(browser) {
+        RunState::Ended(RunEnd::Exited { exit, output }) => (exit, output.text),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// 测试里没有订阅：用订阅的那条输出流把命令终端里的输出交给浏览器。转到终端后同一条流接着读。
+struct CommandOutput(std::pin::Pin<Box<dyn Stream<Item = TerminalPanelMessage>>>);
+
+impl CommandOutput {
+    /// 框里最近开始的那条命令。
+    fn of_the_last_command(browser: &FileBrowser) -> (SessionId, Self) {
+        let tab = browser
+            .terminal_panel
+            .hidden_tabs
+            .last()
+            .expect("a command is running");
+        let reader = tab.session.clone_reader().unwrap();
+        let stream = crate::terminal_panel::session::terminal_output_stream(tab.session.id, reader);
+        (tab.session.id, Self(Box::pin(stream)))
+    }
+
+    async fn deliver_until(
+        &mut self,
+        browser: &mut FileBrowser,
+        done: impl Fn(&FileBrowser) -> bool,
+    ) {
+        while !done(browser) {
+            let message = tokio::time::timeout(std::time::Duration::from_secs(20), self.0.next())
+                .await
+                .expect("the command hung")
+                .expect("output keeps coming until the end");
+            let task = browser.update(Message::TerminalPanel(message));
+            drive(browser, task).await;
+        }
+    }
+
+    /// 读到命令结束、等它退出、结果交回去为止。
+    async fn deliver_to_the_end(&mut self, browser: &mut FileBrowser, session: SessionId) {
+        self.deliver_until(browser, |browser| {
+            browser.hidden_terminal_session(session).is_none()
+        })
+        .await;
+    }
+}
+
+async fn run_to_the_end(browser: &mut FileBrowser, text: &str) {
+    type_and_run(browser, text).await;
+    let (session, mut output) = CommandOutput::of_the_last_command(browser);
+    output.deliver_to_the_end(browser, session).await;
+}
+
 #[tokio::test]
 async fn a_command_gets_the_selection_as_arguments_and_shows_its_output() {
     let directory = tempfile::tempdir().unwrap();
@@ -262,7 +318,7 @@ async fn a_command_gets_the_selection_as_arguments_and_shows_its_output() {
     let mut browser = browser_listing(&root).await;
     browser.select_path(tricky.clone());
 
-    type_and_run(
+    run_to_the_end(
         &mut browser,
         "s:printf '%s' \"$1\" > got.txt; echo \"$0 has $#\"; echo careful >&2",
     )
@@ -273,12 +329,11 @@ async fn a_command_gets_the_selection_as_arguments_and_shows_its_output() {
         tricky.to_str().unwrap()
     );
     assert!(!root.join("pwned").exists() && !root.join("pwned2").exists());
-    match run_state(&browser) {
-        crate::super_box::RunState::Ended(crate::super_box::RunEnd::Finished(output)) => {
-            assert_eq!(output.text, "bennu has 1\ncareful");
-        }
-        other => panic!("{other:?}"),
-    }
+    // 标准输出和标准错误都在终端里，按出现的顺序。
+    assert_eq!(
+        exited(&browser),
+        (Exit::Code(0), "bennu has 1\ncareful".to_owned())
+    );
     assert_eq!(
         browser.user_config.super_box_history.entries()[0],
         "s:printf '%s' \"$1\" > got.txt; echo \"$0 has $#\"; echo careful >&2"
@@ -288,23 +343,19 @@ async fn a_command_gets_the_selection_as_arguments_and_shows_its_output() {
         0,
         "commands are not undone"
     );
+    assert!(
+        browser.operation_queue.tasks().is_empty(),
+        "commands do not go through the task queue"
+    );
 }
 
 #[tokio::test]
-async fn a_failing_command_says_why_in_the_box() {
+async fn a_failing_command_shows_its_exit_status_and_output() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
     let mut browser = browser_listing(&root).await;
-    type_and_run(&mut browser, "s:echo broken >&2; exit 3").await;
-    match run_state(&browser) {
-        crate::super_box::RunState::Ended(crate::super_box::RunEnd::Failed(reason)) => {
-            assert!(
-                reason.contains('3') && reason.contains("broken"),
-                "{reason}"
-            );
-        }
-        other => panic!("{other:?}"),
-    }
+    run_to_the_end(&mut browser, "s:echo broken >&2; exit 3").await;
+    assert_eq!(exited(&browser), (Exit::Code(3), "broken".to_owned()));
 }
 
 #[tokio::test]
@@ -312,20 +363,159 @@ async fn closing_the_box_lets_the_command_finish() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
     let mut browser = browser_listing(&root).await;
-    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
-    send(
-        &mut browser,
-        SuperBoxMessage::InputChanged("s:sleep 0.2; touch late".to_owned()),
-    )
-    .await;
-    let enter_key = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
-    let queued = browser
-        .super_box_key(&enter_key, iced::keyboard::Modifiers::empty())
-        .unwrap();
+    type_and_run(&mut browser, "s:sleep 0.2; touch late").await;
+    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
     drop(browser.update(Message::DismissFloating));
     assert!(browser.super_box.is_none());
-    drive(&mut browser, queued).await;
+    output.deliver_to_the_end(&mut browser, session).await;
     assert!(root.join("late").exists());
+}
+
+#[tokio::test]
+async fn stop_ends_the_command_and_kills_it_when_it_ignores_that() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    type_and_run(&mut browser, "s:echo started; sleep 30").await;
+    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
+    output
+        .deliver_until(&mut browser, |browser| {
+            browser
+                .hidden_terminal_session(session)
+                .is_some_and(|running| running.emulator.last_lines(1) == "started")
+        })
+        .await;
+    // 不等两秒后的强行结束：SIGTERM 就够了。
+    drop(browser.update(Message::SuperBox(SuperBoxMessage::StopPressed)));
+    output.deliver_to_the_end(&mut browser, session).await;
+    assert!(matches!(exited(&browser), (Exit::Signal(_), output) if output == "started"));
+
+    // 忽略 SIGTERM 的（子进程也跟着忽略），等够了就强行结束。
+    type_and_run(&mut browser, "s:trap '' TERM; echo started; sleep 30").await;
+    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
+    output
+        .deliver_until(&mut browser, |browser| {
+            browser
+                .hidden_terminal_session(session)
+                .is_some_and(|running| running.emulator.last_lines(1) == "started")
+        })
+        .await;
+    drop(browser.update(Message::SuperBox(SuperBoxMessage::StopPressed)));
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    assert!(browser.hidden_terminal_session(session).is_some());
+    drop(browser.update(Message::SuperBox(SuperBoxMessage::StopGraceEnded(session))));
+    output.deliver_to_the_end(&mut browser, session).await;
+    assert!(matches!(exited(&browser), (Exit::Signal(_), _)));
+}
+
+/// 全屏界面要用户来操作：整个移进终端面板，接着跑，不跟着文件区换目录（`cd` 不会打进程序里）。
+#[tokio::test]
+async fn a_full_screen_program_moves_to_the_terminal_panel_and_keeps_running() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("elsewhere")).unwrap();
+    let mut browser = browser_listing(&root).await;
+    // 列表视图里终端跟着当前文件夹走（多栏视图跟着鼠标指着的那栏，测试里没有鼠标）。
+    browser
+        .tab_mut()
+        .choose_view_mode(crate::model::BrowserViewMode::List);
+    type_and_run(
+        &mut browser,
+        "s:printf '\\033[?1049h'; read answer; printf '%s' \"$answer\" > answer.txt",
+    )
+    .await;
+    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
+    output
+        .deliver_until(&mut browser, |browser| {
+            browser.hidden_terminal_session(session).is_none()
+        })
+        .await;
+
+    assert!(browser.super_box.is_none(), "the box gets out of the way");
+    assert!(browser.terminal_panel.is_expanded() && browser.terminal_panel.is_focused());
+    let tab = browser
+        .terminal_panel
+        .active_tab()
+        .expect("it is a tab now");
+    assert_eq!(
+        (tab.session.id, tab.program),
+        (session, crate::terminal_panel::tabs::TabProgram::Command)
+    );
+
+    let navigated = browser.navigate_to(
+        root.join("elsewhere"),
+        crate::model::NavigationMode::RecordHistory,
+    );
+    drive(&mut browser, navigated).await;
+    let keys = browser.terminal_panel_keyboard_input(
+        &iced::keyboard::Key::Character("y".into()),
+        iced::keyboard::Modifiers::empty(),
+    );
+    drive(&mut browser, keys.expect("the terminal takes the keys")).await;
+    browser
+        .terminal_panel
+        .active_tab()
+        .unwrap()
+        .session
+        .write_input(b"es\r");
+    output
+        .deliver_until(&mut browser, |browser| {
+            browser.terminal_panel.tabs.is_empty()
+        })
+        .await;
+    assert_eq!(
+        std::fs::read_to_string(root.join("answer.txt")).unwrap(),
+        "yes"
+    );
+    assert!(
+        browser
+            .super_box_commands
+            .past("printf '\\033[?1049h'; read answer; printf '%s' \"$answer\" > answer.txt")
+            .is_none(),
+        "what it did is in the terminal, not in the box"
+    );
+}
+
+#[tokio::test]
+async fn a_running_command_can_be_moved_to_the_terminal() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    type_and_run(&mut browser, "s:printf 'Password: '; read answer").await;
+    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
+    output
+        .deliver_until(&mut browser, |browser| {
+            browser
+                .hidden_terminal_session(session)
+                .is_some_and(|running| running.emulator.last_lines(1) == "Password:")
+        })
+        .await;
+
+    send(&mut browser, SuperBoxMessage::ShowInTerminalPressed).await;
+
+    assert!(browser.super_box.is_none());
+    assert_eq!(
+        browser
+            .terminal_panel
+            .active_tab()
+            .map(|tab| tab.session.id),
+        Some(session)
+    );
+    browser
+        .terminal_panel
+        .active_tab()
+        .unwrap()
+        .session
+        .write_input(b"secret\r");
+    output
+        .deliver_until(&mut browser, |browser| {
+            browser.terminal_panel.tabs.is_empty()
+        })
+        .await;
+    assert!(
+        !browser.terminal_panel.is_expanded(),
+        "it closes like any tab"
+    );
 }
 
 #[tokio::test]
@@ -572,27 +762,22 @@ async fn a_command_result_is_kept_even_when_the_box_was_closed() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().canonicalize().unwrap();
     let mut browser = browser_listing(&root).await;
-    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
-    send(
-        &mut browser,
-        SuperBoxMessage::InputChanged("s:echo kept".to_owned()),
-    )
-    .await;
-    let enter_key = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
-    let queued = browser
-        .super_box_key(&enter_key, iced::keyboard::Modifiers::empty())
-        .unwrap();
+    type_and_run(&mut browser, "s:echo kept").await;
+    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
     drop(browser.update(Message::DismissFloating));
-    drive(&mut browser, queued).await;
+    output.deliver_to_the_end(&mut browser, session).await;
 
     let past = browser
         .super_box_commands
         .past("echo kept")
         .expect("the result is remembered");
-    match &past.end {
-        crate::super_box::RunEnd::Finished(output) => assert_eq!(output.text, "kept"),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(
+        past.end,
+        RunEnd::Exited {
+            exit: Exit::Code(0),
+            output: crate::super_box::ShownOutput::from_text("kept".to_owned()),
+        }
+    );
 
     // 命令模式里选中这条历史就能看到它（框重新打开，历史行是它）。
     drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));

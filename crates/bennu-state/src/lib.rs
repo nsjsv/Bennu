@@ -20,7 +20,9 @@ pub use browser_session::{
     StoredBrowserSession, StoredBrowserTab, StoredBrowserViewMode, StoredColumnBrowserViewport,
     StoredColumnViewport, StoredListViewport, StoredSplitAxis,
 };
-pub use command_outputs::{CommandOutputStore, StoredCommandOutput, StoredCommandResult};
+pub use command_outputs::{
+    CommandOutputStore, StoredCommandOutput, StoredCommandResult, StoredExit,
+};
 pub use database::StateDatabase;
 pub use error::{StoreError, StoreResult};
 pub use preferences_payload::{

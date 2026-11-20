@@ -69,6 +69,7 @@ pub(crate) use preview_panel::view_preview_window;
 pub(crate) use properties_window::view_properties_window;
 pub(crate) use search_panel::search_input_id;
 pub(crate) use settings_window::view_settings_window;
+pub(crate) use super_box::super_box_output_columns;
 pub(crate) use transfer_window::view_transfer_window;
 
 use std::path::Path;

@@ -247,10 +247,9 @@ impl FileBrowser {
         completion: FileOperationCompletion,
     ) -> Task<Message> {
         let completed_operation = self.operation_queue.operation(task_id).cloned();
-        let super_box_ended = self.super_box_task_ended(task_id, &completion);
         let queue_outcome = queue_finish_from_completion(&completion);
         let Some(terminal_status) = self.operation_queue.finish(task_id, queue_outcome) else {
-            return super_box_ended;
+            return Task::none();
         };
 
         let completed_successfully = matches!(completion, FileOperationCompletion::Succeeded(_));
@@ -265,7 +264,7 @@ impl FileBrowser {
 
         // 入队前定下的收尾动作(进入/新标签进入/只选中)替代默认的重命名态;
         // 历史重放和动作不消费收尾意图;创建失败时丢弃,避免遗留到无关操作。
-        let mut tasks: Vec<Task<Message>> = vec![super_box_ended];
+        let mut tasks: Vec<Task<Message>> = Vec::new();
         let creates_entry = completed_operation.as_ref().is_some_and(|operation| {
             matches!(
                 operation,
@@ -696,27 +695,16 @@ impl FileBrowser {
         &mut self,
         operation: QueuedFileOperation,
     ) -> Task<Message> {
-        self.enqueue_file_operation_with_id(operation).1
-    }
-
-    /// 同 [`Self::enqueue_file_operation`]，另外交回任务号（被拒时为 None），等它结束的调用方用。
-    pub(super) fn enqueue_file_operation_with_id(
-        &mut self,
-        operation: QueuedFileOperation,
-    ) -> (Option<u64>, Task<Message>) {
         self.retract_global_error(GlobalErrorSource::FileOperationEnqueue);
-        let task_id = match self.operation_queue.enqueue(operation) {
-            FileOperationEnqueueOutcome::Queued { task_id } => Some(task_id),
-            FileOperationEnqueueOutcome::Rejected { error } => {
-                self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
-                None
-            }
-        };
-        let follow_up = Task::batch([
+        if let FileOperationEnqueueOutcome::Rejected { error } =
+            self.operation_queue.enqueue(operation)
+        {
+            self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
+        }
+        Task::batch([
             self.continue_file_operation_persistence(),
             self.launch_ready_driver(),
-        ]);
-        (task_id, follow_up)
+        ])
     }
     fn focus_after_file_operation_removal(
         &mut self,

@@ -474,7 +474,7 @@ fn index_results_follow_the_other_entries_and_stale_ones_are_dropped() {
 }
 
 #[test]
-fn a_command_run_belongs_to_its_task() {
+fn a_command_run_belongs_to_its_session() {
     let taken = nothing_taken;
     let context = context(&taken);
     let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
@@ -483,10 +483,16 @@ fn a_command_run_belongs_to_its_task() {
     super_box.start_run(7, "make".to_owned());
     super_box.finish_run(8, RunEnd::Failed("other".to_owned()));
     assert_eq!(super_box.run().unwrap().state, RunState::Running);
-    super_box.finish_run(7, RunEnd::finished(&Default::default()));
+    super_box.finish_run(
+        7,
+        RunEnd::Exited {
+            exit: Exit::Code(0),
+            output: ShownOutput::default(),
+        },
+    );
     assert!(matches!(
         super_box.run().unwrap().state,
-        RunState::Ended(RunEnd::Finished(_))
+        RunState::Ended(RunEnd::Exited { .. })
     ));
 
     let nowhere = BoxContext {
@@ -495,21 +501,4 @@ fn a_command_run_belongs_to_its_task() {
     };
     super_box.set_input("make".to_owned(), &nowhere);
     assert!(matches!(super_box.rows(), [BoxRow::Problem(_)]));
-}
-
-#[test]
-fn the_shown_output_is_the_last_lines_with_errors_after() {
-    let output = file_operations::CommandOutput {
-        stdout: (0..300)
-            .map(|line| format!("line {line}\n"))
-            .collect::<String>()
-            .into_bytes(),
-        stderr: b"warning: careful\n".to_vec(),
-    };
-    let RunEnd::Finished(shown) = RunEnd::finished(&output) else {
-        panic!("finished");
-    };
-    assert_eq!(shown.lines, 200);
-    assert!(shown.text.starts_with("line 101\n"));
-    assert!(shown.text.ends_with("line 299\nwarning: careful"));
 }

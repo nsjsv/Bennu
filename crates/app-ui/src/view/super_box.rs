@@ -11,8 +11,9 @@ use crate::app::{super_box_input_id, FileBrowser, SuperBoxMessage};
 use crate::formatting::{format_middle_ellipsized_text, format_system_time};
 use crate::model::Message;
 use crate::super_box::{
-    read_history, BoxMode, BoxRow, FindStatus, NewEntry, RunEnd, RunState, SuperBox,
+    read_history, BoxMode, BoxRow, Exit, FindStatus, NewEntry, RunEnd, RunState, SuperBox,
 };
+use crate::terminal_panel::session::TerminalSession;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::{normal_button, text_field, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
@@ -29,9 +30,19 @@ pub(super) const SUPER_BOX_WIDTH: f32 = 560.0;
 /// 框的上沿离内容区顶部的距离。
 pub(super) const SUPER_BOX_TOP: f32 = 12.0;
 const PATH_MAX_CHARS: usize = 64;
-/// 输出不超过这么多行就直接排开，再多就放进滚动区。
+/// 输出不超过这么多行就直接排开，再多就放进滚动区。跑的时候显示最后这么多行。
 const OUTPUT_LINES_WITHOUT_SCROLLING: usize = 12;
 const OUTPUT_SCROLL_HEIGHT: f32 = 240.0;
+
+/// 框的留白，和结果面板（输出所在）的左右留白。
+const BOX_PADDING: f32 = 8.0;
+const PANEL_PADDING: [f32; 2] = [4.0, 8.0];
+
+/// 框里输出那一栏放得下几个等宽字：命令的终端就这么宽，输出在框里不再折行。
+pub(crate) fn super_box_output_columns() -> usize {
+    let width = SUPER_BOX_WIDTH - 2.0 * (BOX_PADDING + PANEL_PADDING[1]);
+    (width / (CAPTION_SIZE * bennu_theme::font_families::monospace_advance_em())).floor() as usize
+}
 
 fn message(message: SuperBoxMessage) -> Message {
     Message::SuperBox(message)
@@ -94,21 +105,23 @@ pub(super) fn super_box_panel<'a>(
     // 命令模式：这次跑的那条的结果；没跑过时，选中的那条历史上次的结果。
     if let Some(run) = super_box.run() {
         content = content.push(match &run.state {
-            RunState::Running => running_line(&run.command),
-            RunState::Ended(end) => end_panel(tr!("Finished, exit status 0"), end),
+            RunState::Running => {
+                running_panel(&run.command, browser.hidden_terminal_session(run.session))
+            }
+            RunState::Ended(end) => end_panel(None, end),
         });
     } else if let (BoxMode::Shell, Some(BoxRow::History(entry))) = (mode, super_box.selected_row())
     {
         if let Some(past) = browser.super_box_commands.past(read_history(entry).1) {
             let at = UNIX_EPOCH + Duration::from_millis(past.at_ms.max(0) as u64);
             content = content.push(end_panel(
-                tr!("Last run %1", format_system_time(at)),
+                Some(tr!("Last run %1", format_system_time(at))),
                 &past.end,
             ));
         }
     }
     container(content)
-        .padding(8)
+        .padding(BOX_PADDING)
         .width(Length::Fixed(SUPER_BOX_WIDTH))
         .style(context_menu_style)
         .into()
@@ -138,7 +151,7 @@ fn empty_hint(super_box: &SuperBox) -> String {
             "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page."
         ),
         BoxMode::Shell => tr!(
-            "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Ctrl+Enter runs it in the terminal panel."
+            "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there."
         ),
         BoxMode::Search => tr!(
             "Type to find what to do. Tab switches to going to a path or making a new item; g: and n: do it too."
@@ -287,49 +300,83 @@ fn result_row<'a>(
     .into()
 }
 
-/// 正在跑：命令和“停止”。
-fn running_line(command: &str) -> Element<'static, Message> {
-    container(
-        row![
-            readable_text(tr!("Running %1", command))
-                .font(Font::MONOSPACE)
-                .width(Length::Fill),
-            normal_button(readable_text(tr!("Stop")))
-                .on_press(message(SuperBoxMessage::StopPressed)),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center),
-    )
-    .padding([4, 8])
-    .into()
+/// 正在跑：命令、“转到终端”和“停止”，下面是它终端里最后几行（在等密码时能看到提示）。
+fn running_panel<'a>(command: &str, session: Option<&TerminalSession>) -> Element<'a, Message> {
+    let mut panel = Column::new()
+        .push(
+            row![
+                readable_text(tr!("Running %1", command))
+                    .font(Font::MONOSPACE)
+                    .width(Length::Fill),
+                normal_button(readable_text(tr!("Move to Terminal")))
+                    .on_press(message(SuperBoxMessage::ShowInTerminalPressed)),
+                normal_button(readable_text(tr!("Stop")))
+                    .on_press(message(SuperBoxMessage::StopPressed)),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .spacing(4);
+    let live = session
+        .map(|session| session.emulator.last_lines(OUTPUT_LINES_WITHOUT_SCROLLING))
+        .unwrap_or_default();
+    if !live.is_empty() {
+        panel = panel.push(output_text(live));
+    }
+    container(panel).padding(PANEL_PADDING).into()
 }
 
-/// 跑完的结果：标题一行（这次跑完 / 上次的时间），下面是输出的末尾或失败原因。
-fn end_panel(heading: String, end: &RunEnd) -> Element<'_, Message> {
-    let mut panel = Column::new().push(muted(heading)).spacing(4);
-    match end {
-        RunEnd::Failed(reason) => panel = panel.push(error_text(reason.clone())),
-        RunEnd::Finished(output) if !output.text.trim().is_empty() => {
-            // 借用框里的字，不每帧复制；输出里常有中文文件名，按复杂文字排版。
-            let text = iced::widget::text(output.text.as_str())
-                .shaping(iced::widget::text::Shaping::Advanced)
-                .size(CAPTION_SIZE)
-                .font(Font::MONOSPACE);
-            // 短的直接排开；长的放进固定高度的滚动区，停在最后面（看末尾）。
-            panel = if output.lines <= OUTPUT_LINES_WITHOUT_SCROLLING {
-                panel.push(text)
-            } else {
-                panel.push(
-                    iced::widget::scrollable(text)
-                        .anchor_bottom()
-                        .height(Length::Fixed(OUTPUT_SCROLL_HEIGHT))
-                        .width(Length::Fill),
-                )
-            };
-        }
-        RunEnd::Finished(_) => {}
+/// 跑完的结果：标题一行（怎么结束的，以前的还有时间），下面是输出的末尾。
+fn end_panel(when: Option<String>, end: &RunEnd) -> Element<'_, Message> {
+    let (ended, output) = match end {
+        RunEnd::Exited {
+            exit: Exit::Code(0),
+            output,
+        } => (Ok(tr!("Finished, exit status 0")), Some(output)),
+        RunEnd::Exited {
+            exit: Exit::Code(code),
+            output,
+        } => (Err(tr!("Exit status %1", code)), Some(output)),
+        RunEnd::Exited {
+            exit: Exit::Signal(name),
+            output,
+        } => (Err(tr!("Ended by signal: %1", name)), Some(output)),
+        RunEnd::Failed(reason) => (Err(reason.clone()), None),
+    };
+    let heading = |ended: String| match &when {
+        Some(when) => format!("{when} · {ended}"),
+        None => ended,
+    };
+    let mut panel = Column::new()
+        .push(match ended {
+            Ok(ended) => muted(heading(ended)),
+            Err(ended) => error_caption(heading(ended)),
+        })
+        .spacing(4);
+    if let Some(output) = output.filter(|output| !output.text.trim().is_empty()) {
+        // 借用框里的字，不每帧复制。短的直接排开；长的放进固定高度的滚动区，停在最后面（看末尾）。
+        panel = if output.lines <= OUTPUT_LINES_WITHOUT_SCROLLING {
+            panel.push(output_text(output.text.as_str()))
+        } else {
+            panel.push(
+                iced::widget::scrollable(output_text(output.text.as_str()))
+                    .anchor_bottom()
+                    .height(Length::Fixed(OUTPUT_SCROLL_HEIGHT))
+                    .width(Length::Fill),
+            )
+        };
     }
-    container(panel).padding([4, 8]).into()
+    container(panel).padding(PANEL_PADDING).into()
+}
+
+/// 命令的输出：等宽；里面常有中文文件名，按复杂文字排版。
+fn output_text<'a>(
+    text: impl iced::widget::text::IntoFragment<'a>,
+) -> iced::widget::Text<'a, Theme> {
+    iced::widget::text(text)
+        .shaping(iced::widget::text::Shaping::Advanced)
+        .size(CAPTION_SIZE)
+        .font(Font::MONOSPACE)
 }
 
 /// 主目录下的路径写成 `~/…`，太长时从中间省略。
@@ -352,13 +399,14 @@ fn muted(text: String) -> Element<'static, Message> {
 }
 
 fn error_text(text: String) -> Element<'static, Message> {
-    container(
-        readable_text(text)
-            .size(CAPTION_SIZE)
-            .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(ui_colors(theme).error),
-            }),
-    )
-    .padding([4, 8])
-    .into()
+    container(error_caption(text)).padding([4, 8]).into()
+}
+
+fn error_caption(text: String) -> Element<'static, Message> {
+    readable_text(text)
+        .size(CAPTION_SIZE)
+        .style(|theme: &Theme| iced::widget::text::Style {
+            color: Some(ui_colors(theme).error),
+        })
+        .into()
 }

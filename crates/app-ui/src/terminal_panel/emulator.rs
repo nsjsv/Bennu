@@ -6,7 +6,7 @@ use alacritty_terminal::grid::{Dimensions, GridIterator, Scroll};
 use alacritty_terminal::index::{Column, Line, Point, Side};
 use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config as TermConfig, RenderableContent, Term};
+use alacritty_terminal::term::{Config as TermConfig, RenderableContent, Term, TermMode};
 use alacritty_terminal::vte::ansi::Processor;
 use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
 
@@ -180,6 +180,28 @@ impl TerminalEmulator {
 
     pub(crate) fn selection_string(&self) -> Option<String> {
         self.term.selection_to_string()
+    }
+
+    /// 程序打开了全屏界面，要用户来操作：切到了备用屏幕，或者打开了方向键的程序模式（DECCKM）。
+    /// top 不切备用屏幕，只开方向键模式；普通命令两样都不碰。
+    pub(crate) fn is_full_screen(&self) -> bool {
+        self.term
+            .mode()
+            .intersects(TermMode::ALT_SCREEN | TermMode::APP_CURSOR)
+    }
+
+    /// 最后 `count` 行字（连同回看），行尾空白去掉，后面空着的行不算。
+    pub(crate) fn last_lines(&self, count: usize) -> String {
+        let bottom = self.term.bottommost_line();
+        // 屏幕下半截可能还空着：多取一屏，去掉空行后再数。
+        let reach = (count + self.term.screen_lines()) as i32;
+        let top = Line((bottom.0 - reach + 1).max(self.term.topmost_line().0));
+        let text = self.term.bounds_to_string(
+            Point::new(top, Column(0)),
+            Point::new(bottom, self.term.last_column()),
+        );
+        let lines: Vec<&str> = text.trim_end().lines().map(str::trim_end).collect();
+        lines[lines.len().saturating_sub(count)..].join("\n")
     }
 
     fn absolute_point(&self, screen_row: usize, column: usize) -> Point<Line, Column> {
@@ -357,5 +379,29 @@ mod tests {
         let frame = emulator.renderable_frame();
         let second: String = frame.lines[1].iter().map(|cell| cell.character).collect();
         assert!(second.starts_with("two"));
+    }
+
+    #[test]
+    fn the_last_lines_come_from_the_history_too_and_skip_the_empty_screen_below() {
+        let mut emulator = emulator(6, 3);
+        // 换行时折到下一行的不算两行；进度条用回车改写的只留最后的样子。
+        emulator.feed(b"one\r\ntwo\r\n10%\r100%  \r\nlong line\r\n");
+        assert_eq!(emulator.last_lines(3), "two\n100%\nlong line");
+        assert_eq!(emulator.last_lines(10), "one\ntwo\n100%\nlong line");
+        assert_eq!(emulator.last_lines(1), "long line");
+    }
+
+    #[test]
+    fn a_program_that_takes_over_the_screen_or_the_arrow_keys_is_full_screen() {
+        let mut emulator = emulator(10, 4);
+        emulator.feed(b"plain output\r\n");
+        assert!(!emulator.is_full_screen());
+        emulator.feed(b"\x1b[?1049h");
+        assert!(emulator.is_full_screen());
+        emulator.feed(b"\x1b[?1049l");
+        assert!(!emulator.is_full_screen());
+        // top 只发这个。
+        emulator.feed(b"\x1b[?1h");
+        assert!(emulator.is_full_screen());
     }
 }

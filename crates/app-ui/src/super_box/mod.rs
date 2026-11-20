@@ -15,7 +15,6 @@ mod targets;
 
 use std::path::{Path, PathBuf};
 
-use file_operations::CommandOutput;
 use file_search::{SearchHit, SearchTextScope};
 
 pub(crate) use find::{read_find_query, FindQuery};
@@ -26,6 +25,7 @@ pub(crate) use shell::shell_invocation;
 pub(crate) use targets::NewEntry;
 
 use crate::model::InputHistory;
+use crate::terminal_panel::session::SessionId;
 
 pub(crate) type SuperBoxHistory = InputHistory<100>;
 
@@ -86,10 +86,10 @@ pub(crate) enum FindStatus {
     Unavailable(String),
 }
 
-/// 命令模式里正在跑的、或者跑完的那一次。
+/// 命令模式里正在跑的、或者跑完的那一次。命令在不显示的终端标签里跑，`session` 是它的会话。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommandRun {
-    pub(crate) task_id: u64,
+    pub(crate) session: SessionId,
     pub(crate) command: String,
     pub(crate) state: RunState,
 }
@@ -103,23 +103,29 @@ pub(crate) enum RunState {
 /// 一条命令怎么结束的。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunEnd {
-    /// 退出码 0：要显示的输出，结束时拼好一次。
-    Finished(ShownOutput),
-    /// 退出码不是 0、没启动起来、被停止：给用户看的原因。
+    /// 程序退出了：怎么退出的，和它终端里最后的输出（结束时取一次）。
+    Exited { exit: Exit, output: ShownOutput },
+    /// 等不到它的退出情况：原因。
     Failed(String),
 }
 
-/// 框里显示的输出：最后 [`SHOWN_OUTPUT_LINES`] 行，标准输出在前、标准错误在后。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Exit {
+    Code(u32),
+    /// 被信号结束（比如按了停止）：信号的名字。
+    Signal(String),
+}
+
+/// 框里显示的输出：终端里最后 [`SHOWN_OUTPUT_LINES`] 行，就是终端里显示的样子。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ShownOutput {
     pub(crate) text: String,
     pub(crate) lines: usize,
 }
 
-const SHOWN_OUTPUT_LINES: usize = 200;
+pub(crate) const SHOWN_OUTPUT_LINES: usize = 200;
 
 impl ShownOutput {
-    /// 存起来的输出读回来时用。
     pub(crate) fn from_text(text: String) -> Self {
         let lines = text.lines().count();
         Self { text, lines }
@@ -138,23 +144,6 @@ pub(crate) struct PastRun {
 
 /// 记几条命令的结果。
 pub(crate) const PAST_RUNS_KEPT: usize = 20;
-
-impl RunEnd {
-    pub(crate) fn finished(output: &CommandOutput) -> Self {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let lines = stdout
-            .lines()
-            .chain(stderr.lines())
-            .map(str::trim_end)
-            .collect::<Vec<_>>();
-        let shown = &lines[lines.len().saturating_sub(SHOWN_OUTPUT_LINES)..];
-        Self::Finished(ShownOutput {
-            text: shown.join("\n"),
-            lines: shown.len(),
-        })
-    }
-}
 
 /// 搜索模式里最多列几个索引结果，排在功能、动作这些后面。
 const FOUND_IN_SEARCH: usize = 5;
@@ -348,18 +337,18 @@ impl SuperBox {
         self.refresh(context);
     }
 
-    /// 命令进了队列。
-    pub(crate) fn start_run(&mut self, task_id: u64, command: String) {
+    /// 命令开始跑了。
+    pub(crate) fn start_run(&mut self, session: SessionId, command: String) {
         self.run = Some(CommandRun {
-            task_id,
+            session,
             command,
             state: RunState::Running,
         });
     }
 
-    /// 队列里的任务结束了；不是这个框发的就不管。
-    pub(crate) fn finish_run(&mut self, task_id: u64, end: RunEnd) {
-        if let Some(run) = self.run.as_mut().filter(|run| run.task_id == task_id) {
+    /// 命令结束了；不是这个框发的就不管。
+    pub(crate) fn finish_run(&mut self, session: SessionId, end: RunEnd) {
+        if let Some(run) = self.run.as_mut().filter(|run| run.session == session) {
             run.state = RunState::Ended(end);
         }
     }

@@ -1,28 +1,38 @@
-//! 超级输入框执行命令：交给用户的 shell，进任务队列（能暂停、取消），框里等结果；Ctrl+Enter 改成
-//! 送进底部终端面板。每条命令最后一次的结果记进状态库，重启后在命令模式的历史里还能看。
+//! 超级输入框执行命令：交给用户的 shell，在一个不显示的终端标签里跑——程序看到的是终端，所以全屏
+//! 界面、分页、问密码都照常。框里边跑边显示最后几行，跑完显示退出情况和输出的末尾。程序打开全屏
+//! 界面、或者用户点“转到终端”时，把它原样移进底部终端面板接着用。Ctrl+Enter 改成打进终端面板的
+//! shell。每条命令最后一次的结果记进状态库，重启后在命令模式的历史里还能看。
 //!
-//! 哪些任务是框发的命令由这里记（`SuperBoxCommands`），不靠框：命令跑完时框可能已经关了，
+//! 哪些会话是框发的命令由这里记（`SuperBoxCommands`），不靠框：命令跑完时框可能已经关了，
 //! 结果照样要记下来。
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::time::Duration;
 
-use bennu_state::{CommandOutputStore, StoredCommandOutput, StoredCommandResult};
+use bennu_state::{CommandOutputStore, StoredCommandOutput, StoredCommandResult, StoredExit};
 use iced::Task;
 
 use super::super_box::SuperBoxMessage;
 use super::FileBrowser;
 use crate::model::Message;
-use crate::super_box::{shell_invocation, PastRun, RunEnd, RunState, ShownOutput, PAST_RUNS_KEPT};
-use file_operations::{FileOperationCompletion, FileOperationOutcome, QueuedFileOperation};
+use crate::super_box::{
+    shell_invocation, Exit, PastRun, RunEnd, RunState, ShownOutput, SuperBox, PAST_RUNS_KEPT,
+    SHOWN_OUTPUT_LINES,
+};
+use crate::terminal_panel::session::{SessionId, TerminalSession};
 
 /// 存进状态库的输出最多这么多（末尾）。
 const STORED_OUTPUT_BYTES: usize = 16 * 1024;
+/// 命令的终端有几行：输出在框里看，多少行都行，取最常见的终端高度。
+const COMMAND_ROWS: usize = 24;
+/// 停止时先 SIGTERM 让它自己收拾；过这么久还没结束就 SIGKILL 整组。
+const STOP_GRACE: Duration = Duration::from_secs(2);
 
-/// 框发出去、还没结束的命令（任务号 → 命令），和最近几条命令的结果（新的在前）。
+/// 框发出去、还没结束的命令（会话号 → 命令），和最近几条命令的结果（新的在前）。转到终端的命令
+/// 不在这里：之后它就是一个终端标签，输出在终端里。
 #[derive(Debug, Default)]
 pub(crate) struct SuperBoxCommands {
-    running: HashMap<u64, String>,
+    running: HashMap<SessionId, String>,
     past: Vec<PastRun>,
 }
 
@@ -41,7 +51,11 @@ impl SuperBoxCommands {
 
 fn stored(run: &PastRun) -> StoredCommandOutput {
     let result = match &run.end {
-        RunEnd::Finished(output) => StoredCommandResult::Finished {
+        RunEnd::Exited { exit, output } => StoredCommandResult::Exited {
+            exit: match exit {
+                Exit::Code(code) => StoredExit::Code(*code),
+                Exit::Signal(name) => StoredExit::Signal(name.clone()),
+            },
             output: tail(&output.text, STORED_OUTPUT_BYTES).to_owned(),
         },
         RunEnd::Failed(reason) => StoredCommandResult::Failed {
@@ -60,9 +74,13 @@ fn from_stored(record: StoredCommandOutput) -> PastRun {
         command: record.command,
         at_ms: record.at_ms,
         end: match record.result {
-            StoredCommandResult::Finished { output } => {
-                RunEnd::Finished(ShownOutput::from_text(output))
-            }
+            StoredCommandResult::Exited { exit, output } => RunEnd::Exited {
+                exit: match exit {
+                    StoredExit::Code(code) => Exit::Code(code),
+                    StoredExit::Signal(name) => Exit::Signal(name),
+                },
+                output: ShownOutput::from_text(output),
+            },
             StoredCommandResult::Failed { reason } => RunEnd::Failed(reason),
         },
     }
@@ -77,95 +95,144 @@ fn tail(text: &str, bytes: usize) -> &str {
     &text[start..]
 }
 
-impl FileBrowser {
-    /// 和终端面板用同一个 shell：设置里选了就用它，没选就是登录 shell。
-    fn super_box_shell(&self) -> PathBuf {
-        let chosen = self.user_config.terminal_shell.trim();
-        if chosen.is_empty() {
-            PathBuf::from(crate::terminal_panel::session::shell_for_user())
-        } else {
-            PathBuf::from(chosen)
-        }
+fn exit_of(status: &portable_pty::ExitStatus) -> Exit {
+    match status.signal() {
+        Some(name) => Exit::Signal(name.to_owned()),
+        None => Exit::Code(status.exit_code()),
     }
+}
 
-    /// 回车：入队，框里显示“正在运行”。同一个框一次只跑一条。
+impl FileBrowser {
+    /// 回车：在不显示的终端标签里跑，框里显示“正在执行”。同一个框一次只跑一条。
     pub(super) fn run_super_box_command(&mut self, command: String) -> Task<Message> {
-        let running = self
-            .super_box
-            .as_ref()
-            .and_then(|super_box| super_box.run())
+        let Some(super_box) = self.super_box.as_ref() else {
+            return Task::none();
+        };
+        let running = super_box
+            .run()
             .is_some_and(|run| run.state == RunState::Running);
         let Some(folder) = self.keyboard_target_directory().filter(|_| !running) else {
             return Task::none();
         };
+        let (generation, history) = (super_box.generation(), super_box.history_text());
         let invocation = shell_invocation(
-            &self.super_box_shell(),
+            std::path::Path::new(&self.terminal_panel_shell()),
             &command,
             &self.selected_paths_for_operation(),
             &folder,
         );
-        let history = self
-            .super_box
-            .as_ref()
-            .map(|super_box| super_box.history_text())
-            .unwrap_or_default();
-        let (task_id, queued) =
-            self.enqueue_file_operation_with_id(QueuedFileOperation::RunCommands {
-                invocations: vec![invocation],
-            });
-        let Some(task_id) = task_id else {
-            return queued;
+        let size = crate::terminal_panel::emulator_dimensions(
+            crate::view::super_box_output_columns(),
+            COMMAND_ROWS,
+        );
+        let started = self.spawn_hidden_terminal_tab(&invocation, size);
+        let Some(super_box) = self.super_box.as_mut() else {
+            return Task::none();
         };
-        self.super_box_commands
-            .running
-            .insert(task_id, command.clone());
-        if let Some(super_box) = self.super_box.as_mut() {
-            super_box.start_run(task_id, command);
+        match started {
+            Ok(session) => {
+                self.super_box_commands
+                    .running
+                    .insert(session, command.clone());
+                super_box.start_run(session, command);
+                self.remember_super_box_input(history)
+            }
+            Err(reason) => {
+                super_box.show_notice(generation, reason);
+                Task::none()
+            }
         }
-        Task::batch([queued, self.remember_super_box_input(history)])
     }
 
-    /// 停止按钮：取消这条命令的任务（整个进程组都结束）。
+    /// 框里正在跑的那条命令的会话。
+    fn running_super_box_command(&self) -> Option<SessionId> {
+        self.super_box
+            .as_ref()?
+            .run()
+            .filter(|run| run.state == RunState::Running)
+            .map(|run| run.session)
+    }
+
+    /// 停止按钮：整组进程先 SIGTERM，过一会儿还在就 SIGKILL（`StopGraceEnded`）。
     pub(super) fn stop_super_box_command(&mut self) -> Task<Message> {
-        let Some(task_id) = self
+        let Some(session) = self.running_super_box_command() else {
+            return Task::none();
+        };
+        let Some(running) = self.hidden_terminal_session(session) else {
+            return Task::none();
+        };
+        running.signal(libc::SIGTERM);
+        Task::perform(tokio::time::sleep(STOP_GRACE), move |()| {
+            Message::SuperBox(SuperBoxMessage::StopGraceEnded(session))
+        })
+    }
+
+    /// 停止之后等够了：已经结束、转到终端了就不用管。
+    pub(super) fn kill_super_box_command(&self, session: SessionId) {
+        if let Some(running) = self.hidden_terminal_session(session) {
+            running.signal(libc::SIGKILL);
+        }
+    }
+
+    /// “转到终端”按钮。
+    pub(super) fn show_running_super_box_command(&mut self) {
+        if let Some(session) = self.running_super_box_command() {
+            self.show_super_box_command(session);
+        }
+    }
+
+    /// 命令要用户来操作（打开了全屏界面，或者点了“转到终端”）：移进终端面板，键盘给它；框在显示
+    /// 这条命令就关掉。之后它就是一个终端标签，结果不再记。
+    pub(crate) fn show_super_box_command(&mut self, session: SessionId) {
+        if !self.show_hidden_terminal_tab(session) {
+            return;
+        }
+        self.super_box_commands.running.remove(&session);
+        if self
             .super_box
             .as_ref()
-            .and_then(|super_box| super_box.run())
-            .filter(|run| run.state == RunState::Running)
-            .map(|run| run.task_id)
-        else {
-            return Task::none();
-        };
-        self.update(Message::FileOperationCancelRequested(task_id))
+            .and_then(SuperBox::run)
+            .is_some_and(|run| run.session == session)
+        {
+            self.super_box = None;
+        }
     }
 
-    /// 任务结束时：框还开着、是它发的命令，就把结果交给框。
-    /// 任务结束时：是框发的命令就记下结果（框关了也记），框还开着就交给框。
-    pub(super) fn super_box_task_ended(
+    /// 输出读到头了：输出取下来，在后台等它退出（进程关了终端还能接着跑，不卡界面），再交回结果。
+    pub(crate) fn super_box_command_ended(&mut self, ended: TerminalSession) -> Task<Message> {
+        let session = ended.id;
+        let output = ShownOutput::from_text(ended.emulator.last_lines(SHOWN_OUTPUT_LINES));
+        Task::perform(
+            async move {
+                tokio::task::spawn_blocking(move || ended.wait())
+                    .await
+                    .map_err(|error| error.to_string())
+                    .and_then(|waited| waited.map_err(|error| error.to_string()))
+            },
+            move |waited| {
+                let end = match waited {
+                    Ok(status) => RunEnd::Exited {
+                        exit: exit_of(&status),
+                        output,
+                    },
+                    Err(reason) => RunEnd::Failed(reason),
+                };
+                Message::SuperBox(SuperBoxMessage::CommandEnded { session, end })
+            },
+        )
+    }
+
+    /// 命令退出了：记下结果（框关了也记），框还开着就交给框。
+    pub(super) fn accept_super_box_command_end(
         &mut self,
-        task_id: u64,
-        completion: &FileOperationCompletion,
+        session: SessionId,
+        end: RunEnd,
     ) -> Task<Message> {
-        let Some(command) = self.super_box_commands.running.remove(&task_id) else {
+        let Some(command) = self.super_box_commands.running.remove(&session) else {
             return Task::none();
         };
-        let end = match completion {
-            FileOperationCompletion::Succeeded(FileOperationOutcome::CommandsRan { output }) => {
-                RunEnd::finished(output)
-            }
-            // 执行命令成功的结果总是 `CommandsRan`；没有输出可显示时当作空输出。
-            FileOperationCompletion::Succeeded(_) => RunEnd::finished(&Default::default()),
-            FileOperationCompletion::Failed { error, .. }
-            | FileOperationCompletion::RecoveryBlocked { error, .. }
-            | FileOperationCompletion::RecoveryInterrupted(error, _) => {
-                RunEnd::Failed(error.clone())
-            }
-            // 改名被拒只出现在改名任务上，执行命令不会有；归到“停止”。
-            FileOperationCompletion::Canceled(_)
-            | FileOperationCompletion::RenameRejected { .. } => RunEnd::Failed(tr!("Stopped")),
-        };
         if let Some(super_box) = self.super_box.as_mut() {
-            super_box.finish_run(task_id, end.clone());
+            super_box.finish_run(session, end.clone());
         }
         let run = PastRun {
             command,
@@ -271,22 +338,33 @@ mod tests {
         let run = PastRun {
             command: "cat big".to_owned(),
             at_ms: 42,
-            end: RunEnd::Finished(ShownOutput::from_text(long.clone())),
+            end: RunEnd::Exited {
+                exit: Exit::Code(0),
+                output: ShownOutput::from_text(long.clone()),
+            },
         };
         let record = stored(&run);
-        let StoredCommandResult::Finished { output } = &record.result else {
-            panic!("finished");
+        let StoredCommandResult::Exited { output, .. } = &record.result else {
+            panic!("exited");
         };
         assert!(output.len() <= STORED_OUTPUT_BYTES);
         assert!(output.ends_with("末尾") && long.ends_with(output.as_str()));
         let back = from_stored(record);
         assert_eq!((back.command.as_str(), back.at_ms), ("cat big", 42));
 
-        let failed = PastRun {
-            command: "make".to_owned(),
-            at_ms: 1,
-            end: RunEnd::Failed("exit 2".to_owned()),
-        };
-        assert_eq!(from_stored(stored(&failed)).end, failed.end);
+        for end in [
+            RunEnd::Exited {
+                exit: Exit::Signal("Terminated".to_owned()),
+                output: ShownOutput::from_text("half".to_owned()),
+            },
+            RunEnd::Failed("no status".to_owned()),
+        ] {
+            let run = PastRun {
+                command: "make".to_owned(),
+                at_ms: 1,
+                end,
+            };
+            assert_eq!(from_stored(stored(&run)).end, run.end);
+        }
     }
 }

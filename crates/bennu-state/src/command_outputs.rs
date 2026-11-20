@@ -29,10 +29,18 @@ pub struct StoredCommandOutput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StoredCommandResult {
-    /// 退出码 0：要显示的输出。
-    Finished { output: String },
-    /// 没跑成：给用户看的原因。
+    /// 程序退出了：怎么退出的，和它终端里最后的输出。
+    Exited { exit: StoredExit, output: String },
+    /// 等不到它的退出情况：给用户看的原因。
     Failed { reason: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredExit {
+    Code(u32),
+    /// 被信号结束：信号的名字。
+    Signal(String),
 }
 
 #[derive(Debug, Clone)]
@@ -102,7 +110,8 @@ mod tests {
         StoredCommandOutput {
             command: command.to_owned(),
             at_ms,
-            result: StoredCommandResult::Finished {
+            result: StoredCommandResult::Exited {
+                exit: StoredExit::Code(0),
                 output: output.to_owned(),
             },
         }
@@ -124,8 +133,9 @@ mod tests {
                 &StoredCommandOutput {
                     command: "make".to_owned(),
                     at_ms: 4,
-                    result: StoredCommandResult::Failed {
-                        reason: "exit 2".to_owned(),
+                    result: StoredCommandResult::Exited {
+                        exit: StoredExit::Signal("Terminated".to_owned()),
+                        output: String::new(),
                     },
                 },
                 2,

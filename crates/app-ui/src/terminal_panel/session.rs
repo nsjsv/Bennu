@@ -2,8 +2,9 @@ use std::io::Read;
 use std::path::Path;
 use std::sync::Arc;
 
+use file_operations::CommandInvocation;
 use portable_pty::native_pty_system;
-use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{Child, CommandBuilder, ExitStatus, MasterPty, PtySize};
 
 use iced::futures::SinkExt;
 
@@ -90,12 +91,18 @@ fn scan_interactive_shells() -> Vec<String> {
     shells
 }
 
+/// 在新的伪终端里启动 `program`（交互 shell，或超级输入框的一条命令）。
 pub(crate) fn spawn_terminal_session(
     id: SessionId,
-    shell: &str,
-    cwd: &Path,
+    program: &CommandInvocation,
     dimensions: TerminalDimensions,
 ) -> Result<TerminalSession, String> {
+    let not_started = |error: &dyn std::fmt::Display| {
+        let name = Path::new(&program.program)
+            .file_name()
+            .unwrap_or(&program.program);
+        tr!("Could not start %1: %2", name.to_string_lossy(), error)
+    };
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -104,23 +111,24 @@ pub(crate) fn spawn_terminal_session(
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|error| format!("打开 PTY 失败: {error}"))?;
+        .map_err(|error| not_started(&error))?;
 
-    let mut command = CommandBuilder::new(shell);
-    command.cwd(cwd);
+    let mut command = CommandBuilder::new(&program.program);
+    command.args(&program.arguments);
+    command.cwd(&program.working_directory);
     command.env("TERM", "xterm-256color");
     command.env("COLORTERM", "truecolor");
     let child = pair
         .slave
         .spawn_command(command)
-        .map_err(|error| format!("启动 shell 失败: {error}"))?;
+        .map_err(|error| not_started(&error))?;
     // slave 句柄在 spawn 后必须释放,否则终端收到 EOF 前会一直等到父进程退出。
     drop(pair.slave);
 
     let writer = pair
         .master
         .take_writer()
-        .map_err(|error| format!("获取 PTY 写端失败: {error}"))?;
+        .map_err(|error| not_started(&error))?;
     let input = PtyInput::new(writer);
     let emulator = TerminalEmulator::new(
         dimensions.columns,
@@ -184,6 +192,22 @@ impl TerminalSession {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+
+    /// 给会话里的整组进程发信号（领头进程开了新会话，它的 pid 就是组号）。只在 [`Self::wait`]
+    /// 回收它之前用：没回收的 pid 不会给别的进程用，信号不会发错。
+    pub(crate) fn signal(&self, signal: libc::c_int) {
+        if let Some(pid) = self.child.process_id() {
+            // 组里已经没有进程（ESRCH）不算错：刚好都结束了。
+            unsafe {
+                libc::kill(-(pid as libc::pid_t), signal);
+            }
+        }
+    }
+
+    /// 输出读到头以后等它退出并回收。进程关了终端还能接着跑，可能要等，不在界面线程上调。
+    pub(crate) fn wait(mut self) -> std::io::Result<ExitStatus> {
+        self.child.wait()
+    }
 }
 
 /// 读取 PTY 输出的后台线程桥接到 iced stream。
@@ -244,8 +268,11 @@ mod tests {
     fn shell_session(id: SessionId) -> TerminalSession {
         spawn_terminal_session(
             id,
-            "/bin/sh",
-            &std::env::temp_dir(),
+            &CommandInvocation {
+                program: "/bin/sh".into(),
+                arguments: Vec::new(),
+                working_directory: std::env::temp_dir(),
+            },
             TerminalDimensions {
                 columns: 80,
                 screen_lines: 24,
@@ -273,6 +300,7 @@ mod tests {
                     session,
                     directory: std::env::temp_dir(),
                     has_unread_output: false,
+                    program: super::super::tabs::TabProgram::Shell,
                 });
         }
 

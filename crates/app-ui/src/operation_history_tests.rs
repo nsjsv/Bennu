@@ -193,24 +193,6 @@ fn undo_and_redo_rename_keep_non_utf8_name_bytes() {
     assert_eq!(new_name.as_bytes(), b"na\xefve.txt");
 }
 
-#[test]
-fn replay_task_id_remaps_after_durable_insert() {
-    let mut history = FileOperationHistory::new();
-    let mut queue = FakeQueue::default();
-    history
-        .undo_stack
-        .push(entry(FileOperationHistoryItem::Move {
-            transfers: vec![transfer("/a", "/b")],
-        }));
-    request(&mut history, &mut queue, HistoryDirection::Undo);
-    let (local_task_id, _) = queue.last();
-
-    history.remap_task(local_task_id, 42);
-
-    assert!(!history.is_replaying(local_task_id));
-    assert!(history.is_replaying(42));
-}
-
 pub(super) fn moved(transfers: Vec<CompletedTransfer>) -> FileOperationOutcome {
     FileOperationOutcome::Move {
         transfers,

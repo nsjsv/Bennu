@@ -139,19 +139,6 @@ impl FileOperationHistory {
         self.running_task_id() == Some(task_id)
     }
 
-    /// 任务持久化后换成存储里的 id。
-    pub(crate) fn remap_task(&mut self, local_task_id: u64, stored_task_id: u64) {
-        if let Some((task_id, _)) = self
-            .replay
-            .as_mut()
-            .and_then(|replay| replay.running.as_mut())
-        {
-            if *task_id == local_task_id {
-                *task_id = stored_task_id;
-            }
-        }
-    }
-
     /// Ctrl+Z / Ctrl+Shift+Z。有重放在跑时排队，等它结束再做。返回入队被拒的原因。
     pub(crate) fn request(
         &mut self,

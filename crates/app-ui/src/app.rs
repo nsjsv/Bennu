@@ -84,6 +84,8 @@ mod startup_settings;
 mod tabs;
 mod task_end;
 #[cfg(test)]
+mod task_driving_tests;
+#[cfg(test)]
 mod terminal_follow_tests;
 mod text_input_shortcuts;
 mod thumbnailing;

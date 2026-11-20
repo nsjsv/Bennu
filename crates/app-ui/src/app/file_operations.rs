@@ -429,10 +429,6 @@ impl FileBrowser {
         let acceptance = self
             .operation_queue
             .accept_persistence_outcome(persistence_outcome);
-        if let Some((local_task_id, stored_task_id)) = acceptance.task_id_remap {
-            self.operation_history
-                .remap_task(local_task_id, stored_task_id);
-        }
         if let Some(error) = acceptance.error {
             self.show_global_error(error);
         }

@@ -13,7 +13,6 @@ pub enum PersistedShutdownFileOperation {
 #[derive(Debug, Default)]
 pub struct FileOperationPersistenceAcceptance {
     pub error: Option<String>,
-    pub task_id_remap: Option<(u64, u64)>,
     pub rejected_task_id: Option<u64>,
     pub canceled_before_start_task_id: Option<u64>,
     pub persisted_recoverable_terminal_stored_id: Option<u64>,
@@ -222,7 +221,6 @@ impl FileOperationQueue {
                     let local_task_id = persisted.ui_task_id;
                     let stored_task_id = persisted.stored_task_id;
                     acceptance.persisted_shutdown_operation = self.accept_inserted_task(persisted);
-                    acceptance.task_id_remap = Some((local_task_id, stored_task_id));
                     acceptance.canceled_before_start_task_id = self
                         .tasks
                         .iter()

@@ -10,8 +10,8 @@ use super::FileBrowser;
 use crate::model::{IndexedSearchOutcome, Message, NavigationMode, SettingsCategory};
 use crate::shortcuts::{ShortcutAction, ShortcutScope, ShortcutTarget};
 use crate::super_box::{
-    BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, NewEntry, RunEnd,
-    SuperBox,
+    BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, Listing, NewEntry,
+    RunEnd, SuperBox,
 };
 use crate::terminal_panel::session::SessionId;
 use file_operations::QueuedFileOperation;
@@ -21,11 +21,9 @@ pub(crate) enum SuperBoxMessage {
     InputChanged(String),
     RowPressed(usize),
     RowHovered(usize),
-    /// 点了输入框左边的模式按钮：切到下一种。
-    ModePressed,
-    SuggestionsLoaded {
+    ListingLoaded {
         generation: u64,
-        suggestions: Vec<PathBuf>,
+        listing: Listing,
     },
     /// 跳转前在后台看了一眼路径：是文件夹为 `Ok(true)`，是文件为 `Ok(false)`。
     JumpChecked {
@@ -63,11 +61,6 @@ impl FileBrowser {
         match message {
             SuperBoxMessage::InputChanged(text) => {
                 self.update_super_box(|super_box, context| super_box.set_input(text, context))
-            }
-            SuperBoxMessage::ModePressed => {
-                let lookup =
-                    self.update_super_box(|super_box, context| super_box.next_mode(context));
-                Task::batch([lookup, iced::widget::operation::focus(super_box_input_id())])
             }
             SuperBoxMessage::FindSettled(lookup) => self.run_super_box_find(*lookup),
             SuperBoxMessage::FoundLoaded {
@@ -113,15 +106,15 @@ impl FileBrowser {
                 }
                 Task::none()
             }
-            SuperBoxMessage::SuggestionsLoaded {
+            SuperBoxMessage::ListingLoaded {
                 generation,
-                suggestions,
+                listing,
             } => {
                 let Some(mut super_box) = self.super_box.take() else {
                     return Task::none();
                 };
                 self.with_super_box_context(|context| {
-                    super_box.accept_suggestions(generation, suggestions, context)
+                    super_box.accept_listing(generation, listing, context)
                 });
                 self.super_box = Some(super_box);
                 Task::none()
@@ -178,9 +171,9 @@ impl FileBrowser {
         ])
     }
 
-    /// 框开着时它自己的键：上下选、Tab 换模式、回车执行、Ctrl+Enter 换一种执行法、Esc 和打开它的
-    /// 那个键关掉它。其余的键只给输入框（输入框自己收键盘事件），一个都不往文件区的快捷键、字母
-    /// 跳转那边走。
+    /// 框开着时它自己的键：上下选、Shift+Tab 换模式、Tab 补全、→（End、Ctrl+F）接受淡色的建议、
+    /// 回车执行、Ctrl+Enter 换一种执行法、Esc 和打开它的那个键关掉它。其余的键只给输入框（输入框
+    /// 自己收键盘事件），一个都不往文件区的快捷键、字母跳转那边走。
     ///
     /// 回车只在这里处理，输入框不设 `on_submit`：输入框的回车和这里的按键是两条消息，先后不定，
     /// 靠“Ctrl 按着没有”去挡其中一条挡不住（虚拟机里 Ctrl+Enter 先跑了普通回车）。
@@ -199,13 +192,23 @@ impl FileBrowser {
             iced::keyboard::Key::Named(Named::ArrowUp) => super_box.select_previous(),
             iced::keyboard::Key::Named(Named::Tab) if modifiers.shift() => {
                 return Some(
-                    self.update_super_box(|super_box, context| super_box.previous_mode(context)),
+                    self.update_super_box(|super_box, context| super_box.next_mode(context)),
                 );
             }
             iced::keyboard::Key::Named(Named::Tab) => {
                 return Some(
-                    self.update_super_box(|super_box, context| super_box.next_mode(context)),
+                    self.edit_super_box_input(|super_box, context| super_box.complete(context)),
                 );
+            }
+            iced::keyboard::Key::Named(Named::ArrowRight | Named::End) if !modifiers.shift() => {
+                return Some(self.edit_super_box_input(|super_box, context| {
+                    super_box.accept_suggestion(context)
+                }));
+            }
+            iced::keyboard::Key::Character("f") if modifiers.control() => {
+                return Some(self.edit_super_box_input(|super_box, context| {
+                    super_box.accept_suggestion(context)
+                }));
             }
             iced::keyboard::Key::Named(Named::Escape) => self.super_box = None,
             iced::keyboard::Key::Named(Named::Enter) if modifiers.control() => {
@@ -330,21 +333,35 @@ impl FileBrowser {
         };
         let lookup = self.with_super_box_context(|context| change(&mut super_box, context));
         self.super_box = Some(super_box);
-        let (generation, path) = match lookup {
-            None => return Task::none(),
-            Some(find @ BoxLookup::Find { .. }) => return self.schedule_super_box_find(find),
-            Some(BoxLookup::Jump { generation, path }) => (generation, path),
-        };
-        // 路径已经是完整的，“当前文件夹”用不上。
-        Task::perform(
-            crate::commands::load_path_suggestions(path, self.home_dir.clone()),
-            move |suggestions| {
-                Message::SuperBox(SuperBoxMessage::SuggestionsLoaded {
-                    generation,
-                    suggestions,
-                })
-            },
-        )
+        match lookup {
+            None => Task::none(),
+            Some(find @ BoxLookup::Find { .. }) => self.schedule_super_box_find(find),
+            Some(BoxLookup::List {
+                generation,
+                source,
+                name,
+            }) => super::super_box_complete::list_super_box_candidates(generation, source, name),
+        }
+    }
+
+    /// 框替用户改了字（补全、接受建议）：输入框的光标还停在原处，挪到最后。
+    fn edit_super_box_input(
+        &mut self,
+        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Option<BoxLookup>,
+    ) -> Task<Message> {
+        let before = self
+            .super_box
+            .as_ref()
+            .map(|super_box| super_box.input().to_owned());
+        let lookup = self.update_super_box(change);
+        let after = self.super_box.as_ref().map(SuperBox::input);
+        if before.as_deref() == after {
+            return lookup;
+        }
+        Task::batch([
+            lookup,
+            iced::widget::operation::move_cursor_to_end(super_box_input_id()),
+        ])
     }
 
     fn run_selected_super_box_row(&mut self) -> Task<Message> {

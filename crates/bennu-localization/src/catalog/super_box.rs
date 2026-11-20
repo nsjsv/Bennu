@@ -22,20 +22,25 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     // 框和设置页
     (
-        "%1 opens the super box; Tab switches the mode while it is open.",
-        "%1 打开超级输入框；打开后按 Tab 切换模式。",
+        "%1 opens the super box; Shift+Tab switches the mode while it is open.",
+        "%1 打开超级输入框；打开后按 Shift+Tab 切换模式。",
     ),
-    ("Tab switches the mode while the super box is open.", "超级输入框打开后按 Tab 切换模式。"),
+    (
+        "Shift+Tab switches the mode while the super box is open.",
+        "超级输入框打开后按 Shift+Tab 切换模式。",
+    ),
     ("Super Box Opens In", "超级输入框默认模式"),
-    ("Tab switches the mode", "Tab 切换模式"),
     ("Find a feature, action, setting or favorite", "找功能、动作、设置或收藏"),
     ("Go to a path; ~ is your home folder", "输入路径，~ 是主目录"),
     ("Name of the new file; end it with / for a folder", "新文件的名字；以 / 结尾是文件夹"),
     ("Nothing matches", "没有找到"),
-    ("Type a path, or start with / or ~ in search.", "输入路径；在搜索模式里以 / 或 ~ 开头也行。"),
     (
-        "Type to find what to do. Tab switches to going to a path or making a new item; g: and n: do it too.",
-        "打字找要做的事。按 Tab 切到跳转路径或新建，打 g: 或 n: 也行。",
+        "Type a path, or start with / or ~ in search. Tab completes it, → takes the faded suggestion.",
+        "输入路径；在搜索模式里以 / 或 ~ 开头也行。Tab 补全，→ 接受淡色的建议。",
+    ),
+    (
+        "Type to find what to do. Shift+Tab switches to files, a path, a new item or a command; f:, g:, n: and s: do it too.",
+        "打字找要做的事。按 Shift+Tab 切到文件、路径、新建或命令，打 f:、g:、n:、s: 也行。",
     ),
     ("Go to %1", "跳到 %1"),
     ("New file “%1”", "新建文件“%1”"),
@@ -56,8 +61,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Exit status %1", "退出码 %1"),
     ("Ended by signal: %1", "被信号结束：%1"),
     (
-        "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there.",
-        "输入命令。用你的 shell 在这个文件夹里执行，选中的项作为参数（\"$@\"，fish 里是 $argv）。全屏的程序会转到终端面板；Ctrl+Enter 直接在终端面板里执行。",
+        "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Tab completes, → takes the faded suggestion. Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there.",
+        "输入命令。用你的 shell 在这个文件夹里执行，选中的项作为参数（\"$@\"，fish 里是 $argv）。Tab 补全，→ 接受淡色的建议。全屏的程序会转到终端面板；Ctrl+Enter 直接在终端面板里执行。",
     ),
     ("Type what to look for; filters only narrow it down", "写上要找的词，筛选只是缩小范围"),
     (

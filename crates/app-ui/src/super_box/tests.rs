@@ -50,7 +50,7 @@ fn prefixes_switch_modes_with_either_colon() {
 }
 
 #[test]
-fn tab_goes_round_the_modes_both_ways() {
+fn shift_tab_goes_round_the_modes() {
     let mut mode = BoxMode::Search;
     let mut seen = Vec::new();
     for _ in 0..BoxMode::ALL.len() {
@@ -67,9 +67,7 @@ fn tab_goes_round_the_modes_both_ways() {
             BoxMode::Search
         ]
     );
-    assert_eq!(BoxMode::Search.previous(), BoxMode::Shell);
     for mode in BoxMode::ALL {
-        assert_eq!(mode.next().previous(), mode);
         assert_eq!(BoxMode::from_config_value(mode.config_value()), Some(mode));
     }
 }
@@ -205,9 +203,10 @@ fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
     assert_eq!(super_box.input(), "~/下载");
     assert_eq!(
         lookup,
-        Some(BoxLookup::Jump {
+        Some(BoxLookup::List {
             generation: super_box.generation(),
-            path: "/home/me/下载".to_owned()
+            source: ListSource::Folder(PathBuf::from("/home/me/")),
+            name: "下载".to_owned()
         })
     );
     assert_eq!(
@@ -250,29 +249,122 @@ fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
     );
     super_box.next_mode(&context);
     assert_eq!(super_box.rows(), [BoxRow::Run("新建".to_owned())]);
-    super_box.previous_mode(&context);
-    assert_eq!(super_box.mode(), BoxMode::New);
+    super_box.next_mode(&context);
+    assert_eq!(super_box.mode(), BoxMode::Search, "it wraps round");
 }
 
 #[test]
-fn an_empty_box_lists_the_history_of_its_mode() {
+fn an_empty_box_lists_five_of_all_history_and_three_of_a_mode() {
     let taken = nothing_taken;
     let context = context(&taken);
-    let history = vec![
-        "g:~/下载".to_owned(),
-        "新建".to_owned(),
-        "g:/tmp".to_owned(),
-    ];
-    let super_box = SuperBox::open(BoxMode::Path, Vec::new(), history.clone(), &context);
+    let history = ["g:/a", "新建", "g:/b", "s:ls", "g:/c", "g:/d", "s:make"]
+        .map(str::to_owned)
+        .to_vec();
+    let rows = |mode| {
+        SuperBox::open(mode, Vec::new(), history.clone(), &context)
+            .rows()
+            .to_vec()
+    };
     assert_eq!(
-        super_box.rows(),
-        [
-            BoxRow::History("g:~/下载".to_owned()),
-            BoxRow::History("g:/tmp".to_owned())
-        ]
+        rows(BoxMode::Search),
+        ["g:/a", "新建", "g:/b", "s:ls", "g:/c"].map(|entry| BoxRow::History(entry.to_owned()))
     );
-    let super_box = SuperBox::open(BoxMode::Search, Vec::new(), history, &context);
-    assert_eq!(super_box.rows(), [BoxRow::History("新建".to_owned())]);
+    assert_eq!(
+        rows(BoxMode::Path),
+        ["g:/a", "g:/b", "g:/c"].map(|entry| BoxRow::History(entry.to_owned()))
+    );
+}
+
+#[test]
+fn backspace_in_an_empty_box_removes_the_mode() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let mut super_box = SuperBox::open(BoxMode::Search, Vec::new(), Vec::new(), &context);
+    super_box.set_input("s:".to_owned(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Shell);
+    super_box.set_input("l".to_owned(), &context);
+    // 删掉最后一个字：胶囊还在。
+    super_box.set_input(String::new(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Shell);
+    // 空着再退格（输入框又报一次空的）：胶囊没了。
+    super_box.set_input(String::new(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Search);
+}
+
+fn candidate(name: &str, is_dir: bool) -> Candidate {
+    Candidate {
+        name: name.to_owned(),
+        is_dir,
+    }
+}
+
+/// 按框里这次的查询把候选交回去（应用层在后台列出来的样子）。
+fn list(super_box: &mut SuperBox, candidates: Vec<Candidate>, context: &BoxContext<'_>) {
+    super_box.accept_listing(
+        super_box.generation(),
+        Listing {
+            folder: Some(PathBuf::from("/home/me/work")),
+            candidates,
+            truncated: false,
+        },
+        context,
+    );
+}
+
+#[test]
+fn tab_completes_and_then_goes_through_the_choices() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
+    super_box.set_input("cd Do".to_owned(), &context);
+    assert_eq!(super_box.complete(&context), None, "nothing listed yet");
+    list(
+        &mut super_box,
+        vec![candidate("Documents", true), candidate("Downloads", true)],
+        &context,
+    );
+    super_box.complete(&context);
+    assert_eq!(super_box.input(), "cd Do", "nothing more is shared");
+    assert_eq!(super_box.choices().unwrap().candidates.len(), 2);
+    super_box.complete(&context);
+    assert_eq!(super_box.input(), "cd Documents/");
+    super_box.complete(&context);
+    assert_eq!(super_box.input(), "cd Downloads/");
+    assert_eq!(super_box.choices().unwrap().chosen, Some(1));
+    // 打字就收起。
+    super_box.set_input("cd Downloads/x".to_owned(), &context);
+    assert!(super_box.choices().is_none());
+
+    super_box.set_input("cd Doc".to_owned(), &context);
+    list(&mut super_box, vec![candidate("Documents", true)], &context);
+    super_box.complete(&context);
+    assert_eq!(super_box.input(), "cd Documents/");
+}
+
+#[test]
+fn the_faded_suggestion_comes_from_history_first_then_from_the_folder() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let history = vec!["g:~/下载/新的".to_owned(), "s:make install".to_owned()];
+    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), history, &context);
+    super_box.set_input("~/下".to_owned(), &context);
+    list(&mut super_box, vec![candidate("下面", true)], &context);
+    assert_eq!(super_box.suggestion(), Some("载/新的"));
+    super_box.set_input("~/下面".to_owned(), &context);
+    assert_eq!(
+        super_box.suggestion(),
+        None,
+        "nothing listed for this input yet"
+    );
+    list(&mut super_box, vec![candidate("下面的", true)], &context);
+    assert_eq!(super_box.suggestion(), Some("的/"));
+    super_box.accept_suggestion(&context);
+    assert_eq!(super_box.input(), "~/下面的/");
+
+    super_box.set_input("s:make".to_owned(), &context);
+    assert_eq!(super_box.suggestion(), Some(" install"));
+    super_box.set_input("s:".to_owned(), &context);
+    assert_eq!(super_box.suggestion(), None);
 }
 
 #[test]
@@ -280,24 +372,32 @@ fn stale_suggestions_are_dropped_and_problems_cannot_be_selected() {
     let taken = |name: &str| name == "已有";
     let context = context(&taken);
     let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), &context);
-    let Some(BoxLookup::Jump {
+    let Some(BoxLookup::List {
         generation: first, ..
     }) = super_box.set_input("~/d".to_owned(), &context)
     else {
         panic!("a path lookup");
     };
     super_box.set_input("~/do".to_owned(), &context);
-    super_box.accept_suggestions(first, vec![PathBuf::from("/home/me/desktop")], &context);
+    let listing = |names: &[&str]| Listing {
+        folder: Some(PathBuf::from("/home/me")),
+        candidates: names.iter().map(|name| candidate(name, true)).collect(),
+        truncated: false,
+    };
+    super_box.accept_listing(first, listing(&["desktop"]), &context);
     assert_eq!(super_box.rows().len(), 1, "the older lookup is ignored");
-    super_box.accept_suggestions(
+    super_box.accept_listing(
         super_box.generation(),
-        vec![
-            PathBuf::from("/home/me/documents"),
-            PathBuf::from("/home/me/downloads"),
-        ],
+        listing(&["documents", "downloads"]),
         &context,
     );
-    assert_eq!(super_box.rows().len(), 3);
+    assert_eq!(
+        super_box.rows()[1..],
+        [
+            BoxRow::JumpSuggestion(PathBuf::from("/home/me/documents")),
+            BoxRow::JumpSuggestion(PathBuf::from("/home/me/downloads"))
+        ]
+    );
     super_box.select_next();
     super_box.select_next();
     super_box.select_next();

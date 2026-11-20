@@ -69,17 +69,18 @@ fn the_shortcut_opens_and_closes_the_box_in_the_default_mode() {
         "file-area keys are off"
     );
 
-    // 框开着时 Tab 换模式，打开它的键关掉它。
+    // 框开着时 Shift+Tab 换模式（Tab 留给补全），打开它的键关掉它。
     let tab = iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab);
-    drop(browser.super_box_key(&tab, iced::keyboard::Modifiers::empty()));
+    drop(browser.super_box_key(&tab, iced::keyboard::Modifiers::SHIFT));
     assert_eq!(
         browser.super_box.as_ref().map(SuperBox::mode),
         Some(BoxMode::New)
     );
-    drop(browser.super_box_key(&tab, iced::keyboard::Modifiers::SHIFT));
+    drop(browser.super_box_key(&tab, iced::keyboard::Modifiers::empty()));
     assert_eq!(
         browser.super_box.as_ref().map(SuperBox::mode),
-        Some(BoxMode::Path)
+        Some(BoxMode::New),
+        "Tab completes instead"
     );
     let space = iced::keyboard::Key::Named(iced::keyboard::key::Named::Space);
     drop(browser.super_box_key(&space, iced::keyboard::Modifiers::ALT));
@@ -224,10 +225,7 @@ async fn a_history_row_fills_the_box_instead_of_running() {
         .super_box_history
         .record_submission("n:不要马上建.txt");
     drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
-    // 搜索 → 文件 → 路径 → 新建。
-    for _ in 0..3 {
-        send(&mut browser, SuperBoxMessage::ModePressed).await;
-    }
+    // 没有模式胶囊时各种模式的历史混在一起。
     enter(&mut browser).await;
     let super_box = browser.super_box.as_ref().unwrap();
     assert_eq!(super_box.mode(), BoxMode::New);
@@ -777,11 +775,8 @@ async fn a_command_result_is_kept_even_when_the_box_was_closed() {
         }
     );
 
-    // 命令模式里选中这条历史就能看到它（框重新打开，历史行是它）。
+    // 框重新打开，混在一起的历史里第一条就是它（选中它，下面显示它的输出）。
     drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
-    for _ in 0..4 {
-        send(&mut browser, SuperBoxMessage::ModePressed).await;
-    }
     assert_eq!(
         browser.super_box.as_ref().unwrap().selected_row(),
         Some(&crate::super_box::BoxRow::History("s:echo kept".to_owned()))

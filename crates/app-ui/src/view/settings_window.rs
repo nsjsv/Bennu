@@ -245,10 +245,10 @@ fn super_box_settings_card(browser: &FileBrowser) -> Element<'_, Message> {
         .map(|key| key.display_label());
     let hint = match key {
         Some(key) => tr!(
-            "%1 opens the super box; Tab switches the mode while it is open.",
+            "%1 opens the super box; Shift+Tab switches the mode while it is open.",
             key
         ),
-        None => tr!("Tab switches the mode while the super box is open."),
+        None => tr!("Shift+Tab switches the mode while the super box is open."),
     };
     let found_in_columns = browser.user_config().super_box_found_in_columns;
     let found_choices = crate::super_box::FoundInColumns::ALL

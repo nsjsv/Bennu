@@ -2,7 +2,7 @@
 //! 前缀本身不留在框里。
 //! 历史里存的是“前缀 + 字”，和手打前缀是同一种写法。
 
-/// Tab 按这个顺序往后切，到头绕回。
+/// Shift+Tab 按这个顺序往后切，到头绕回。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BoxMode {
     /// 找功能、动作、设置、收藏（最后也列索引里名字对上的文件）。
@@ -55,11 +55,6 @@ impl BoxMode {
         Self::ALL[(index + 1) % Self::ALL.len()]
     }
 
-    pub(crate) fn previous(self) -> Self {
-        let index = Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0);
-        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
-    }
-
     pub(crate) fn config_value(self) -> &'static str {
         match self {
             Self::Search => "search",
@@ -100,7 +95,7 @@ pub(crate) fn history_text(mode: BoxMode, text: &str) -> String {
     }
 }
 
-/// 一条历史属于哪个模式、框里该显示的字（不带前缀：模式按钮已经说明了）。
+/// 一条历史属于哪个模式、框里该显示的字（不带前缀：模式显示成胶囊）。
 pub(crate) fn read_history(entry: &str) -> (BoxMode, &str) {
     split_prefix(entry).unwrap_or((BoxMode::Search, entry))
 }

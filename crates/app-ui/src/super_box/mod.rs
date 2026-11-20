@@ -5,6 +5,7 @@
 //! 结果行在改输入、换模式、后台结果回来时算一次（输入只校验这一次），界面直接画，执行时信行里的值。
 //! 这里不读盘：路径补全、路径检查、索引查询都由应用层在后台做，结果按 `generation` 对号交回来。
 
+mod complete;
 mod find;
 mod found;
 mod matching;
@@ -17,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use file_search::{SearchHit, SearchTextScope};
 
+pub(crate) use complete::{Candidate, Choices, ListSource, Listing};
 pub(crate) use find::{read_find_query, FindQuery};
 pub(crate) use found::FoundInColumns;
 pub(crate) use matching::{BoxEntry, BoxTarget, EntryKind, MOST_ROWS};
@@ -66,8 +68,12 @@ impl BoxRow {
 /// 应用层要在后台做的事，做完按 `generation` 交回来。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BoxLookup {
-    /// 补全路径模式里正在打的字：`path` 是 `~` 换成主目录、相对路径接好的完整写法。
-    Jump { generation: u64, path: String },
+    /// 列补全的候选（路径模式、命令模式最后那个词）：名字开头是 `name`（不分大小写）的。
+    List {
+        generation: u64,
+        source: ListSource,
+        name: String,
+    },
     /// 查索引（停顿一下再查）。
     Find {
         generation: u64,
@@ -156,7 +162,12 @@ pub(crate) struct SuperBox {
     entries: Vec<BoxEntry>,
     /// 打开时的历史快照，带前缀，最新的在前。
     history: Vec<String>,
-    suggestions: Vec<PathBuf>,
+    /// 这次输入的补全候选；路径模式的子文件夹行也从这里来。
+    listing: Listing,
+    /// Tab 补不动时列出来的候选。
+    choices: Option<Choices>,
+    /// 框里的字后面淡淡显示的建议，→ 接受。
+    suggestion: Option<String>,
     found: Vec<SearchHit>,
     find_status: FindStatus,
     /// 在途的索引查询：换成新的、或者框关掉时，旧的就取消。
@@ -181,7 +192,9 @@ impl SuperBox {
             input: String::new(),
             entries,
             history,
-            suggestions: Vec::new(),
+            listing: Listing::default(),
+            choices: None,
+            suggestion: None,
             found: Vec::new(),
             find_status: FindStatus::Idle,
             find_in_flight: None,
@@ -231,6 +244,14 @@ impl SuperBox {
         self.rows.get(self.selected?)
     }
 
+    pub(crate) fn choices(&self) -> Option<&Choices> {
+        self.choices.as_ref()
+    }
+
+    pub(crate) fn suggestion(&self) -> Option<&str> {
+        self.suggestion.as_deref()
+    }
+
     pub(crate) fn notice(&self) -> Option<&str> {
         self.notice.as_deref()
     }
@@ -239,7 +260,8 @@ impl SuperBox {
         self.generation
     }
 
-    /// 打了字。开头是前缀就切模式、去掉前缀；搜索模式里以 `/` `~` 开头也切到路径。
+    /// 打了字。开头是前缀就切模式（框里显示成前面的胶囊）、去掉前缀；搜索模式里以 `/` `~` 开头也切到
+    /// 路径。
     pub(crate) fn set_input(
         &mut self,
         text: String,
@@ -247,6 +269,9 @@ impl SuperBox {
     ) -> Option<BoxLookup> {
         let (mode, text) = match mode::split_prefix(&text) {
             Some((mode, rest)) => (mode, rest.to_owned()),
+            // 已经空了又按退格：删掉前面的胶囊，回到搜索。输入框空着按退格也照样报一次“变成空的”，
+            // 只认这一条消息；全局按键和它先后不定，不能靠按键判断。
+            None if text.is_empty() && self.input.is_empty() => (BoxMode::Search, text),
             None if self.mode == BoxMode::Search && text.starts_with(['/', '~']) => {
                 (BoxMode::Path, text)
             }
@@ -254,23 +279,49 @@ impl SuperBox {
         };
         self.mode = mode;
         self.input = text;
+        self.choices = None;
         self.changed(context)
     }
 
+    /// Shift+Tab：换下一种模式，到头绕回。
     pub(crate) fn next_mode(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
         self.mode = self.mode.next();
+        self.choices = None;
         self.changed(context)
     }
 
-    pub(crate) fn previous_mode(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
-        self.mode = self.mode.previous();
+    /// Tab：补最后那个词。候选已经列出来了才补（列得很快，打字时就在列）；列出了候选再按就一个个换。
+    pub(crate) fn complete(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
+        if let Some(choices) = self.choices.as_mut() {
+            self.input = choices.next();
+            return self.changed(context);
+        }
+        let word = complete::word(self.mode, &self.input)?;
+        match complete::complete(&word, &self.input, &self.listing) {
+            complete::Completed::Text(text) => {
+                self.input = text;
+                self.changed(context)
+            }
+            complete::Completed::Choices(candidates) => {
+                self.choices = Some(Choices::new(word, self.input.clone(), candidates));
+                None
+            }
+            complete::Completed::Nothing => None,
+        }
+    }
+
+    /// →：接受淡色的建议。
+    pub(crate) fn accept_suggestion(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
+        let suggestion = self.suggestion.take()?;
+        self.input.push_str(&suggestion);
+        self.choices = None;
         self.changed(context)
     }
 
     fn changed(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
         self.generation += 1;
         self.notice = None;
-        self.suggestions.clear();
+        self.listing = Listing::default();
         self.found.clear();
         let lookup = self.lookup(context);
         self.find_status = match lookup {
@@ -288,11 +339,12 @@ impl SuperBox {
             return None;
         }
         match self.mode {
-            BoxMode::Path => {
-                let path = targets::jump_path(text, context.current_dir, context.home)?;
-                Some(BoxLookup::Jump {
+            BoxMode::Path | BoxMode::Shell => {
+                let word = complete::word(self.mode, &self.input)?;
+                Some(BoxLookup::List {
                     generation,
-                    path: path.to_string_lossy().into_owned(),
+                    source: word.source(context.current_dir, context.home)?,
+                    name: word.name,
                 })
             }
             // 搜索模式只按名字找几个，排在别的结果后面。
@@ -311,7 +363,7 @@ impl SuperBox {
                     text_scope: SearchTextScope::NameAndContent,
                     limit: MOST_ROWS,
                 }),
-            BoxMode::New | BoxMode::Shell => None,
+            BoxMode::New => None,
         }
     }
 
@@ -353,17 +405,17 @@ impl SuperBox {
         }
     }
 
-    /// 后台列好的子文件夹；输入已经变了的过期结果不要。
-    pub(crate) fn accept_suggestions(
+    /// 后台列好的补全候选；输入已经变了的过期结果不要。
+    pub(crate) fn accept_listing(
         &mut self,
         generation: u64,
-        suggestions: Vec<PathBuf>,
+        listing: Listing,
         context: &BoxContext<'_>,
     ) {
-        if generation != self.generation || self.mode != BoxMode::Path {
+        if generation != self.generation {
             return;
         }
-        self.suggestions = suggestions;
+        self.listing = listing;
         self.refresh(context);
     }
 
@@ -408,6 +460,26 @@ impl SuperBox {
     fn refresh(&mut self, context: &BoxContext<'_>) {
         self.rows = self.compute_rows(context);
         self.selected = self.rows.iter().position(BoxRow::selectable);
+        self.suggestion = self.compute_suggestion();
+    }
+
+    /// 这个模式最近的历史里接得上的那条优先（同 fish），没有再看候选。
+    fn compute_suggestion(&self) -> Option<String> {
+        if self.input.is_empty() || !matches!(self.mode, BoxMode::Path | BoxMode::Shell) {
+            return None;
+        }
+        let from_history = self
+            .history
+            .iter()
+            .map(|entry| mode::read_history(entry))
+            .find(|(mode, text)| {
+                *mode == self.mode && text.len() > self.input.len() && text.starts_with(&self.input)
+            })
+            .map(|(_, text)| text[self.input.len()..].to_owned());
+        from_history.or_else(|| {
+            let word = complete::word(self.mode, &self.input)?;
+            complete::suggestion(&word, &self.input, &self.listing)
+        })
     }
 }
 

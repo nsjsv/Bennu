@@ -1,22 +1,25 @@
-//! 超级输入框的浮层：上面是模式按钮和输入框，下面是结果行，命令模式再往下是输出。行和选中都由模型
-//! 算好，这里只画。
+//! 超级输入框的浮层：上面是输入框（有模式时最前面是模式的胶囊），下面是结果行，命令模式再往下是输出。
+//! 行、选中、建议都由模型算好，这里只画。
 
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 
-use iced::widget::{button, container, mouse_area, row, Column, Space};
-use iced::{Alignment, Element, Font, Length, Theme};
+use iced::widget::text::Wrapping;
+use iced::widget::{button, container, mouse_area, rich_text, row, span, stack, text_input};
+use iced::widget::{Column, Space};
+use iced::{Alignment, Background, Border, Color, Element, Font, Length, Theme};
 
 use crate::app::{super_box_input_id, FileBrowser, SuperBoxMessage};
 use crate::formatting::{format_middle_ellipsized_text, format_system_time};
 use crate::model::Message;
 use crate::super_box::{
-    read_history, BoxMode, BoxRow, Exit, FindStatus, NewEntry, RunEnd, RunState, SuperBox,
+    read_history, BoxMode, BoxRow, Choices, Exit, FindStatus, NewEntry, RunEnd, RunState, SuperBox,
 };
 use crate::terminal_panel::session::TerminalSession;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::controls::{normal_button, text_field, tooltip_bubble};
+use bennu_theme::controls::{normal_button, text_field, text_field_style};
 use bennu_theme::icons::IconSymbol;
+use bennu_theme::metrics::{CONTROL_LINE_HEIGHT, CONTROL_PADDING_Y, FIELD_PADDING_X};
 use bennu_theme::styles::{
     context_menu_highlighted_item_button_style, context_menu_item_button_style, context_menu_style,
 };
@@ -61,31 +64,15 @@ pub(super) fn super_box_panel<'a>(
     browser: &'a FileBrowser,
     super_box: &'a SuperBox,
 ) -> Element<'a, Message> {
-    let mode = super_box.mode();
     let context = RowContext {
         home: &browser.home_dir,
         folder: browser.tab().current_directory(),
         selected_items: browser.tab().selected_paths.len(),
     };
-    let mode_button = iced::widget::tooltip(
-        normal_button(readable_text(mode.label())).on_press(message(SuperBoxMessage::ModePressed)),
-        tooltip_bubble(tr!("Tab switches the mode")),
-        iced::widget::tooltip::Position::Bottom,
-    );
-    let mut input = text_field(&placeholder(mode), super_box.input())
-        .id(super_box_input_id())
-        .on_input(|text| message(SuperBoxMessage::InputChanged(text)))
-        .width(Length::Fill);
-    if mode == BoxMode::Shell {
-        input = input.font(Font::MONOSPACE);
+    let mut content = Column::new().push(input_field(super_box)).spacing(6);
+    if let Some(choices) = super_box.choices() {
+        content = content.push(choice_strip(choices));
     }
-    let mut content = Column::new()
-        .push(
-            row![mode_button, input]
-                .spacing(8)
-                .align_y(Alignment::Center),
-        )
-        .spacing(6);
     if let Some(notice) = super_box.notice() {
         content = content.push(error_text(notice.to_owned()));
     }
@@ -110,9 +97,13 @@ pub(super) fn super_box_panel<'a>(
             }
             RunState::Ended(end) => end_panel(None, end),
         });
-    } else if let (BoxMode::Shell, Some(BoxRow::History(entry))) = (mode, super_box.selected_row())
+    } else if let Some((BoxMode::Shell, command)) =
+        super_box.selected_row().and_then(|row| match row {
+            BoxRow::History(entry) => Some(read_history(entry)),
+            _ => None,
+        })
     {
-        if let Some(past) = browser.super_box_commands.past(read_history(entry).1) {
+        if let Some(past) = browser.super_box_commands.past(command) {
             let at = UNIX_EPOCH + Duration::from_millis(past.at_ms.max(0) as u64);
             content = content.push(end_panel(
                 Some(tr!("Last run %1", format_system_time(at))),
@@ -124,6 +115,131 @@ pub(super) fn super_box_panel<'a>(
         .padding(BOX_PADDING)
         .width(Length::Fixed(SUPER_BOX_WIDTH))
         .style(context_menu_style)
+        .into()
+}
+
+/// 输入框是一个整体：有模式时最前面是它的胶囊，后面是打的字，字后面淡淡的是建议（→ 接受）。
+fn input_field(super_box: &SuperBox) -> Element<'_, Message> {
+    let mode = super_box.mode();
+    let font = (mode == BoxMode::Shell).then_some(Font::MONOSPACE);
+    let mut input = text_field(&placeholder(mode), super_box.input())
+        .id(super_box_input_id())
+        .on_input(|text| message(SuperBoxMessage::InputChanged(text)))
+        .style(bare_field_style)
+        .width(Length::Fill);
+    if let Some(font) = font {
+        input = input.font(font);
+    }
+    // 建议叠在输入框上面：前面那截是框里的字，同字体同排字，透明着只用来占出一样的宽；后面那截是
+    // 建议。字长过输入框时输入框会往左滚，那时建议已经在框外，被裁掉。
+    let mut faded: iced::widget::text::Rich<'_, (), Message> = rich_text([
+        span(super_box.input()).color(Color::TRANSPARENT),
+        span(super_box.suggestion().unwrap_or("")),
+    ])
+    .line_height(iced::widget::text::LineHeight::Absolute(
+        CONTROL_LINE_HEIGHT.into(),
+    ))
+    .wrapping(Wrapping::None)
+    .style(|theme: &Theme| iced::widget::text::Style {
+        color: Some(muted_text_color(theme)),
+    });
+    if let Some(font) = font {
+        faded = faded.font(font);
+    }
+    let typed = stack![
+        input,
+        container(faded)
+            .padding([CONTROL_PADDING_Y, FIELD_PADDING_X])
+            .width(Length::Fill)
+            .clip(true)
+    ];
+    // 胶囊出现、消失，有没有建议，输入框前后的控件都不能换种类：2026-11-20 虚拟机里胶囊那一格从
+    // 空白换成胶囊时，输入框的焦点跟着丢了，`n:` 后面打的字全没进去。没有胶囊时那一格是同样嵌套的
+    // 空胶囊。
+    let chip = match mode {
+        BoxMode::Search => container(container(readable_text(String::new()))),
+        mode => container(mode_chip(mode)).padding(iced::Padding::ZERO.left(6)),
+    };
+    container(row![chip, typed].align_y(Alignment::Center))
+        .style(field_frame_style)
+        .into()
+}
+
+/// 外框照输入框聚焦时的样子画：框开着时它的输入框一直有焦点。
+fn field_frame_style(theme: &Theme) -> container::Style {
+    let field = text_field_style(theme, text_input::Status::Focused { is_hovered: false });
+    container::Style {
+        background: Some(field.background),
+        border: field.border,
+        ..container::Style::default()
+    }
+}
+
+/// 外框里的输入框自己不画底和边。
+fn bare_field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let field = text_field_style(theme, status);
+    text_input::Style {
+        background: Background::Color(Color::TRANSPARENT),
+        border: Border {
+            width: 0.0,
+            ..field.border
+        },
+        ..field
+    }
+}
+
+/// 模式的胶囊：输入框最前面、混在一起的历史行前面。
+fn mode_chip(mode: BoxMode) -> Element<'static, Message> {
+    container(
+        readable_text(mode.label())
+            .size(CAPTION_SIZE)
+            .style(|theme: &Theme| iced::widget::text::Style {
+                color: Some(ui_colors(theme).primary),
+            }),
+    )
+    .padding([1, 8])
+    .style(|theme: &Theme| chip_style(theme, 0.16))
+    .into()
+}
+
+fn chip_style(theme: &Theme, strength: f32) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(Color {
+            a: strength,
+            ..ui_colors(theme).primary
+        })),
+        border: Border {
+            radius: 999.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
+/// 最多列出这么多个候选，再多写“…”。
+const CHOICES_SHOWN: usize = 40;
+
+/// Tab 补不动时列出来的候选，再按 Tab 换到的那个高亮。
+fn choice_strip(choices: &Choices) -> Element<'_, Message> {
+    let mut strip = row![].spacing(4);
+    for (index, candidate) in choices.candidates.iter().take(CHOICES_SHOWN).enumerate() {
+        let name = if candidate.is_dir {
+            format!("{}/", candidate.name)
+        } else {
+            candidate.name.clone()
+        };
+        let chosen = choices.chosen == Some(index);
+        strip = strip.push(
+            container(readable_text(name).size(CAPTION_SIZE))
+                .padding([1, 6])
+                .style(move |theme: &Theme| chip_style(theme, if chosen { 0.24 } else { 0.0 })),
+        );
+    }
+    if choices.candidates.len() > CHOICES_SHOWN {
+        strip = strip.push(muted("…".to_owned()));
+    }
+    container(strip.wrap().vertical_spacing(4))
+        .padding(PANEL_PADDING)
         .into()
 }
 
@@ -151,19 +267,22 @@ fn empty_hint(super_box: &SuperBox) -> String {
             "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page."
         ),
         BoxMode::Shell => tr!(
-            "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there."
+            "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Tab completes, → takes the faded suggestion. Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there."
         ),
         BoxMode::Search => tr!(
-            "Type to find what to do. Tab switches to going to a path or making a new item; g: and n: do it too."
+            "Type to find what to do. Shift+Tab switches to files, a path, a new item or a command; f:, g:, n: and s: do it too."
         ),
-        BoxMode::Path => tr!("Type a path, or start with / or ~ in search."),
+        BoxMode::Path => tr!(
+            "Type a path, or start with / or ~ in search. Tab completes it, → takes the faded suggestion."
+        ),
         BoxMode::New => tr!("Type a name; end it with / to make a folder"),
     }
 }
 
-/// 一行的内容：图标、名字（命令用等宽字）、名字后面的灰字、最右边的灰字。
+/// 一行的内容：图标、模式胶囊（混在一起的历史）、名字（命令用等宽字）、名字后面的灰字、最右边的灰字。
 struct RowParts {
     icon: Option<IconSymbol>,
+    chip: Option<BoxMode>,
     title: String,
     monospace: bool,
     detail: Option<String>,
@@ -174,6 +293,7 @@ impl RowParts {
     fn plain(icon: IconSymbol, title: String) -> Self {
         Self {
             icon: Some(icon),
+            chip: None,
             title,
             monospace: false,
             detail: None,
@@ -192,6 +312,7 @@ fn row_parts(super_box: &SuperBox, row: &BoxRow, context: &RowContext<'_>) -> Ro
             }
             RowParts {
                 icon: None,
+                chip: None,
                 title: entry.title.clone(),
                 monospace: false,
                 detail: entry.detail.clone(),
@@ -229,11 +350,16 @@ fn row_parts(super_box: &SuperBox, row: &BoxRow, context: &RowContext<'_>) -> Ro
                 ..RowParts::plain(IconSymbol::Terminal, format!("$ {command}"))
             }
         }
-        // 模式按钮已经说明了是哪种，前缀不再写。
-        BoxRow::History(entry) => RowParts {
-            monospace: super_box.mode() == BoxMode::Shell,
-            ..RowParts::plain(IconSymbol::RotateCcw, read_history(entry).1.to_owned())
-        },
+        // 前缀不写：有模式胶囊时它说明了是哪种；没有时（各种混在一起）每行前面带自己的胶囊。
+        BoxRow::History(entry) => {
+            let (mode, text) = read_history(entry);
+            RowParts {
+                chip: (super_box.mode() == BoxMode::Search && mode != BoxMode::Search)
+                    .then_some(mode),
+                monospace: mode == BoxMode::Shell,
+                ..RowParts::plain(IconSymbol::RotateCcw, text.to_owned())
+            }
+        }
         BoxRow::JumpTo(path) => RowParts::plain(
             IconSymbol::ArrowRight,
             tr!("Go to %1", short_path(path, context.home)),
@@ -273,7 +399,11 @@ fn result_row<'a>(
     } else {
         title
     };
-    let mut label = row![title].spacing(8).align_y(Alignment::Center);
+    let mut label = row![].spacing(8).align_y(Alignment::Center);
+    if let Some(mode) = parts.chip {
+        label = label.push(mode_chip(mode));
+    }
+    label = label.push(title);
     if let Some(detail) = parts.detail {
         label = label.push(muted(format_middle_ellipsized_text(
             &detail,

@@ -18,6 +18,40 @@ mod fnmatch;
 use cache::{CasePass, MimeCache, NameMatch};
 
 pub const TEXT_PLAIN: &str = "text/plain";
+
+/// “文档”：PDF、RTF 和常见的办公文档。文字类（text/plain 及其子类）不在里面，用的地方各自加上。
+/// 搜索的类型筛选和动作的类别共用这张表。
+pub const DOCUMENT_TYPES: &[&str] = &[
+    "application/pdf",
+    "application/rtf",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.oasis.opendocument.text",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+];
+
+/// “压缩包”：搜索的类型筛选和动作的类别共用这张表。
+pub const ARCHIVE_TYPES: &[&str] = &[
+    "application/zip",
+    "application/x-7z-compressed",
+    "application/vnd.rar",
+    "application/x-rar-compressed",
+    "application/x-tar",
+    "application/gzip",
+    "application/x-bzip2",
+    "application/x-xz",
+    "application/zstd",
+    "application/x-compressed-tar",
+    "application/x-bzip2-compressed-tar",
+    "application/x-xz-compressed-tar",
+    "application/x-zstd-compressed-tar",
+    "application/x-lzma-compressed-tar",
+];
 const OCTET_STREAM: &str = "application/octet-stream";
 /// 判断“像不像文字”只看开头这么多字节（shared-mime-info 规范的建议）。
 const TEXT_SNIFF_BYTES: usize = 128;

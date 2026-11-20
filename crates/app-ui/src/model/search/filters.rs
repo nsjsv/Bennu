@@ -68,40 +68,21 @@ impl SearchEntryTypePreset {
             Self::Video => vec![prefix("video/")],
             Self::Images => vec![prefix("image/")],
             Self::Text => vec![text()],
-            Self::Documents => vec![
-                text(),
-                exact("application/pdf"),
-                exact("application/rtf"),
-                exact("application/msword"),
-                exact("application/vnd.ms-excel"),
-                exact("application/vnd.ms-powerpoint"),
-                exact("application/vnd.oasis.opendocument.text"),
-                exact("application/vnd.oasis.opendocument.spreadsheet"),
-                exact("application/vnd.oasis.opendocument.presentation"),
-                exact("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-                exact("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-                exact("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
-            ],
+            Self::Documents => std::iter::once(text())
+                .chain(
+                    file_core::mime::DOCUMENT_TYPES
+                        .iter()
+                        .map(|mime| exact(mime)),
+                )
+                .collect(),
             Self::Folders => vec![kind(SearchFileKind::Directory)],
             Self::Audio => vec![prefix("audio/")],
             Self::Pdf => vec![exact("application/pdf")],
             Self::Files => vec![kind(SearchFileKind::File)],
-            Self::Archives => vec![
-                exact("application/zip"),
-                exact("application/x-7z-compressed"),
-                exact("application/vnd.rar"),
-                exact("application/x-rar-compressed"),
-                exact("application/x-tar"),
-                exact("application/gzip"),
-                exact("application/x-bzip2"),
-                exact("application/x-xz"),
-                exact("application/zstd"),
-                exact("application/x-compressed-tar"),
-                exact("application/x-bzip2-compressed-tar"),
-                exact("application/x-xz-compressed-tar"),
-                exact("application/x-zstd-compressed-tar"),
-                exact("application/x-lzma-compressed-tar"),
-            ],
+            Self::Archives => file_core::mime::ARCHIVE_TYPES
+                .iter()
+                .map(|mime| exact(mime))
+                .collect(),
             Self::Links => vec![kind(SearchFileKind::Symlink)],
         }
     }

@@ -16,7 +16,7 @@ use crate::model::{
     AdvancedNewFolderAfter, BrowserLocation, BrowserViewMode, DestructiveActionConfirmation,
     IconGridExpansionMigration, Message, NavigationMode,
 };
-use crate::operation_history::PendingHistoryOperation;
+use crate::operation_history::TaskEnd;
 use crate::view::rename_input_id;
 use file_operations::{
     FileOperationEnqueueOutcome, FileOperationFinish, FileOperationPersistenceOutcome,
@@ -363,34 +363,31 @@ impl FileBrowser {
             }
             None => Task::none(),
         };
-        match &completion {
-            FileOperationCompletion::Succeeded(outcome) => {
-                self.operation_history.accept_completed(task_id, outcome);
-            }
+        let end = match &completion {
+            FileOperationCompletion::Succeeded(outcome) => TaskEnd::Completed(outcome),
             FileOperationCompletion::Canceled(partial_outcome)
             | FileOperationCompletion::Failed {
                 partial_outcome, ..
-            } => self
-                .operation_history
-                .accept_failed(task_id, partial_outcome),
+            } => TaskEnd::Stopped(partial_outcome),
             FileOperationCompletion::RecoveryInterrupted(_, partial_outcome)
             | FileOperationCompletion::RecoveryBlocked {
                 partial_outcome, ..
-            } => self
-                .operation_history
-                .accept_interrupted(task_id, partial_outcome),
-            FileOperationCompletion::RenameRejected {
-                path,
-                attempted_name,
-                reason,
-            } => {
-                self.operation_history
-                    .accept_failed(task_id, &FileOperationOutcome::NoHistory);
-                // 原因已由 queue_finish_from_completion 写进任务行，这是文件操作错误的
-                // 归属位置。撤销/重做的新名字来自历史而不是输入框，没有可以接着改的输入。
-                if !is_history_replay {
-                    tasks.push(self.reopen_rejected_rename(path, attempted_name, *reason));
-                }
+            } => TaskEnd::Interrupted(partial_outcome),
+            FileOperationCompletion::RenameRejected { .. } => {
+                TaskEnd::Stopped(&FileOperationOutcome::NoHistory)
+            }
+        };
+        tasks.push(self.accept_task_end(task_id, end));
+        // 原因已由 queue_finish_from_completion 写进任务行，这是文件操作错误的
+        // 归属位置。撤销/重做的新名字来自历史而不是输入框，没有可以接着改的输入。
+        if let FileOperationCompletion::RenameRejected {
+            path,
+            attempted_name,
+            reason,
+        } = &completion
+        {
+            if !is_history_replay {
+                tasks.push(self.reopen_rejected_rename(path, attempted_name, *reason));
             }
         }
 
@@ -434,25 +431,27 @@ impl FileBrowser {
             .accept_persistence_outcome(persistence_outcome);
         if let Some((local_task_id, stored_task_id)) = acceptance.task_id_remap {
             self.operation_history
-                .remap_pending_task(local_task_id, stored_task_id);
+                .remap_task(local_task_id, stored_task_id);
         }
         if let Some(error) = acceptance.error {
             self.show_global_error(error);
         }
-        if let Some(task_id) = acceptance.rejected_task_id {
-            self.operation_history
-                .accept_failed(task_id, &FileOperationOutcome::NoHistory);
-        }
-        if let Some(task_id) = acceptance.canceled_before_start_task_id {
-            self.operation_history
-                .accept_failed(task_id, &FileOperationOutcome::NoHistory);
-        }
+        let ended_without_running = [
+            acceptance.rejected_task_id,
+            acceptance.canceled_before_start_task_id,
+        ]
+        .into_iter()
+        .flatten()
+        .map(|task_id| {
+            self.accept_task_end(task_id, TaskEnd::Stopped(&FileOperationOutcome::NoHistory))
+        })
+        .collect::<Vec<_>>();
         let next_persistence = self.continue_file_operation_persistence();
         let shutdown_progress = self.accept_file_operation_persistence_progress(
             acceptance.persisted_recoverable_terminal_stored_id,
             acceptance.persisted_shutdown_operation,
         );
-        Task::batch([next_persistence, shutdown_progress])
+        Task::batch(ended_without_running).chain(Task::batch([next_persistence, shutdown_progress]))
     }
 
     pub(super) fn continue_file_operation_persistence(&mut self) -> Task<Message> {
@@ -669,46 +668,11 @@ impl FileBrowser {
         &mut self,
         operation: QueuedFileOperation,
     ) -> Task<Message> {
-        self.enqueue_file_operation_with_history(operation, None)
-    }
-
-    pub(super) fn undo_file_operation(&mut self) -> Task<Message> {
-        self.context_menu = None;
-        let Some((operation, pending_history)) = self.operation_history.take_undo_operation()
-        else {
-            return Task::none();
-        };
-        self.enqueue_file_operation_with_history(operation, Some(pending_history))
-    }
-
-    pub(super) fn redo_file_operation(&mut self) -> Task<Message> {
-        self.context_menu = None;
-        let Some((operation, pending_history)) = self.operation_history.take_redo_operation()
-        else {
-            return Task::none();
-        };
-        self.enqueue_file_operation_with_history(operation, Some(pending_history))
-    }
-
-    fn enqueue_file_operation_with_history(
-        &mut self,
-        operation: QueuedFileOperation,
-        pending_history: Option<PendingHistoryOperation>,
-    ) -> Task<Message> {
         self.retract_global_error(GlobalErrorSource::FileOperationEnqueue);
-        match self.operation_queue.enqueue(operation) {
-            FileOperationEnqueueOutcome::Queued { task_id } => {
-                if let Some(pending_history) = pending_history {
-                    self.operation_history
-                        .track_pending(task_id, pending_history);
-                }
-            }
-            FileOperationEnqueueOutcome::Rejected { error } => {
-                self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
-                if let Some(pending_history) = pending_history {
-                    self.operation_history.reject_pending(pending_history);
-                }
-            }
+        if let FileOperationEnqueueOutcome::Rejected { error } =
+            self.operation_queue.enqueue(operation)
+        {
+            self.show_global_error_from(GlobalErrorSource::FileOperationEnqueue, error);
         }
         Task::batch([
             self.continue_file_operation_persistence(),

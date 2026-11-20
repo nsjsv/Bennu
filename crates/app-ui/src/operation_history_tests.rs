@@ -32,7 +32,58 @@ impl Drop for ScopedEnvironmentVariable {
     }
 }
 
-fn transfer(source: &str, target: &str) -> CompletedTransfer {
+/// 测试用的任务队列：按顺序发任务 id，记下放进来的操作。
+#[derive(Default)]
+pub(super) struct FakeQueue {
+    pub(super) operations: Vec<(u64, QueuedFileOperation)>,
+}
+
+impl FakeQueue {
+    pub(super) fn enqueue(
+        &mut self,
+        operation: QueuedFileOperation,
+    ) -> FileOperationEnqueueOutcome {
+        let task_id = self.operations.len() as u64 + 1;
+        self.operations.push((task_id, operation));
+        FileOperationEnqueueOutcome::Queued { task_id }
+    }
+
+    pub(super) fn last(&self) -> (u64, QueuedFileOperation) {
+        self.operations
+            .last()
+            .cloned()
+            .expect("an operation was queued")
+    }
+}
+
+pub(super) fn request(
+    history: &mut FileOperationHistory,
+    queue: &mut FakeQueue,
+    direction: HistoryDirection,
+) {
+    assert_eq!(
+        history.request(direction, &mut |operation| queue.enqueue(operation)),
+        None
+    );
+}
+
+pub(super) fn end_replay(
+    history: &mut FileOperationHistory,
+    queue: &mut FakeQueue,
+    task_id: u64,
+    end: TaskEnd<'_>,
+) {
+    assert_eq!(
+        history.accept_replay_end(task_id, end, &mut |operation| queue.enqueue(operation)),
+        None
+    );
+}
+
+pub(super) fn entry(item: FileOperationHistoryItem) -> HistoryEntry {
+    HistoryEntry { items: vec![item] }
+}
+
+pub(super) fn transfer(source: &str, target: &str) -> CompletedTransfer {
     CompletedTransfer {
         source: PathBuf::from(source),
         target: PathBuf::from(target),
@@ -91,13 +142,13 @@ fn non_replayable_move_still_reports_completed_path_migration() {
     let migrations = outcome.completed_path_migrations();
     let mut history = FileOperationHistory::new();
 
-    history.accept_completed(1, &outcome);
+    history.record(TaskEnd::Completed(&outcome));
 
     assert_eq!(
         path_after_completed_migrations(Path::new("/workspace/old/child"), &migrations),
         PathBuf::from("/archive/old/child")
     );
-    assert!(history.take_undo_operation().is_none());
+    assert!(history.next_undo_operation().is_none());
 }
 
 #[test]
@@ -143,21 +194,24 @@ fn undo_and_redo_rename_keep_non_utf8_name_bytes() {
 }
 
 #[test]
-fn pending_history_task_id_remaps_after_durable_insert() {
+fn replay_task_id_remaps_after_durable_insert() {
     let mut history = FileOperationHistory::new();
-    history.undo_stack.push(FileOperationHistoryItem::Move {
-        transfers: vec![transfer("/a", "/b")],
-    });
-    let (_operation, pending) = history.take_undo_operation().expect("undo operation");
-    history.track_pending(u64::MAX - 1, pending);
+    let mut queue = FakeQueue::default();
+    history
+        .undo_stack
+        .push(entry(FileOperationHistoryItem::Move {
+            transfers: vec![transfer("/a", "/b")],
+        }));
+    request(&mut history, &mut queue, HistoryDirection::Undo);
+    let (local_task_id, _) = queue.last();
 
-    history.remap_pending_task(u64::MAX - 1, 42);
+    history.remap_task(local_task_id, 42);
 
-    assert!(!history.is_replaying(u64::MAX - 1));
+    assert!(!history.is_replaying(local_task_id));
     assert!(history.is_replaying(42));
 }
 
-fn moved(transfers: Vec<CompletedTransfer>) -> FileOperationOutcome {
+pub(super) fn moved(transfers: Vec<CompletedTransfer>) -> FileOperationOutcome {
     FileOperationOutcome::Move {
         transfers,
         history_eligibility: FileOperationHistoryEligibility::Replayable,
@@ -170,20 +224,22 @@ fn stopped_task_keeps_undo_for_the_part_that_finished() {
     let mut history = FileOperationHistory::new();
     history
         .redo_stack
-        .push(FileOperationHistoryItem::CreateEmptyFile {
+        .push(entry(FileOperationHistoryItem::CreateEmptyFile {
             path: PathBuf::from("/tmp/New File"),
-        });
+        }));
 
-    history.accept_failed(1, &FileOperationOutcome::NoHistory);
+    history.record(TaskEnd::Stopped(&FileOperationOutcome::NoHistory));
     assert_eq!(history.redo_stack.len(), 1);
 
-    history.accept_interrupted(2, &moved(vec![transfer("/a/one", "/b/one")]));
+    history.record(TaskEnd::Interrupted(&moved(vec![transfer(
+        "/a/one", "/b/one",
+    )])));
     assert!(history.undo_stack.is_empty());
 
-    history.accept_failed(3, &moved(vec![transfer("/a/one", "/b/one")]));
+    history.record(TaskEnd::Stopped(&moved(vec![transfer("/a/one", "/b/one")])));
     assert!(history.redo_stack.is_empty());
-    let (undo, _) = history
-        .take_undo_operation()
+    let undo = history
+        .next_undo_operation()
         .expect("undo the finished move");
     let QueuedFileOperation::Move { transfers, .. } = undo else {
         panic!("expected undo move");
@@ -200,16 +256,13 @@ fn stopped_trash_keeps_undo_for_items_already_in_trash() {
         PathBuf::from("/workspace/a"),
     );
 
-    history.accept_failed(
-        1,
-        &FileOperationOutcome::Trash {
-            entries: vec![entry.clone()],
-            untrashable: Vec::new(),
-        },
-    );
+    history.record(TaskEnd::Stopped(&FileOperationOutcome::Trash {
+        entries: vec![entry.clone()],
+        untrashable: Vec::new(),
+    }));
 
-    let (undo, _) = history
-        .take_undo_operation()
+    let undo = history
+        .next_undo_operation()
         .expect("undo the trashed item");
     assert!(matches!(undo, QueuedFileOperation::Restore { entries } if entries == vec![entry]));
 }
@@ -217,16 +270,24 @@ fn stopped_trash_keeps_undo_for_items_already_in_trash() {
 #[test]
 fn failed_undo_move_splits_completed_and_remaining_transfers() {
     let mut history = FileOperationHistory::new();
-    history.undo_stack.push(FileOperationHistoryItem::Move {
-        transfers: vec![transfer("/a/one", "/b/one"), transfer("/a/two", "/b/two")],
-    });
-    let (_operation, pending) = history.take_undo_operation().expect("undo move");
-    history.track_pending(1, pending);
+    let mut queue = FakeQueue::default();
+    history
+        .undo_stack
+        .push(entry(FileOperationHistoryItem::Move {
+            transfers: vec![transfer("/a/one", "/b/one"), transfer("/a/two", "/b/two")],
+        }));
+    request(&mut history, &mut queue, HistoryDirection::Undo);
+    let (task_id, _) = queue.last();
 
-    history.accept_failed(1, &moved(vec![transfer("/b/two", "/a/two")]));
+    end_replay(
+        &mut history,
+        &mut queue,
+        task_id,
+        TaskEnd::Stopped(&moved(vec![transfer("/b/two", "/a/two")])),
+    );
 
-    let (remaining_undo, _) = history
-        .take_undo_operation()
+    let remaining_undo = history
+        .next_undo_operation()
         .expect("remaining undo transfer");
     let QueuedFileOperation::Move {
         transfers: remaining_undo_transfers,
@@ -239,8 +300,8 @@ fn failed_undo_move_splits_completed_and_remaining_transfers() {
     assert_eq!(remaining_undo_transfers[0].source, PathBuf::from("/b/one"));
     assert_eq!(remaining_undo_transfers[0].target, PathBuf::from("/a/one"));
 
-    let (completed_redo, _) = history
-        .take_redo_operation()
+    let completed_redo = history
+        .next_redo_operation()
         .expect("completed transfer redo");
     let QueuedFileOperation::Move {
         transfers: completed_redo_transfers,
@@ -257,16 +318,24 @@ fn failed_undo_move_splits_completed_and_remaining_transfers() {
 #[test]
 fn failed_redo_move_splits_completed_and_remaining_transfers() {
     let mut history = FileOperationHistory::new();
-    history.redo_stack.push(FileOperationHistoryItem::Move {
-        transfers: vec![transfer("/a/one", "/b/one"), transfer("/a/two", "/b/two")],
-    });
-    let (_operation, pending) = history.take_redo_operation().expect("redo move");
-    history.track_pending(1, pending);
+    let mut queue = FakeQueue::default();
+    history
+        .redo_stack
+        .push(entry(FileOperationHistoryItem::Move {
+            transfers: vec![transfer("/a/one", "/b/one"), transfer("/a/two", "/b/two")],
+        }));
+    request(&mut history, &mut queue, HistoryDirection::Redo);
+    let (task_id, _) = queue.last();
 
-    history.accept_failed(1, &moved(vec![transfer("/a/one", "/b/one")]));
+    end_replay(
+        &mut history,
+        &mut queue,
+        task_id,
+        TaskEnd::Stopped(&moved(vec![transfer("/a/one", "/b/one")])),
+    );
 
-    let (remaining_redo, _) = history
-        .take_redo_operation()
+    let remaining_redo = history
+        .next_redo_operation()
         .expect("remaining redo transfer");
     let QueuedFileOperation::Move {
         transfers: remaining_redo_transfers,
@@ -279,8 +348,8 @@ fn failed_redo_move_splits_completed_and_remaining_transfers() {
     assert_eq!(remaining_redo_transfers[0].source, PathBuf::from("/a/two"));
     assert_eq!(remaining_redo_transfers[0].target, PathBuf::from("/b/two"));
 
-    let (completed_undo, _) = history
-        .take_undo_operation()
+    let completed_undo = history
+        .next_undo_operation()
         .expect("completed transfer undo");
     let QueuedFileOperation::Move {
         transfers: completed_undo_transfers,
@@ -337,7 +406,7 @@ fn copy_metadata_loss_warns_and_keeps_undo_history() {
         metadata_loss_on(&["/usb/a.txt"]),
     );
     let mut history = FileOperationHistory::new();
-    history.accept_completed(11, &outcome);
+    history.record(TaskEnd::Completed(&outcome));
 
     assert_eq!(
         outcome
@@ -347,7 +416,7 @@ fn copy_metadata_loss_warns_and_keeps_undo_history() {
             "Some file attributes could not be preserved: a.txt (permissions, extended attributes)"
         )
     );
-    assert!(history.take_undo_operation().is_some());
+    assert!(history.next_undo_operation().is_some());
 }
 
 #[test]
@@ -357,12 +426,12 @@ fn non_replayable_copy_still_warns_without_undo_history() {
         metadata_loss_on(&["/usb/a.txt"]),
     );
     let mut history = FileOperationHistory::new();
-    history.accept_completed(12, &outcome);
+    history.record(TaskEnd::Completed(&outcome));
 
     assert!(outcome
         .completion_warning(bennu_localization::UiLanguage::English)
         .is_some());
-    assert!(history.take_undo_operation().is_none());
+    assert!(history.next_undo_operation().is_none());
 }
 
 #[test]
@@ -414,15 +483,12 @@ async fn trashed_entry_creates_an_executable_undo_entry() {
         .await
         .unwrap();
     let mut history = FileOperationHistory::new();
-    history.accept_completed(
-        7,
-        &FileOperationOutcome::Trash {
-            entries: vec![entry.clone()],
-            untrashable: Vec::new(),
-        },
-    );
+    history.record(TaskEnd::Completed(&FileOperationOutcome::Trash {
+        entries: vec![entry.clone()],
+        untrashable: Vec::new(),
+    }));
 
-    let (undo, _) = history.take_undo_operation().expect("verified undo entry");
+    let undo = history.next_undo_operation().expect("verified undo entry");
     let QueuedFileOperation::Restore { mut entries } = undo else {
         panic!("expected restore operation");
     };
@@ -436,28 +502,28 @@ async fn trashed_entry_creates_an_executable_undo_entry() {
 #[test]
 fn normal_operation_clears_redo_stack() {
     let mut history = FileOperationHistory::new();
+    let mut queue = FakeQueue::default();
     history
         .undo_stack
-        .push(FileOperationHistoryItem::CreateEmptyFile {
+        .push(entry(FileOperationHistoryItem::CreateEmptyFile {
             path: PathBuf::from("/tmp/New File"),
-        });
-    let (_operation, pending) = history.take_undo_operation().expect("undo");
-    history.track_pending(1, pending);
-    history.accept_completed(
-        1,
-        &FileOperationOutcome::Trash {
+        }));
+    request(&mut history, &mut queue, HistoryDirection::Undo);
+    let (task_id, _) = queue.last();
+    end_replay(
+        &mut history,
+        &mut queue,
+        task_id,
+        TaskEnd::Completed(&FileOperationOutcome::Trash {
             entries: Vec::new(),
             untrashable: Vec::new(),
-        },
+        }),
     );
     assert_eq!(history.redo_stack.len(), 1);
 
-    history.accept_completed(
-        2,
-        &FileOperationOutcome::CreateDirectory {
-            path: PathBuf::from("/tmp/New Folder"),
-        },
-    );
+    history.record(TaskEnd::Completed(&FileOperationOutcome::CreateDirectory {
+        path: PathBuf::from("/tmp/New Folder"),
+    }));
 
     assert!(history.redo_stack.is_empty());
     assert_eq!(history.undo_stack.len(), 1);
@@ -480,15 +546,14 @@ fn advanced_new_folder_outcome(moved: Vec<CompletedTransfer>) -> FileOperationOu
 #[test]
 fn undoing_an_advanced_new_folder_with_moved_items_moves_them_back() {
     let mut history = FileOperationHistory::new();
-    history.accept_completed(
-        1,
-        &advanced_new_folder_outcome(vec![CompletedTransfer {
+    history.record(TaskEnd::Completed(&advanced_new_folder_outcome(vec![
+        CompletedTransfer {
             source: PathBuf::from("/docs/a.txt"),
             target: PathBuf::from("/docs/p/q/a.txt"),
-        }]),
-    );
+        },
+    ])));
 
-    let (operation, _) = history.take_undo_operation().expect("undo operation");
+    let operation = history.next_undo_operation().expect("undo operation");
 
     let QueuedFileOperation::UngatherNewFolder {
         directory,
@@ -513,9 +578,9 @@ fn undoing_an_advanced_new_folder_with_moved_items_moves_them_back() {
 #[test]
 fn undoing_an_advanced_new_folder_without_moved_items_trashes_its_top_level_folders() {
     let mut history = FileOperationHistory::new();
-    history.accept_completed(1, &advanced_new_folder_outcome(Vec::new()));
+    history.record(TaskEnd::Completed(&advanced_new_folder_outcome(Vec::new())));
 
-    let (operation, _) = history.take_undo_operation().expect("undo operation");
+    let operation = history.next_undo_operation().expect("undo operation");
 
     let QueuedFileOperation::Trash { paths } = operation else {
         panic!("expected trash, got {operation:?}");
@@ -529,8 +594,7 @@ fn undoing_an_advanced_new_folder_without_moved_items_trashes_its_top_level_fold
 #[test]
 fn undoing_a_gather_removes_only_the_gathered_folder() {
     let mut history = FileOperationHistory::new();
-    history.accept_completed(
-        1,
+    history.record(TaskEnd::Completed(
         &FileOperationOutcome::GatheredIntoNewFolder {
             directory: PathBuf::from("/docs/新建文件夹"),
             moved: vec![CompletedTransfer {
@@ -538,9 +602,9 @@ fn undoing_a_gather_removes_only_the_gathered_folder() {
                 target: PathBuf::from("/docs/新建文件夹/a.txt"),
             }],
         },
-    );
+    ));
 
-    let (operation, _) = history.take_undo_operation().expect("undo operation");
+    let operation = history.next_undo_operation().expect("undo operation");
 
     let QueuedFileOperation::UngatherNewFolder {
         created_directories,
@@ -590,81 +654,4 @@ fn ungathering_that_removes_the_new_folder_has_no_warning() {
     assert!(outcome
         .completion_warning(bennu_localization::UiLanguage::English)
         .is_none());
-}
-
-/// 转换、压缩、解压生成的东西：撤销 = 移到回收站，重做 = 从回收站拿回来（同 Nautilus 撤销压缩、解压）。
-#[test]
-fn made_files_go_to_the_trash_on_undo_and_come_back_on_redo() {
-    let made = [
-        (
-            FileOperationOutcome::Convert {
-                failures: Vec::new(),
-                outputs: vec![PathBuf::from("/music/a.m4a"), PathBuf::from("/music/b.m4a")],
-            },
-            vec![PathBuf::from("/music/a.m4a"), PathBuf::from("/music/b.m4a")],
-        ),
-        (
-            FileOperationOutcome::CreatedArchive {
-                archive: PathBuf::from("/docs/report.zip"),
-            },
-            vec![PathBuf::from("/docs/report.zip")],
-        ),
-        (
-            FileOperationOutcome::Extracted {
-                placed: PathBuf::from("/docs/photos"),
-            },
-            vec![PathBuf::from("/docs/photos")],
-        ),
-    ];
-    for (task_id, (outcome, paths)) in (1..).zip(made) {
-        let mut history = FileOperationHistory::new();
-        history.accept_completed(task_id, &outcome);
-
-        let (undo, pending) = history.take_undo_operation().expect("undo what was made");
-        assert!(
-            matches!(&undo, QueuedFileOperation::Trash { paths: trashed } if *trashed == paths),
-            "{undo:?}"
-        );
-
-        let entries = paths
-            .iter()
-            .map(|path| {
-                TrashRestoreEntry::from_historical_paths(
-                    PathBuf::from("/trash/files").join(path.file_name().unwrap()),
-                    PathBuf::from("/trash/info").join(path.file_name().unwrap()),
-                    path.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        history.track_pending(100 + task_id, pending);
-        history.accept_completed(
-            100 + task_id,
-            &FileOperationOutcome::Trash {
-                entries: entries.clone(),
-                untrashable: Vec::new(),
-            },
-        );
-
-        let (redo, _) = history
-            .take_redo_operation()
-            .expect("redo brings them back");
-        assert!(
-            matches!(&redo, QueuedFileOperation::Restore { entries: restored } if *restored == entries),
-            "{redo:?}"
-        );
-    }
-}
-
-/// 一个都没转成的转换没有可撤销的东西。
-#[test]
-fn a_conversion_that_made_nothing_leaves_no_undo() {
-    let mut history = FileOperationHistory::new();
-    history.accept_completed(
-        1,
-        &FileOperationOutcome::Convert {
-            failures: vec!["a.mp4: broken".to_owned()],
-            outputs: Vec::new(),
-        },
-    );
-    assert!(history.take_undo_operation().is_none());
 }

@@ -1,25 +1,38 @@
-use std::collections::HashMap;
+//! 撤销 / 重做历史。一条记录可以有多项：一次普通操作是一项，一个动作是它做过的各项。
+//! 重放一条记录时一次只往队列里放一项，这一项结束了再放下一项；中途停下时，做完的和没做的
+//! 各成一条，再按一次接着做剩下的。
+
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use file_core::{
     BatchRenameItem, CompletedBatchRename, FileOperationVerification, TransferConflictStrategy,
     TrashRestoreEntry,
 };
-use file_operations::{CompletedTransfer, FileOperationHistoryEligibility, FileOperationOutcome};
-
-use file_operations::{QueuedFileOperation, QueuedTransfer};
-
-#[derive(Debug, Clone)]
-pub(crate) struct PendingHistoryOperation {
-    direction: HistoryDirection,
-    item: FileOperationHistoryItem,
-}
+use file_operations::{
+    CompletedTransfer, FileOperationEnqueueOutcome, FileOperationHistoryEligibility,
+    FileOperationOutcome, QueuedFileOperation, QueuedTransfer,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HistoryDirection {
+pub(crate) enum HistoryDirection {
     Undo,
     Redo,
 }
+
+/// 一个队列任务怎么结束的，带着它已经生效的部分。
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TaskEnd<'a> {
+    Completed(&'a FileOperationOutcome),
+    /// 失败、取消，或者还没开始就被拒、被取消。
+    Stopped(&'a FileOperationOutcome),
+    /// 恢复中断：之后还会接着恢复，现在只交代重放。
+    Interrupted(&'a FileOperationOutcome),
+}
+
+/// 把一个操作放进任务队列。历史只通过它入队，拿到的任务 id 用来认它的结束。
+pub(crate) type EnqueueOperation<'a> =
+    dyn FnMut(QueuedFileOperation) -> FileOperationEnqueueOutcome + 'a;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FileOperationHistoryItem {
@@ -69,11 +82,31 @@ pub(crate) enum FileOperationHistoryItem {
     },
 }
 
+/// 一条撤销记录，项按执行的顺序排。
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HistoryEntry {
+    items: Vec<FileOperationHistoryItem>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct FileOperationHistory {
-    undo_stack: Vec<FileOperationHistoryItem>,
-    redo_stack: Vec<FileOperationHistoryItem>,
-    pending_tasks: HashMap<u64, PendingHistoryOperation>,
+    undo_stack: Vec<HistoryEntry>,
+    redo_stack: Vec<HistoryEntry>,
+    replay: Option<HistoryReplay>,
+    /// 重放进行中又按的撤销 / 重做，前一条结束后按顺序开始。
+    requested: VecDeque<HistoryDirection>,
+}
+
+/// 正在重放的一条记录。
+#[derive(Debug)]
+struct HistoryReplay {
+    direction: HistoryDirection,
+    /// 还没放进队列的项，下一项在末尾：撤销从最后一步倒着来，重做从第一步来。
+    remaining: Vec<FileOperationHistoryItem>,
+    /// 做完的项变成的反方向的项，按做完的顺序。
+    finished: Vec<FileOperationHistoryItem>,
+    /// 放进队列、正在等结果的那一项和它的任务。
+    running: Option<(u64, FileOperationHistoryItem)>,
 }
 
 impl FileOperationHistory {
@@ -81,177 +114,268 @@ impl FileOperationHistory {
         Self::default()
     }
 
-    pub(crate) fn take_undo_operation(
-        &mut self,
-    ) -> Option<(QueuedFileOperation, PendingHistoryOperation)> {
-        let item = self.undo_stack.pop()?;
-        let Some(operation) = item.undo_operation() else {
-            self.undo_stack.push(item);
-            return None;
-        };
-        Some((operation, PendingHistoryOperation::undo(item)))
-    }
-
-    pub(crate) fn take_redo_operation(
-        &mut self,
-    ) -> Option<(QueuedFileOperation, PendingHistoryOperation)> {
-        let item = self.redo_stack.pop()?;
-        let Some(operation) = item.redo_operation() else {
-            self.redo_stack.push(item);
-            return None;
-        };
-        Some((operation, PendingHistoryOperation::redo(item)))
-    }
-
-    pub(crate) fn reject_pending(&mut self, pending: PendingHistoryOperation) {
-        self.restore_item(pending.direction, pending.item);
-    }
-
-    pub(crate) fn track_pending(&mut self, task_id: u64, operation: PendingHistoryOperation) {
-        self.pending_tasks.insert(task_id, operation);
-    }
-
-    pub(crate) fn remap_pending_task(&mut self, local_task_id: u64, stored_task_id: u64) {
-        if let Some(operation) = self.pending_tasks.remove(&local_task_id) {
-            self.pending_tasks.insert(stored_task_id, operation);
+    /// 普通操作（不是重放）结束：做成的部分记成一条。做完的操作即使没有可撤销的东西，
+    /// 也让重做作废，因为文件已经变了；什么都没做成的停下不动历史。
+    pub(crate) fn record(&mut self, end: TaskEnd<'_>) {
+        match end {
+            TaskEnd::Completed(outcome) => {
+                if let Some(item) = FileOperationHistoryItem::from_outcome(outcome) {
+                    self.undo_stack.push(HistoryEntry { items: vec![item] });
+                }
+                self.redo_stack.clear();
+            }
+            TaskEnd::Stopped(partial_outcome) => {
+                if let Some(item) = FileOperationHistoryItem::from_outcome(partial_outcome) {
+                    self.undo_stack.push(HistoryEntry { items: vec![item] });
+                    self.redo_stack.clear();
+                }
+            }
+            // 恢复完会再以完成或停下结束一次，那时再记。
+            TaskEnd::Interrupted(_) => {}
         }
     }
 
     pub(crate) fn is_replaying(&self, task_id: u64) -> bool {
-        self.pending_tasks.contains_key(&task_id)
+        self.running_task_id() == Some(task_id)
     }
 
-    pub(crate) fn accept_completed(&mut self, task_id: u64, outcome: &FileOperationOutcome) {
-        if let Some(pending) = self.pending_tasks.remove(&task_id) {
-            self.accept_completed_replay(pending, outcome);
-            return;
-        }
-
-        if let Some(item) = FileOperationHistoryItem::from_outcome(outcome) {
-            self.undo_stack.push(item);
-        }
-        self.redo_stack.clear();
-    }
-
-    /// 失败或取消：停下前已生效的部分和成功一样进撤销历史。
-    pub(crate) fn accept_failed(&mut self, task_id: u64, partial_outcome: &FileOperationOutcome) {
-        if self.pending_tasks.contains_key(&task_id) {
-            self.accept_interrupted(task_id, partial_outcome);
-        } else if let Some(item) = FileOperationHistoryItem::from_outcome(partial_outcome) {
-            self.undo_stack.push(item);
-            self.redo_stack.clear();
+    /// 任务持久化后换成存储里的 id。
+    pub(crate) fn remap_task(&mut self, local_task_id: u64, stored_task_id: u64) {
+        if let Some((task_id, _)) = self
+            .replay
+            .as_mut()
+            .and_then(|replay| replay.running.as_mut())
+        {
+            if *task_id == local_task_id {
+                *task_id = stored_task_id;
+            }
         }
     }
 
-    /// 恢复中断的任务之后还会接着跑完，这时只处理撤销/重做重放，不记新历史。
-    pub(crate) fn accept_interrupted(
+    /// Ctrl+Z / Ctrl+Shift+Z。有重放在跑时排队，等它结束再做。返回入队被拒的原因。
+    pub(crate) fn request(
+        &mut self,
+        direction: HistoryDirection,
+        enqueue: &mut EnqueueOperation<'_>,
+    ) -> Option<String> {
+        if self.replay.is_some() {
+            self.requested.push_back(direction);
+            return None;
+        }
+        self.start_replay(direction, enqueue)
+    }
+
+    /// 重放的那一项结束了：做完就放下一项，停下就把这条拆开放回去。返回入队被拒的原因。
+    pub(crate) fn accept_replay_end(
         &mut self,
         task_id: u64,
-        partial_outcome: &FileOperationOutcome,
-    ) {
-        let Some(pending) = self.pending_tasks.remove(&task_id) else {
-            return;
-        };
-        let completed_move_transfers = match partial_outcome {
-            FileOperationOutcome::Move { transfers, .. } => transfers.as_slice(),
-            _ => &[],
-        };
-
-        let PendingHistoryOperation { direction, item } = pending;
-        let FileOperationHistoryItem::Move { transfers } = item else {
-            self.restore_item(direction, item);
-            return;
-        };
-        if completed_move_transfers.is_empty() {
-            self.restore_item(direction, FileOperationHistoryItem::Move { transfers });
-            return;
-        }
-
-        let completed_original_transfers = match direction {
-            HistoryDirection::Undo => completed_move_transfers
-                .iter()
-                .rev()
-                .map(|transfer| CompletedTransfer {
-                    source: transfer.target.clone(),
-                    target: transfer.source.clone(),
-                })
-                .collect::<Vec<_>>(),
-            HistoryDirection::Redo => completed_move_transfers.to_vec(),
-        };
-        let mut unmatched_completed_transfers = completed_original_transfers.clone();
-        let remaining_original_transfers = transfers
-            .into_iter()
-            .filter(|transfer| {
-                let Some(completed_index) = unmatched_completed_transfers
-                    .iter()
-                    .position(|completed_transfer| completed_transfer == transfer)
-                else {
-                    return true;
+        end: TaskEnd<'_>,
+        enqueue: &mut EnqueueOperation<'_>,
+    ) -> Option<String> {
+        let replay = self.replay.as_mut()?;
+        let (_, item) = replay
+            .running
+            .take_if(|(running_task_id, _)| *running_task_id == task_id)?;
+        match end {
+            TaskEnd::Completed(outcome) => {
+                let opposite = match replay.direction {
+                    HistoryDirection::Undo => Some(item.after_undo(outcome)),
+                    HistoryDirection::Redo => FileOperationHistoryItem::from_outcome(outcome),
                 };
-                unmatched_completed_transfers.remove(completed_index);
-                false
-            })
-            .collect::<Vec<_>>();
-        debug_assert!(
-            unmatched_completed_transfers.is_empty(),
-            "completed history replay transfers must belong to the pending move"
-        );
+                replay.finished.extend(opposite);
+                self.advance_replay(enqueue)
+            }
+            TaskEnd::Stopped(partial_outcome) | TaskEnd::Interrupted(partial_outcome) => {
+                let (unfinished, finished) =
+                    split_stopped_replay(replay.direction, item, partial_outcome);
+                replay.finished.extend(finished);
+                replay.remaining.extend(unfinished);
+                self.stop_replay();
+                None
+            }
+        }
+    }
 
+    fn running_task_id(&self) -> Option<u64> {
+        self.replay
+            .as_ref()
+            .and_then(|replay| replay.running.as_ref())
+            .map(|(task_id, _)| *task_id)
+    }
+
+    fn start_replay(
+        &mut self,
+        direction: HistoryDirection,
+        enqueue: &mut EnqueueOperation<'_>,
+    ) -> Option<String> {
+        let stack = match direction {
+            HistoryDirection::Undo => &mut self.undo_stack,
+            HistoryDirection::Redo => &mut self.redo_stack,
+        };
+        let HistoryEntry { mut items } = stack.pop()?;
+        if direction == HistoryDirection::Redo {
+            items.reverse();
+        }
+        self.replay = Some(HistoryReplay {
+            direction,
+            remaining: items,
+            finished: Vec::new(),
+            running: None,
+        });
+        self.advance_replay(enqueue)
+    }
+
+    /// 放下一项进队列。这条做完了就收尾，再开始排着的下一次请求。
+    fn advance_replay(&mut self, enqueue: &mut EnqueueOperation<'_>) -> Option<String> {
+        let replay = self.replay.as_mut()?;
+        let Some(item) = replay.remaining.pop() else {
+            self.finish_replay();
+            let direction = self.requested.pop_front()?;
+            return self.start_replay(direction, enqueue);
+        };
+        let operation = match replay.direction {
+            HistoryDirection::Undo => item.undo_operation(),
+            HistoryDirection::Redo => item.redo_operation(),
+        };
+        // 这一项做不了（比如重做时源路径已经变了）：停在这里，整条留给用户。
+        let Some(operation) = operation else {
+            replay.remaining.push(item);
+            self.stop_replay();
+            return None;
+        };
+        match enqueue(operation) {
+            FileOperationEnqueueOutcome::Queued { task_id } => {
+                replay.running = Some((task_id, item));
+                None
+            }
+            FileOperationEnqueueOutcome::Rejected { error } => {
+                replay.remaining.push(item);
+                self.stop_replay();
+                Some(error)
+            }
+        }
+    }
+
+    /// 整条都做完：做完的项成为另一边的一条。
+    fn finish_replay(&mut self) {
+        if let Some(replay) = self.replay.take() {
+            self.push_finished(replay.direction, replay.finished);
+        }
+    }
+
+    /// 停下：做完的成为另一边的一条，没做的按原来的顺序放回原来的栈。之后排着的请求作废，
+    /// 它们是冲着这一串连着做的，停下以后再接着做会撤到用户没想到的地方。
+    fn stop_replay(&mut self) {
+        self.requested.clear();
+        let Some(replay) = self.replay.take() else {
+            return;
+        };
+        let mut unfinished = replay.remaining;
+        match replay.direction {
+            HistoryDirection::Undo => push_entry(&mut self.undo_stack, unfinished),
+            HistoryDirection::Redo => {
+                unfinished.reverse();
+                push_entry(&mut self.redo_stack, unfinished);
+            }
+        }
+        self.push_finished(replay.direction, replay.finished);
+    }
+
+    fn push_finished(
+        &mut self,
+        direction: HistoryDirection,
+        mut finished: Vec<FileOperationHistoryItem>,
+    ) {
         match direction {
             HistoryDirection::Undo => {
-                self.push_move_item(HistoryDirection::Undo, remaining_original_transfers);
-                self.push_move_item(HistoryDirection::Redo, completed_original_transfers);
+                finished.reverse();
+                push_entry(&mut self.redo_stack, finished);
             }
-            HistoryDirection::Redo => {
-                self.push_move_item(HistoryDirection::Redo, remaining_original_transfers);
-                self.push_move_item(HistoryDirection::Undo, completed_original_transfers);
-            }
-        }
-    }
-
-    fn restore_item(&mut self, direction: HistoryDirection, item: FileOperationHistoryItem) {
-        match direction {
-            HistoryDirection::Undo => self.undo_stack.push(item),
-            HistoryDirection::Redo => self.redo_stack.push(item),
-        }
-    }
-
-    fn push_move_item(&mut self, direction: HistoryDirection, transfers: Vec<CompletedTransfer>) {
-        if !transfers.is_empty() {
-            self.restore_item(direction, FileOperationHistoryItem::Move { transfers });
-        }
-    }
-
-    fn accept_completed_replay(
-        &mut self,
-        pending: PendingHistoryOperation,
-        outcome: &FileOperationOutcome,
-    ) {
-        match pending.direction {
-            HistoryDirection::Undo => self.redo_stack.push(pending.item.after_undo(outcome)),
-            HistoryDirection::Redo => {
-                if let Some(item) = FileOperationHistoryItem::from_outcome(outcome) {
-                    self.undo_stack.push(item);
-                }
-            }
+            HistoryDirection::Redo => push_entry(&mut self.undo_stack, finished),
         }
     }
 }
 
-impl PendingHistoryOperation {
-    fn undo(item: FileOperationHistoryItem) -> Self {
-        Self {
-            direction: HistoryDirection::Undo,
-            item,
-        }
+#[cfg(test)]
+impl FileOperationHistory {
+    /// 测试用：撤销栈顶那条时第一个要放进队列的操作，不动历史。
+    pub(crate) fn next_undo_operation(&self) -> Option<QueuedFileOperation> {
+        self.undo_stack.last()?.items.last()?.undo_operation()
     }
 
-    fn redo(item: FileOperationHistoryItem) -> Self {
-        Self {
-            direction: HistoryDirection::Redo,
-            item,
-        }
+    /// 测试用：重做栈顶那条时第一个要放进队列的操作，不动历史。
+    pub(crate) fn next_redo_operation(&self) -> Option<QueuedFileOperation> {
+        self.redo_stack.last()?.items.first()?.redo_operation()
     }
+
+    pub(crate) fn undo_depth(&self) -> usize {
+        self.undo_stack.len()
+    }
+}
+
+fn push_entry(stack: &mut Vec<HistoryEntry>, items: Vec<FileOperationHistoryItem>) {
+    if !items.is_empty() {
+        stack.push(HistoryEntry { items });
+    }
+}
+
+/// 重放的一项停下了：(没做完、留在原来那边的部分, 做完了、去另一边的部分)。移动可能只挪回了
+/// 一部分，按实际挪过的拆成两段；其余的项整项留在原来那边。
+fn split_stopped_replay(
+    direction: HistoryDirection,
+    item: FileOperationHistoryItem,
+    partial_outcome: &FileOperationOutcome,
+) -> (
+    Option<FileOperationHistoryItem>,
+    Option<FileOperationHistoryItem>,
+) {
+    let completed_move_transfers = match partial_outcome {
+        FileOperationOutcome::Move { transfers, .. } => transfers.as_slice(),
+        _ => &[],
+    };
+    let FileOperationHistoryItem::Move { transfers } = item else {
+        return (Some(item), None);
+    };
+    if completed_move_transfers.is_empty() {
+        return (Some(FileOperationHistoryItem::Move { transfers }), None);
+    }
+
+    let completed_original_transfers = match direction {
+        HistoryDirection::Undo => completed_move_transfers
+            .iter()
+            .rev()
+            .map(|transfer| CompletedTransfer {
+                source: transfer.target.clone(),
+                target: transfer.source.clone(),
+            })
+            .collect::<Vec<_>>(),
+        HistoryDirection::Redo => completed_move_transfers.to_vec(),
+    };
+    let mut unmatched_completed_transfers = completed_original_transfers.clone();
+    let remaining_original_transfers = transfers
+        .into_iter()
+        .filter(|transfer| {
+            let Some(completed_index) = unmatched_completed_transfers
+                .iter()
+                .position(|completed_transfer| completed_transfer == transfer)
+            else {
+                return true;
+            };
+            unmatched_completed_transfers.remove(completed_index);
+            false
+        })
+        .collect::<Vec<_>>();
+    debug_assert!(
+        unmatched_completed_transfers.is_empty(),
+        "completed history replay transfers must belong to the replayed move"
+    );
+    let as_item = |transfers: Vec<CompletedTransfer>| {
+        (!transfers.is_empty()).then_some(FileOperationHistoryItem::Move { transfers })
+    };
+    (
+        as_item(remaining_original_transfers),
+        as_item(completed_original_transfers),
+    )
 }
 
 impl FileOperationHistoryItem {
@@ -562,6 +686,9 @@ fn top_level_directories(created: &[PathBuf]) -> Vec<PathBuf> {
         .collect()
 }
 
+#[cfg(test)]
+#[path = "operation_history_replay_tests.rs"]
+mod replay_tests;
 #[cfg(test)]
 #[path = "operation_history_tests.rs"]
 mod tests;

@@ -308,8 +308,7 @@ fn duplicate_completion_is_rejected_before_history_side_effects() {
     drop(browser.accept_file_operation_finished(task_id, completion.clone()));
     drop(browser.accept_file_operation_finished(task_id, completion));
 
-    assert!(browser.operation_history.take_undo_operation().is_some());
-    assert!(browser.operation_history.take_undo_operation().is_none());
+    assert_eq!(browser.operation_history.undo_depth(), 1);
 }
 
 #[tokio::test]
@@ -742,27 +741,26 @@ fn rejected_recoverable_history_replay_returns_item_to_original_stack() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     let source = PathBuf::from("/workspace/source");
     let target = PathBuf::from("/workspace/target");
-    browser.operation_history.accept_completed(
-        1,
-        &FileOperationOutcome::Move {
-            transfers: vec![file_operations::CompletedTransfer {
-                source: source.clone(),
-                target: target.clone(),
-            }],
-            history_eligibility: file_operations::FileOperationHistoryEligibility::Replayable,
-            metadata_loss: Default::default(),
-        },
-    );
-    let (operation, pending_history) = browser
+    browser
         .operation_history
-        .take_undo_operation()
-        .expect("move undo operation");
+        .record(crate::operation_history::TaskEnd::Completed(
+            &FileOperationOutcome::Move {
+                transfers: vec![file_operations::CompletedTransfer {
+                    source: source.clone(),
+                    target: target.clone(),
+                }],
+                history_eligibility: file_operations::FileOperationHistoryEligibility::Replayable,
+                metadata_loss: Default::default(),
+            },
+        ));
 
-    drop(browser.enqueue_file_operation_with_history(operation, Some(pending_history)));
+    // 没有任务库时队列拒收可恢复的移动。
+    drop(browser.undo_file_operation());
 
-    let (restored_operation, _) = browser
+    assert!(browser.current_error().is_some());
+    let restored_operation = browser
         .operation_history
-        .take_undo_operation()
+        .next_undo_operation()
         .expect("rejected move returned to undo stack");
     let QueuedFileOperation::Move {
         transfers,

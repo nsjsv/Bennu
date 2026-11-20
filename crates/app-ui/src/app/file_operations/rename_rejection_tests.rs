@@ -108,7 +108,7 @@ fn rejected_user_rename_reopens_editor_with_attempted_name_and_reason() {
     assert_eq!(browser.rename_input, "notes.txt");
     assert_eq!(browser.rename_hint(), Some(RenameRejection::NameTaken));
     assert_eq!(browser.current_error(), None);
-    assert!(browser.operation_history.take_undo_operation().is_none());
+    assert!(browser.operation_history.next_undo_operation().is_none());
 
     drop(browser.apply_rename_input_change(String::from("summary.txt")));
     assert_eq!(browser.rename_hint(), None);

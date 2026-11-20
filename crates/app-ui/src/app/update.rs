@@ -471,6 +471,9 @@ impl FileBrowser {
             Message::SidebarBookmarkReleased => self.finish_sidebar_bookmark_drag(),
             Message::SidebarBookmarkAddRequested(path) => self.add_sidebar_bookmark(path),
             Message::SidebarBookmarkDeleteRequested(path) => self.delete_sidebar_bookmark(path),
+            Message::SmartFolderOpened(query) => self.open_smart_folder(&query),
+            Message::SmartFolderRightClicked(query) => self.open_smart_folder_menu(query),
+            Message::SmartFolderRemoved(query) => self.remove_smart_folder(&query),
             Message::SidebarResizeStarted => self.start_sidebar_resize_drag(),
             Message::RightPreviewPanelResizeStarted => self.start_right_preview_panel_resize_drag(),
             Message::RightPreviewPanelRatioResizeStarted => {

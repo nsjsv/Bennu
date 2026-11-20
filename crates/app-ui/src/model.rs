@@ -470,6 +470,10 @@ pub(crate) enum Message {
     SidebarBookmarkReleased,
     SidebarBookmarkAddRequested(PathBuf),
     SidebarBookmarkDeleteRequested(PathBuf),
+    /// 侧栏里点了一个智能文件夹（它存的 `f:` 写法）。
+    SmartFolderOpened(String),
+    SmartFolderRightClicked(String),
+    SmartFolderRemoved(String),
     SidebarResizeStarted,
     RightPreviewPanelResizeStarted,
     RightPreviewPanelRatioResizeStarted,
@@ -928,6 +932,7 @@ pub(crate) enum ContextMenuState {
     SidebarBookmark(SidebarBookmarkContextMenuState),
     SidebarDevice(SidebarDeviceContextMenuState),
     NetworkConnection(SidebarNetworkConnectionContextMenuState),
+    SmartFolder(SmartFolderContextMenuState),
 }
 
 impl ContextMenuState {
@@ -939,6 +944,7 @@ impl ContextMenuState {
             Self::SidebarBookmark(menu) => menu.position,
             Self::SidebarDevice(menu) => menu.position,
             Self::NetworkConnection(menu) => menu.position,
+            Self::SmartFolder(menu) => menu.position,
         }
     }
 
@@ -950,6 +956,7 @@ impl ContextMenuState {
             Self::SidebarBookmark(_) => None,
             Self::SidebarDevice(_) => None,
             Self::NetworkConnection(_) => None,
+            Self::SmartFolder(_) => None,
         }
     }
 }
@@ -1056,6 +1063,13 @@ pub(crate) enum FileContextMenuExpansion {
 #[derive(Debug, Clone)]
 pub(crate) struct SidebarBookmarkContextMenuState {
     pub(crate) path: PathBuf,
+    pub(crate) position: Point,
+}
+
+/// 侧栏智能文件夹的右键菜单：只有移除。
+#[derive(Debug, Clone)]
+pub(crate) struct SmartFolderContextMenuState {
+    pub(crate) query: String,
     pub(crate) position: Point,
 }
 

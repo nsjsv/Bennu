@@ -151,6 +151,9 @@ pub(crate) struct StoredUserPreferences {
     /// 多栏视图里回车打开找到的文件时去哪（`expand` / `folder_first` / `open`）；None = 旧版本数据。
     #[serde(default)]
     pub super_box_found_in_columns: Option<String>,
+    /// 智能文件夹：存下的 `f:` 写法（词和筛选），侧栏里点开就是这样一次搜索。
+    #[serde(default)]
+    pub smart_folders: Vec<String>,
 }
 
 /// 收藏设备条目:fingerprint 是 LocalSend 设备身份(证书指纹)。
@@ -263,6 +266,7 @@ impl Default for StoredUserPreferences {
             super_box_history: Vec::new(),
             super_box_mode: None,
             super_box_found_in_columns: None,
+            smart_folders: Vec::new(),
         }
     }
 }

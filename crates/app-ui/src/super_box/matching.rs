@@ -18,6 +18,7 @@ pub(crate) enum EntryKind {
     Action,
     Setting,
     Favorite,
+    SmartFolder,
 }
 
 impl EntryKind {
@@ -27,6 +28,7 @@ impl EntryKind {
             Self::Action => tr!("Action"),
             Self::Setting => tr!("Settings"),
             Self::Favorite => tr!("Favorite"),
+            Self::SmartFolder => tr!("Smart Folder"),
         }
     }
 }
@@ -38,6 +40,8 @@ pub(crate) enum BoxTarget {
     Action(ActionId),
     Settings(SettingsCategory),
     Folder(PathBuf),
+    /// 智能文件夹：它存的 `f:` 写法。
+    SmartFolder(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

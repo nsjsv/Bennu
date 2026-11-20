@@ -231,7 +231,7 @@ impl FileBrowser {
                 }));
             }
             iced::keyboard::Key::Character("s") if modifiers.control() => {
-                return Some(self.save_super_box_pipe());
+                return Some(self.save_from_super_box());
             }
             iced::keyboard::Key::Character("f") if modifiers.control() => {
                 return Some(self.edit_super_box_input(|super_box, context| {
@@ -307,6 +307,13 @@ impl FileBrowser {
                 EntryKind::Setting,
                 category.label(),
                 BoxTarget::Settings(category),
+            )
+        }));
+        entries.extend(self.user_config.smart_folders.iter().map(|query| {
+            BoxEntry::new(
+                EntryKind::SmartFolder,
+                query.clone(),
+                BoxTarget::SmartFolder(query.clone()),
             )
         }));
         entries.extend(
@@ -515,7 +522,26 @@ impl FileBrowser {
                 self.select_settings_category(category),
             ]),
             BoxTarget::Folder(path) => self.navigate_to(path, NavigationMode::RecordHistory),
+            BoxTarget::SmartFolder(query) => self.open_smart_folder(&query),
         }
+    }
+
+    /// Ctrl+S：管道存成动作；文件模式里的查询存成侧栏里的智能文件夹。
+    fn save_from_super_box(&mut self) -> Task<Message> {
+        let Some(super_box) = self.super_box.as_ref() else {
+            return Task::none();
+        };
+        if super_box.pipe().is_some() {
+            return self.save_super_box_pipe();
+        }
+        let query = super_box.input().trim().to_owned();
+        let finds_something =
+            crate::super_box::read_find_query(&query).is_ok_and(|found| !found.terms.is_empty());
+        if super_box.mode() != BoxMode::Files || !finds_something {
+            return Task::none();
+        }
+        self.super_box = None;
+        self.save_smart_folder(query)
     }
 
     fn finish_super_box_jump(

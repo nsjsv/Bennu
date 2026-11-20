@@ -294,7 +294,7 @@ fn empty_hint(super_box: &SuperBox) -> String {
     }
     match mode {
         BoxMode::Files => tr!(
-            "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page."
+            "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page, Ctrl+S saves it as a smart folder in the sidebar."
         ),
         BoxMode::Shell => tr!(
             "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Tab completes, → takes the faded suggestion. Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there."

@@ -78,6 +78,7 @@ mod sidebar_bookmarks;
 mod sidebar_devices;
 mod sidebar_resize;
 mod smart_extract;
+mod smart_folders;
 pub(crate) mod smooth_scroll;
 mod split_commands;
 mod split_resize;

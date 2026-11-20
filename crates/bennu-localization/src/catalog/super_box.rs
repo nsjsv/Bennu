@@ -66,8 +66,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ),
     ("Type what to look for; filters only narrow it down", "写上要找的词，筛选只是缩小范围"),
     (
-        "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page.",
-        "输入要找的词。用 类型:、时间:、大小: 缩小范围，例如 类型:图片 时间:7天 大小:>10m。Ctrl+Enter 打开搜索页。",
+        "Type what to look for. type:, time: and size: narrow it down, for example type:images time:7d size:>10m. Ctrl+Enter opens the search page, Ctrl+S saves it as a smart folder in the sidebar.",
+        "输入要找的词。用 类型:、时间:、大小: 缩小范围，例如 类型:图片 时间:7天 大小:>10m。Ctrl+Enter 打开搜索页，Ctrl+S 存成侧栏里的智能文件夹。",
     ),
     ("Unknown time “%1”. You can use: %2", "不认识的时间“%1”，可以写：%2"),
     ("Unknown type “%1”. You can use: %2", "不认识的类型“%1”，可以写：%2"),
@@ -104,6 +104,11 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("More than %1 items; narrow it down", "超过 %1 项了，缩小一下范围"),
     ("%1 items → %2", "%1 项 → %2"),
     ("Enter runs it · Ctrl+S saves it as an action", "回车执行 · Ctrl+S 存成动作"),
+    // 智能文件夹
+    ("Smart Folders", "智能文件夹"),
+    ("Smart Folder", "智能文件夹"),
+    ("Saved as a smart folder in the sidebar", "存成了侧栏里的智能文件夹"),
+    ("Smart folder “%1”: %2", "智能文件夹“%1”：%2"),
     // 清理
     ("Find Large Files Here", "在这里找大文件"),
     ("Select Duplicate Files", "选中重复的文件"),

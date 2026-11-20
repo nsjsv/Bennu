@@ -34,6 +34,8 @@ use bennu_theme::typography::{BODY_SIZE, BOLD, CAPTION_SIZE};
 
 /// 位置行图标。侧边栏数据 crate 不依赖图标词汇，映射由两个宿主的视图各持一份
 /// （portal 侧栏同一张表）：没有同时能看到两种类型的共享 crate，为一张 8 行的表不值得再建一个。
+mod smart_folders;
+
 fn location_icon_symbol(location: &SidebarLocation) -> IconSymbol {
     match location.kind {
         SidebarLocationKind::Home => IconSymbol::House,
@@ -95,6 +97,9 @@ pub(crate) fn sidebar_body(browser: &FileBrowser) -> Element<'_, Message> {
     }
     if let Some(favorites) = sidebar_favorites_section(browser) {
         sidebar = sidebar.push(favorites);
+    }
+    if let Some(smart_folders) = smart_folders::smart_folders_section(browser) {
+        sidebar = sidebar.push(smart_folders);
     }
 
     sidebar = append_sidebar_network_connections(sidebar, browser);
@@ -564,7 +569,23 @@ fn sidebar_local_send_row<'a>(
     })
     .height(Length::Fixed(SIDEBAR_ROW_HEIGHT))
     .width(Length::Fill)
-    .style(move |theme, status| {
+    .style(sidebar_row_button_style(drop_hovered));
+    // 应用内拖拽在这里松手时要结束拖拽（同其他侧栏行）；按钮只在自己被按下时
+    // 才吃掉松开事件，拖拽经过时不会。
+    track_file_drag_hit_test_marker(
+        mouse_area(item).on_release(Message::DragSelectionFinished),
+        FileDragHitTestMarker::SidebarLocalSend {
+            target: drop_target,
+        },
+    )
+}
+
+/// 不是路径的侧栏行（LocalSend、智能文件夹）：悬停、按下用按钮自身的状态高亮，文件拖到上面时
+/// （`drop_hovered`）也高亮。
+fn sidebar_row_button_style(
+    drop_hovered: bool,
+) -> impl Fn(&iced::Theme, button::Status) -> button::Style {
+    move |theme, status| {
         let highlighted =
             drop_hovered || matches!(status, button::Status::Hovered | button::Status::Pressed);
         let surface = if highlighted {
@@ -581,15 +602,7 @@ fn sidebar_local_send_row<'a>(
             shadow: surface.shadow,
             snap: surface.snap,
         }
-    });
-    // 应用内拖拽在这里松手时要结束拖拽（同其他侧栏行）；按钮只在自己被按下时
-    // 才吃掉松开事件，拖拽经过时不会。
-    track_file_drag_hit_test_marker(
-        mouse_area(item).on_release(Message::DragSelectionFinished),
-        FileDragHitTestMarker::SidebarLocalSend {
-            target: drop_target,
-        },
-    )
+    }
 }
 
 /// 分组标题（收藏夹、网络、设备）：小号粗体灰字，固定高度——收藏夹拖放落点按它算。

@@ -85,6 +85,7 @@ pub(crate) struct UserPreferences {
     pub(crate) super_box_history: crate::super_box::SuperBoxHistory,
     pub(crate) super_box_mode: crate::super_box::BoxMode,
     pub(crate) super_box_found_in_columns: crate::super_box::FoundInColumns,
+    pub(crate) smart_folders: Vec<String>,
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
@@ -150,6 +151,7 @@ impl UserPreferences {
             super_box_history: config.super_box_history.clone(),
             super_box_mode: config.super_box_mode,
             super_box_found_in_columns: config.super_box_found_in_columns,
+            smart_folders: config.smart_folders.clone(),
             last_search_scope: config.last_search_scope.clone(),
             theme_mode: config.theme_mode,
             color_scheme: config.color_scheme,
@@ -210,6 +212,7 @@ impl UserPreferences {
         config.super_box_history = self.super_box_history.clone();
         config.super_box_mode = self.super_box_mode;
         config.super_box_found_in_columns = self.super_box_found_in_columns;
+        config.smart_folders = self.smart_folders.clone();
         config.last_search_scope = self.last_search_scope.clone();
         config.theme_mode = self.theme_mode;
         config.color_scheme = self.color_scheme;
@@ -313,6 +316,7 @@ impl UserPreferences {
         stored.super_box_mode = Some(self.super_box_mode.config_value().to_owned());
         stored.super_box_found_in_columns =
             Some(self.super_box_found_in_columns.config_value().to_owned());
+        stored.smart_folders = self.smart_folders.clone();
         stored.last_search_scope = self.last_search_scope.as_ref().map(|scope| match scope {
             LastSearchScope::Global => StoredLastSearchScope::Global,
             LastSearchScope::Directory(path) => StoredLastSearchScope::Directory {
@@ -527,6 +531,7 @@ impl UserPreferences {
             super_box_history: crate::super_box::SuperBoxHistory::from_persisted(
                 stored.super_box_history.clone(),
             ),
+            smart_folders: stored.smart_folders.clone(),
             // None = 旧版本数据，用默认值。
             super_box_found_in_columns: match stored.super_box_found_in_columns.as_deref() {
                 None => default_preferences.super_box_found_in_columns,

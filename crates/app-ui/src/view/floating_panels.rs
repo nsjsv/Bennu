@@ -273,6 +273,18 @@ pub(super) fn context_menu_panel<'a>(
             root: network_connection_context_menu_panel(menu, context_menus),
             submenu: None,
         },
+        ContextMenuState::SmartFolder(menu) => ContextMenuPanels {
+            root: container(menu_button(
+                IconSymbol::Trash,
+                tr!("Remove"),
+                Message::SmartFolderRemoved(menu.query.clone()),
+            ))
+            .padding(8)
+            .width(Length::Fixed(190.0))
+            .style(context_menu_style)
+            .into(),
+            submenu: None,
+        },
     }
 }
 

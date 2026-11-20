@@ -218,6 +218,9 @@ fn chip_style(theme: &Theme, strength: f32) -> container::Style {
     }
 }
 
+/// 改名那一行最多写出几个“旧 → 新”。
+const RENAMES_SHOWN: usize = 3;
+
 /// 最多列出这么多个候选，再多写“…”。
 const CHOICES_SHOWN: usize = 40;
 
@@ -275,6 +278,7 @@ fn placeholder(mode: BoxMode) -> String {
         BoxMode::Files => tr!("Find files in the index"),
         BoxMode::Path => tr!("Go to a path; ~ is your home folder"),
         BoxMode::New => tr!("Name of the new file; end it with / for a folder"),
+        BoxMode::Rename => tr!("New name; {n} numbers several items"),
         BoxMode::Shell => tr!("A command for your shell"),
     }
 }
@@ -302,6 +306,9 @@ fn empty_hint(super_box: &SuperBox) -> String {
             "Type a path, or start with / or ~ in search. Tab completes it, → takes the faded suggestion."
         ),
         BoxMode::New => tr!("Type a name; end it with / to make a folder"),
+        BoxMode::Rename => tr!(
+            "Type the new name. With several items selected it is a pattern: {n} is the number, {name}, {stem} and {ext} the old name, for example photo-{n}.{ext}."
+        ),
     }
 }
 
@@ -398,6 +405,35 @@ fn row_parts(super_box: &SuperBox, row: &BoxRow, context: &RowContext<'_>) -> Ro
             ),
             hint: Some(tr!("Enter runs it · Ctrl+S saves it as an action")),
             ..RowParts::plain(IconSymbol::ArrowRight, String::new())
+        },
+        BoxRow::Answer(answer) => RowParts {
+            monospace: true,
+            hint: Some(tr!("Enter copies it")),
+            ..RowParts::plain(IconSymbol::Hash, format!("= {answer}"))
+        },
+        BoxRow::Rename(renamed) => {
+            let shown: Vec<String> = renamed
+                .iter()
+                .take(RENAMES_SHOWN)
+                .map(|renamed| {
+                    let name = |path: &Path| {
+                        path.file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned()
+                    };
+                    format!("{} → {}", name(&renamed.from), name(&renamed.to))
+                })
+                .collect();
+            RowParts {
+                hint: (renamed.len() > RENAMES_SHOWN)
+                    .then(|| tr!("%1 items in all", renamed.len())),
+                ..RowParts::plain(IconSymbol::Pencil, shown.join("，"))
+            }
+        }
+        BoxRow::SendTo(target) => RowParts {
+            hint: Some(tr!("%1 selected", context.selected_items)),
+            ..RowParts::plain(IconSymbol::Send, tr!("Send to %1", target.name))
         },
         BoxRow::JumpTo(path) => RowParts::plain(
             IconSymbol::ArrowRight,

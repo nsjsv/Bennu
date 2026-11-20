@@ -1,6 +1,6 @@
 //! 每种模式下框里列什么。
 
-use super::{complete, find, matching, mode, targets};
+use super::{calculate, complete, find, matching, mode, rename, targets};
 use super::{BoxContext, BoxMode, BoxRow, FindStatus, SuperBox, FOUND_IN_SEARCH, MOST_ROWS};
 use super::{PickedItems, Pipe, PipeSource, MOST_PICKED};
 
@@ -31,6 +31,14 @@ impl SuperBox {
             return self.pipe_rows(pipe);
         }
         match self.mode {
+            BoxMode::Search if calculate::expression(text).is_some() => {
+                let expression = calculate::expression(text).unwrap_or_default();
+                match calculate::calculate(expression) {
+                    Some(answer) => vec![BoxRow::Answer(answer)],
+                    None => vec![BoxRow::Problem(tr!("This cannot be worked out"))],
+                }
+            }
+            BoxMode::Search if text.starts_with('@') => send_rows(&text[1..], context),
             BoxMode::Search => matching::ranked(&self.entries, text)
                 .into_iter()
                 .map(BoxRow::Entry)
@@ -88,6 +96,17 @@ impl SuperBox {
                     Err(reason) => vec![BoxRow::Problem(reason)],
                 }
             }
+            BoxMode::Rename => {
+                match rename::plan_renames(
+                    text,
+                    context.selected,
+                    context.current_dir,
+                    context.taken,
+                ) {
+                    Ok(renamed) => vec![BoxRow::Rename(renamed)],
+                    Err(reason) => vec![BoxRow::Problem(reason)],
+                }
+            }
             BoxMode::Shell => match context.current_dir {
                 Some(_) => vec![BoxRow::Run(text.to_owned())],
                 None => vec![BoxRow::Problem(tr!(
@@ -125,5 +144,77 @@ impl SuperBox {
 
     fn found_rows(&self, most: usize) -> impl Iterator<Item = BoxRow> + '_ {
         (0..self.found.len().min(most)).map(BoxRow::Found)
+    }
+}
+
+/// `@`：名字里有打的字的设备；没选中东西、没有能发的设备时说明。
+fn send_rows(name: &str, context: &BoxContext<'_>) -> Vec<BoxRow> {
+    if context.selected.is_empty() {
+        return vec![BoxRow::Problem(tr!("Select what to send first"))];
+    }
+    let name = mode::fold(name.trim());
+    let devices: Vec<_> = context
+        .devices
+        .iter()
+        .filter(|device| mode::fold(&device.name).contains(&name))
+        .take(MOST_ROWS)
+        .cloned()
+        .map(BoxRow::SendTo)
+        .collect();
+    if devices.is_empty() {
+        return vec![BoxRow::Problem(tr!(
+            "No device to send to: turn on transfers, or wait for a device nearby"
+        ))];
+    }
+    devices
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+    use crate::super_box::SendTarget;
+
+    #[test]
+    fn devices_are_found_by_name_and_need_something_selected() {
+        let taken = |_: &str| false;
+        let devices = [
+            SendTarget {
+                name: "我的手机".to_owned(),
+                fingerprint: "a".to_owned(),
+            },
+            SendTarget {
+                name: "Desktop".to_owned(),
+                fingerprint: "b".to_owned(),
+            },
+        ];
+        let selected = [PathBuf::from("/w/a.txt")];
+        let with = BoxContext {
+            current_dir: Some(Path::new("/w")),
+            home: Path::new("/home/me"),
+            cannot_create: None,
+            taken: &taken,
+            selected: &selected,
+            devices: &devices,
+        };
+        assert_eq!(
+            send_rows("手机", &with),
+            [BoxRow::SendTo(devices[0].clone())]
+        );
+        assert_eq!(
+            send_rows("desk", &with),
+            [BoxRow::SendTo(devices[1].clone())]
+        );
+        assert_eq!(send_rows("", &with).len(), 2);
+        assert!(matches!(send_rows("平板", &with)[..], [BoxRow::Problem(_)]));
+        let nothing_selected = BoxContext {
+            selected: &[],
+            ..with
+        };
+        assert!(matches!(
+            send_rows("手机", &nothing_selected)[..],
+            [BoxRow::Problem(_)]
+        ));
     }
 }

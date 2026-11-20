@@ -14,6 +14,8 @@ fn context<'a>(taken: &'a dyn Fn(&str) -> bool) -> BoxContext<'a> {
         home: Path::new("/home/me"),
         cannot_create: None,
         taken,
+        selected: &[],
+        devices: &[],
     }
 }
 
@@ -63,6 +65,7 @@ fn shift_tab_goes_round_the_modes() {
             BoxMode::Files,
             BoxMode::Path,
             BoxMode::New,
+            BoxMode::Rename,
             BoxMode::Shell,
             BoxMode::Search
         ]
@@ -260,6 +263,11 @@ fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
         [BoxRow::Create(NewEntry::File("新建".to_owned()))]
     );
     super_box.next_mode(&context);
+    assert!(
+        matches!(super_box.rows(), [BoxRow::Problem(_)]),
+        "nothing selected to rename"
+    );
+    super_box.next_mode(&context);
     assert_eq!(super_box.rows(), [BoxRow::Run("新建".to_owned())]);
     super_box.next_mode(&context);
     assert_eq!(super_box.mode(), BoxMode::Search, "it wraps round");
@@ -315,7 +323,13 @@ fn only_a_typed_tag_shows_a_pill_and_tab_in_an_empty_box_lists_the_tags() {
     assert_eq!(
         super_box.tab_list(),
         Some(&TabList::Tags {
-            tags: vec![BoxMode::Search, BoxMode::Files, BoxMode::Path, BoxMode::New],
+            tags: vec![
+                BoxMode::Search,
+                BoxMode::Files,
+                BoxMode::Path,
+                BoxMode::New,
+                BoxMode::Rename
+            ],
             chosen: None
         })
     );

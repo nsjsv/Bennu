@@ -11,7 +11,7 @@ use crate::model::{IndexedSearchOutcome, Message, NavigationMode, SettingsCatego
 use crate::shortcuts::{ShortcutAction, ShortcutScope, ShortcutTarget};
 use crate::super_box::{
     BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, Listing, NewEntry,
-    PipeSource, RunEnd, SuperBox,
+    PipeSource, RunEnd, SendTarget, SuperBox,
 };
 use crate::terminal_panel::session::SessionId;
 use file_operations::QueuedFileOperation;
@@ -166,6 +166,14 @@ impl FileBrowser {
         self.persist_user_preferences_command()
     }
 
+    /// 从外面要框（`bennu --box`）：已经开着就留着，不像快捷键那样关掉它。
+    pub(super) fn open_super_box(&mut self) -> Task<Message> {
+        if self.super_box.is_some() {
+            return iced::widget::operation::focus(super_box_input_id());
+        }
+        self.toggle_super_box()
+    }
+
     /// 快捷键：开着就关，关着就开。
     pub(super) fn toggle_super_box(&mut self) -> Task<Message> {
         if self.super_box.take().is_some() {
@@ -235,7 +243,9 @@ impl FileBrowser {
                 return Some(match super_box.mode() {
                     BoxMode::Files => self.continue_super_box_find_in_search_page(),
                     BoxMode::Shell => self.run_super_box_command_in_terminal(),
-                    BoxMode::Search | BoxMode::Path | BoxMode::New => Task::none(),
+                    BoxMode::Search | BoxMode::Path | BoxMode::New | BoxMode::Rename => {
+                        Task::none()
+                    }
                 });
             }
             iced::keyboard::Key::Named(Named::Enter) => {
@@ -335,11 +345,22 @@ impl FileBrowser {
                 .as_ref()
                 .is_some_and(|directory| self.entry_for_path(&directory.join(name)).is_some())
         };
+        let selected = self.selected_paths_for_operation();
+        let devices: Vec<SendTarget> = self
+            .send_targets()
+            .into_iter()
+            .map(|device| SendTarget {
+                name: device.alias,
+                fingerprint: device.fingerprint,
+            })
+            .collect();
         compute(&BoxContext {
             current_dir: self.tab().current_directory(),
             home: &self.home_dir,
             cannot_create,
             taken: &taken,
+            selected: &selected,
+            devices: &devices,
         })
     }
 
@@ -447,6 +468,40 @@ impl FileBrowser {
             }
             BoxRow::Run(command) => self.run_super_box_command(command),
             BoxRow::Pipe => self.run_super_box_pipe(),
+            // 算出来的复制走；式子不进历史。
+            BoxRow::Answer(answer) => {
+                self.super_box = None;
+                iced::clipboard::write(answer)
+            }
+            BoxRow::Rename(renamed) => {
+                self.super_box = None;
+                let operation = match renamed.as_slice() {
+                    [only] => QueuedFileOperation::Rename {
+                        path: only.from.clone(),
+                        new_name: only.to.file_name().unwrap_or_default().to_owned(),
+                    },
+                    _ => QueuedFileOperation::BatchRename {
+                        items: renamed
+                            .into_iter()
+                            .map(|renamed| file_core::BatchRenameItem {
+                                from: renamed.from,
+                                to: renamed.to,
+                            })
+                            .collect(),
+                    },
+                };
+                let remember = self.remember_super_box_input(history);
+                Task::batch([remember, self.enqueue_file_operation(operation)])
+            }
+            BoxRow::SendTo(target) => {
+                self.super_box = None;
+                let paths = self.selected_paths_for_operation();
+                let remember = self.remember_super_box_input(history);
+                Task::batch([
+                    remember,
+                    self.send_files_to_device(&target.fingerprint, paths),
+                ])
+            }
             BoxRow::Problem(_) => Task::none(),
         }
     }

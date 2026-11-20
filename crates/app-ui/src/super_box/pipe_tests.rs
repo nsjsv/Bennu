@@ -135,6 +135,8 @@ mod in_the_box {
             home: Path::new("/home/me"),
             cannot_create: None,
             taken,
+            selected: &[],
+            devices: &[],
         }
     }
 

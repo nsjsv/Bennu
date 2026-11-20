@@ -11,7 +11,7 @@ use crate::model::{
     BrowserTabSession, BrowserViewMode, ColumnBrowserViewport,
 };
 
-pub(crate) const HELP_TEXT: &str = "Usage: bennu [OPTIONS] [PATH]...\n\nOpen local directories or reveal local files.\n\nArguments:\n  [PATH]...        Local directories or files to open\n\nOptions:\n      --new-window Open a new window even when Bennu merges launches into an open window\n  -h, --help       Print help\n  -V, --version    Print version\n";
+pub(crate) const HELP_TEXT: &str = "Usage: bennu [OPTIONS] [PATH]...\n\nOpen local directories or reveal local files.\n\nArguments:\n  [PATH]...        Local directories or files to open\n\nOptions:\n      --new-window Open a new window even when Bennu merges launches into an open window\n      --box        Open the super box (in the running window if Bennu is open)\n  -h, --help       Print help\n  -V, --version    Print version\n";
 pub(crate) const VERSION_TEXT: &str = concat!("bennu ", env!("CARGO_PKG_VERSION"), "\n");
 pub(crate) const RENDERER_PROBE_ARGUMENT: &str = "--renderer-probe";
 
@@ -21,6 +21,8 @@ pub(crate) enum CommandLineAction {
     /// `--new-window`：不管“启动行为”设置，自己开一个窗口，不交给已经开着的窗口。
     LaunchInNewWindow(ApplicationLaunchRequest),
     ActivationService,
+    /// `--box`：弹出超级输入框；Bennu 开着就交给开着的那个。
+    OpenSuperBox,
     RendererProbe,
     PrintHelp,
     PrintVersion,
@@ -176,6 +178,7 @@ pub(crate) fn parse_arguments(
     let mut activation_service = false;
     let mut renderer_probe = false;
     let mut new_window = false;
+    let mut super_box = false;
     while let Some(argument) = parser
         .next()
         .map_err(|error| CommandLineError::Arguments(error.to_string()))?
@@ -186,6 +189,7 @@ pub(crate) fn parse_arguments(
             Long("activation-service") => activation_service = true,
             Long("renderer-probe") => renderer_probe = true,
             Long("new-window") => new_window = true,
+            Long("box") => super_box = true,
             Value(path) => path_arguments.push(path),
             unexpected => {
                 return Err(CommandLineError::Arguments(
@@ -204,6 +208,15 @@ pub(crate) fn parse_arguments(
         return Err(CommandLineError::Arguments(
             "--new-window only applies to opening a window".to_owned(),
         ));
+    }
+
+    if super_box {
+        if activation_service || renderer_probe || new_window || !path_arguments.is_empty() {
+            return Err(CommandLineError::Arguments(
+                "--box does not take paths or other options".to_owned(),
+            ));
+        }
+        return Ok(CommandLineAction::OpenSuperBox);
     }
 
     if renderer_probe {
@@ -392,6 +405,7 @@ mod tests {
         .expect_err("renderer probe must reject the activation service mode");
         assert!(matches!(mixed_mode_error, CommandLineError::Arguments(_)));
         assert!(!HELP_TEXT.contains("renderer-probe"));
+        assert!(HELP_TEXT.contains("--box"));
     }
 
     #[test]
@@ -620,5 +634,19 @@ mod tests {
 
         assert_eq!(workspace.workspace.tabs()[0].directory(), directory);
         assert_eq!(workspace.workspace.tabs()[0].selected_paths(), &[file]);
+    }
+
+    #[test]
+    fn box_opens_the_super_box_and_takes_nothing_else() {
+        let here = std::path::Path::new("/");
+        assert_eq!(
+            parse_arguments([OsString::from("--box")], here).unwrap(),
+            CommandLineAction::OpenSuperBox
+        );
+        for extra in ["--new-window", "/tmp"] {
+            assert!(
+                parse_arguments([OsString::from("--box"), OsString::from(extra)], here).is_err()
+            );
+        }
     }
 }

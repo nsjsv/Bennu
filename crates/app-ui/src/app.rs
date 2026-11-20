@@ -84,6 +84,8 @@ mod startup;
 mod startup_settings;
 mod super_box;
 mod super_box_complete;
+#[cfg(test)]
+mod super_box_extras_tests;
 mod super_box_find;
 mod super_box_pipe;
 mod super_box_shell;
@@ -574,22 +576,21 @@ impl FileBrowser {
             startup_rendering_environment,
         );
 
-        let open_main_window = open_main_window.then(|window_id| {
+        // 启动时带来的激活（`--box`、打开属性）等主窗口建好再处理：弹出的框要给输入框焦点，窗口
+        // 还没有时找不到它。
+        let open_main_window = open_main_window.then(move |window_id| {
             Task::batch([
                 wayland_dnd_window_handle_command(window_id),
                 x11_dnd_window_handle_command(window_id),
+                initial_desktop_activation
+                    .clone()
+                    .map(Message::DesktopActivationReceived)
+                    .map(Task::done)
+                    .unwrap_or_else(Task::none),
             ])
         });
 
-        let initial_desktop_activation = initial_desktop_activation
-            .map(Message::DesktopActivationReceived)
-            .map(Task::done)
-            .unwrap_or_else(Task::none);
-
-        (
-            browser,
-            Task::batch([open_main_window, initial_tasks, initial_desktop_activation]),
-        )
+        (browser, Task::batch([open_main_window, initial_tasks]))
     }
 
     #[cfg(test)]

@@ -103,6 +103,31 @@ impl FileBrowser {
             .collect()
     }
 
+    /// 超级输入框 `@` 能发的设备：收藏的（在线的、记得地址的）和附近发现的，同传输窗口的列表。
+    pub(crate) fn send_targets(&self) -> Vec<DeviceInfo> {
+        self.favorite_rows()
+            .iter()
+            .filter_map(FavoriteRow::target)
+            .chain(self.unclaimed_nearby_devices().into_iter().cloned())
+            .collect()
+    }
+
+    /// 把这些文件直接发给这台设备（同传输窗口的直接发送）；设备已经不在了就不发。
+    pub(crate) fn send_files_to_device(
+        &mut self,
+        fingerprint: &str,
+        paths: Vec<std::path::PathBuf>,
+    ) -> iced::Task<Message> {
+        let Some(device) = self
+            .send_targets()
+            .into_iter()
+            .find(|device| device.fingerprint == fingerprint)
+        else {
+            return iced::Task::none();
+        };
+        self.begin_direct_sends(vec![device], Outgoing::Files(paths))
+    }
+
     /// 发给勾着的设备；勾选保留，换一批文件接着发给同一组人不用重勾。
     pub(super) fn send_to_checked_devices(
         &mut self,

@@ -1,4 +1,4 @@
-//! 框的模式和前缀。前缀是切换模式的快捷写法：`f:` 文件、`g:` 路径、`n:` 新建、`s:` 命令，
+//! 框的模式和前缀。前缀是切换模式的快捷写法：`f:` 文件、`g:` 路径、`n:` 新建、`r:` 改名、`s:` 命令，
 //! 前缀本身不留在框里。
 //! 历史里存的是“前缀 + 字”，和手打前缀是同一种写法。
 
@@ -13,20 +13,23 @@ pub(crate) enum BoxMode {
     Path,
     /// 在当前文件夹新建文件或文件夹。
     New,
+    /// 给选中的项改名（几项时按模板）。
+    Rename,
     /// 交给用户的 shell 执行一条命令。
     Shell,
 }
 
 impl BoxMode {
-    pub(crate) const ALL: [Self; 5] = [
+    pub(crate) const ALL: [Self; 6] = [
         Self::Search,
         Self::Files,
         Self::Path,
         Self::New,
+        Self::Rename,
         Self::Shell,
     ];
 
-    /// 设置页“默认模式”能选的：新建要先有名字，不适合当打开时的样子。
+    /// 设置页“默认模式”能选的：新建要先有名字、改名要先选中，不适合当打开时的样子。
     pub(crate) const DEFAULT_CHOICES: [Self; 4] =
         [Self::Search, Self::Files, Self::Path, Self::Shell];
 
@@ -36,6 +39,7 @@ impl BoxMode {
             Self::Files => tr!("Files"),
             Self::Path => tr!("Path"),
             Self::New => tr!("New"),
+            Self::Rename => tr!("Rename"),
             Self::Shell => tr!("Command"),
         }
     }
@@ -47,6 +51,7 @@ impl BoxMode {
             Self::Files => Some('f'),
             Self::Path => Some('g'),
             Self::New => Some('n'),
+            Self::Rename => Some('r'),
             Self::Shell => Some('s'),
         }
     }
@@ -62,6 +67,7 @@ impl BoxMode {
             Self::Files => "files",
             Self::Path => "path",
             Self::New => "new",
+            Self::Rename => "rename",
             Self::Shell => "shell",
         }
     }

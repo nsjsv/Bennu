@@ -108,12 +108,18 @@ fn main() -> std::process::ExitCode {
     };
 
     // `--new-window` 不看“启动行为”设置。
+    let open_super_box = action == command_line::CommandLineAction::OpenSuperBox;
     let (application_launch_request, activation_service, launch_window_override) = match action {
         command_line::CommandLineAction::Launch(request) => (Some(request), false, None),
         command_line::CommandLineAction::LaunchInNewWindow(request) => (
             Some(request),
             false,
             Some(config::LaunchWindowPolicy::OpenNewWindow),
+        ),
+        command_line::CommandLineAction::OpenSuperBox => (
+            Some(command_line::ApplicationLaunchRequest::ConfiguredStartup),
+            false,
+            None,
         ),
         command_line::CommandLineAction::ActivationService => (None, true, None),
         command_line::CommandLineAction::RendererProbe => {
@@ -158,10 +164,14 @@ fn main() -> std::process::ExitCode {
             desktop_linux::DesktopLaunchWindowPolicy::OpenNewWindow
         }
     };
-    let activation_claim = desktop_linux::DesktopActivationRuntime::claim_or_forward(
-        &activation_paths,
-        desktop_launch_window_policy,
-    );
+    let activation_claim = if open_super_box {
+        desktop_linux::DesktopActivationRuntime::claim_or_open_super_box()
+    } else {
+        desktop_linux::DesktopActivationRuntime::claim_or_forward(
+            &activation_paths,
+            desktop_launch_window_policy,
+        )
+    };
     let activation_claim_outcome = match &activation_claim {
         Ok(desktop_linux::FileManagerActivationClaim::Primary(_)) => {
             startup_trace::DesktopActivationClaimOutcome::Primary
@@ -208,12 +218,20 @@ fn main() -> std::process::ExitCode {
                         ),
                         None,
                     ),
-                    event @ desktop_linux::DesktopActivationEvent::OpenProperties(_, _) => (
+                    event @ (desktop_linux::DesktopActivationEvent::OpenProperties(_, _)
+                    | desktop_linux::DesktopActivationEvent::OpenSuperBox(_)) => (
                         command_line::ApplicationLaunchRequest::ConfiguredStartup,
                         Some(event),
                     ),
                 }
             }
+            // `--box` 自己当了主实例：照常启动，起来以后弹出框。
+            _ if open_super_box => (
+                command_line::ApplicationLaunchRequest::ConfiguredStartup,
+                Some(desktop_linux::DesktopActivationEvent::OpenSuperBox(
+                    desktop_linux::DesktopStartupId::none(),
+                )),
+            ),
             _ if activation_service => (
                 // Detached：带 --activation-service 启动，但主实例已占名且策略要求新窗口。
                 command_line::ApplicationLaunchRequest::ConfiguredStartup,

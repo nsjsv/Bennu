@@ -34,6 +34,11 @@ impl DesktopStartupId {
         Ok(Self(startup_id))
     }
 
+    /// 没有启动通知的 id：自己启动时、命令行转发时（转发也传空的）。
+    pub fn none() -> Self {
+        Self(String::new())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -124,6 +129,8 @@ pub enum DesktopActivationEvent {
     FocusMainWindow(DesktopStartupId),
     MergeWorkspace(LocalWorkspaceRequest, DesktopStartupId),
     OpenProperties(LocalPropertyTargets, DesktopStartupId),
+    /// `bennu --box`：窗口到前面，弹出超级输入框。
+    OpenSuperBox(DesktopStartupId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,19 +170,39 @@ impl DesktopActivationRuntime {
     ) -> Result<FileManagerActivationClaim, FileManagerActivationError> {
         let (event_sender, event_receiver) = mpsc::channel(ACTIVATION_CHANNEL_CAPACITY);
         match build_primary_connection(event_sender) {
-            Ok(connection) => {
-                let standard_service_status = claim_file_manager1_name(&connection);
-                Ok(FileManagerActivationClaim::Primary(Arc::new(Self {
-                    _connection: connection,
-                    event_receiver: Mutex::new(Some(event_receiver)),
-                    standard_service_status,
-                })))
-            }
+            Ok(connection) => Ok(Self::primary(connection, event_receiver)),
             Err(zbus::Error::NameTaken) => {
                 resolve_name_taken_claim(paths, policy, forward_paths_to_primary)
             }
             Err(source) => Err(FileManagerActivationError::Connect { source }),
         }
+    }
+
+    /// `bennu --box`：主实例已经在就让它弹出超级输入框，不看窗口策略（框不是新窗口）；不在就自己
+    /// 当主实例。
+    pub fn claim_or_open_super_box(
+    ) -> Result<FileManagerActivationClaim, FileManagerActivationError> {
+        let (event_sender, event_receiver) = mpsc::channel(ACTIVATION_CHANNEL_CAPACITY);
+        match build_primary_connection(event_sender) {
+            Ok(connection) => Ok(Self::primary(connection, event_receiver)),
+            Err(zbus::Error::NameTaken) => {
+                call_primary("OpenSuperBox", &(String::new(),))?;
+                Ok(FileManagerActivationClaim::Forwarded)
+            }
+            Err(source) => Err(FileManagerActivationError::Connect { source }),
+        }
+    }
+
+    fn primary(
+        connection: zbus::blocking::Connection,
+        event_receiver: Receiver<DesktopActivationEvent>,
+    ) -> FileManagerActivationClaim {
+        let standard_service_status = claim_file_manager1_name(&connection);
+        FileManagerActivationClaim::Primary(Arc::new(Self {
+            _connection: connection,
+            event_receiver: Mutex::new(Some(event_receiver)),
+            standard_service_status,
+        }))
     }
 
     pub fn wait_for_initial_event(
@@ -455,6 +482,21 @@ fn claim_file_manager1_name(
 }
 
 fn forward_paths_to_primary(paths: &[PathBuf]) -> Result<(), FileManagerActivationError> {
+    if paths.is_empty() {
+        return call_primary("Activate", &(String::new(),));
+    }
+    let encoded_paths = paths
+        .iter()
+        .map(|path| path.as_os_str().as_bytes().to_vec())
+        .collect::<Vec<_>>();
+    call_primary("OpenPaths", &(encoded_paths, String::new()))
+}
+
+/// 调主实例自己的激活接口；不让总线为这次调用去启动新进程。
+fn call_primary<B>(method: &str, body: &B) -> Result<(), FileManagerActivationError>
+where
+    B: zbus::export::serde::Serialize + zbus::zvariant::DynamicType,
+{
     let connection = zbus::blocking::Connection::session()
         .map_err(|source| FileManagerActivationError::Forward { source })?;
     let proxy = zbus::blocking::Proxy::new(
@@ -464,24 +506,9 @@ fn forward_paths_to_primary(paths: &[PathBuf]) -> Result<(), FileManagerActivati
         FILE_MANAGER_ACTIVATION_INTERFACE,
     )
     .map_err(|source| FileManagerActivationError::Forward { source })?;
-    let response = if paths.is_empty() {
-        proxy.call_with_flags::<_, _, ()>(
-            "Activate",
-            MethodFlags::NoAutoStart.into(),
-            &(String::new(),),
-        )
-    } else {
-        let encoded_paths = paths
-            .iter()
-            .map(|path| path.as_os_str().as_bytes().to_vec())
-            .collect::<Vec<_>>();
-        proxy.call_with_flags::<_, _, ()>(
-            "OpenPaths",
-            MethodFlags::NoAutoStart.into(),
-            &(encoded_paths, String::new()),
-        )
-    };
-    response.map_err(|source| FileManagerActivationError::Forward { source })?;
+    proxy
+        .call_with_flags::<_, _, ()>(method, MethodFlags::NoAutoStart.into(), body)
+        .map_err(|source| FileManagerActivationError::Forward { source })?;
     Ok(())
 }
 
@@ -551,6 +578,14 @@ impl BrandedActivationInterface {
         try_send_event(
             &self.event_sender,
             DesktopActivationEvent::FocusMainWindow(startup_id),
+        )
+    }
+
+    fn open_super_box(&self, startup_id: String) -> zbus::fdo::Result<()> {
+        let startup_id = DesktopStartupId::parse(startup_id).map_err(fdo_request_error)?;
+        try_send_event(
+            &self.event_sender,
+            DesktopActivationEvent::OpenSuperBox(startup_id),
         )
     }
 

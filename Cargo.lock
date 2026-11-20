@@ -150,6 +150,7 @@ dependencies = [
  "chrono-tz",
  "dark-light",
  "desktop-linux",
+ "fend-core",
  "file-core",
  "file-operations",
  "file-search",
@@ -1768,6 +1769,12 @@ checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
 dependencies = [
  "simd-adler32",
 ]
+
+[[package]]
+name = "fend-core"
+version = "1.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bf10938a7681e32b5b7d82ada720a04837f120e671c1e653309053e92c9e1e2"
 
 [[package]]
 name = "file-core"

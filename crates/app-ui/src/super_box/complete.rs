@@ -77,7 +77,7 @@ pub(crate) fn word(mode: BoxMode, input: &str) -> Option<Word> {
             Some(path_word(input, start, true))
         }
         BoxMode::Search | BoxMode::Files => stage_word(input),
-        BoxMode::New => None,
+        BoxMode::New | BoxMode::Rename => None,
     }
 }
 

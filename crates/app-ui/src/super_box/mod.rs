@@ -1,16 +1,18 @@
 //! 超级输入框（默认 Alt+Space）：键盘就能找到并执行功能、动作、设置页、收藏，搜索索引，跳到一个
-//! 路径，新建文件或文件夹，执行一条命令。这里是纯模型——模式、候选和排序、结果行、命令的运行状态；
+//! 路径，新建文件或文件夹，改名，执行一条命令，算式子（`=`），把选中的发给别的设备（`@`）。这里是纯模型——模式、候选和排序、结果行、命令的运行状态；
 //! 怎么执行在 `app/super_box*.rs`。
 //!
 //! 结果行在改输入、换模式、后台结果回来时算一次（输入只校验这一次），界面直接画，执行时信行里的值。
 //! 这里不读盘：路径补全、路径检查、索引查询都由应用层在后台做，结果按 `generation` 对号交回来。
 
+mod calculate;
 mod complete;
 mod find;
 mod found;
 mod matching;
 mod mode;
 mod pipe;
+mod rename;
 mod rows;
 mod shell;
 mod targets;
@@ -26,6 +28,7 @@ pub(crate) use matching::{BoxEntry, BoxTarget, EntryKind, MOST_ROWS};
 use mode::fold;
 pub(crate) use mode::{read_history, BoxMode};
 pub(crate) use pipe::{Pipe, PipeAction, PipeSource, Stage};
+pub(crate) use rename::Renamed;
 
 /// 管道一次最多对这么多项：再多就是写宽了，让用户加筛选缩小范围（用户定）。
 pub(crate) const MOST_PICKED: usize = 1000;
@@ -46,6 +49,17 @@ pub(crate) struct BoxContext<'a> {
     pub(crate) cannot_create: Option<String>,
     /// 当前文件夹里是不是已经有这个名字（按已经列出的条目回答）。
     pub(crate) taken: &'a dyn Fn(&str) -> bool,
+    /// 主窗口里选中的项（改名、发送用）。
+    pub(crate) selected: &'a [PathBuf],
+    /// 现在能发的设备（`@`）。
+    pub(crate) devices: &'a [SendTarget],
+}
+
+/// 能发的一台设备：收藏里在线的、附近发现的。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SendTarget {
+    pub(crate) name: String,
+    pub(crate) fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +77,12 @@ pub(crate) enum BoxRow {
     Run(String),
     /// 管道：挑出来的项接着各步，内容在 [`SuperBox::pipe`]、[`SuperBox::picked`]。
     Pipe,
+    /// `=` 算出来的结果：回车复制。
+    Answer(String),
+    /// 改名模式：选中的项要改成的名字。
+    Rename(Vec<Renamed>),
+    /// `@`：把选中的发给这台设备。
+    SendTo(SendTarget),
     /// 不能执行的说明，选不中。
     Problem(String),
 }
@@ -487,6 +507,8 @@ impl SuperBox {
             return None;
         }
         match self.mode {
+            // `=` 是式子、`@` 是设备，不查索引。
+            BoxMode::Search if text.starts_with(['=', '＝', '@']) => None,
             // 搜索模式只按名字找几个，排在别的结果后面。
             BoxMode::Search => Some(BoxLookup::Find {
                 generation,
@@ -503,7 +525,7 @@ impl SuperBox {
                     text_scope: SearchTextScope::NameAndContent,
                     limit: MOST_ROWS,
                 }),
-            BoxMode::Path | BoxMode::Shell | BoxMode::New => None,
+            BoxMode::Path | BoxMode::Shell | BoxMode::New | BoxMode::Rename => None,
         }
     }
 
@@ -622,12 +644,20 @@ impl SuperBox {
     fn refresh(&mut self, context: &BoxContext<'_>) {
         self.rows = self.compute_rows(context);
         self.selected = self.rows.iter().position(BoxRow::selectable);
-        self.suggestion = self.compute_suggestion();
+        self.suggestion = self.compute_suggestion(context);
     }
 
     /// 有能补的词时（路径、命令、管道的一段）：这个模式最近的历史里接得上的那条优先（同 fish），
     /// 没有再看候选。
-    fn compute_suggestion(&self) -> Option<String> {
+    fn compute_suggestion(&self, context: &BoxContext<'_>) -> Option<String> {
+        // 改名一项时：它现在的名字（→ 接受了再改）。
+        if let (BoxMode::Rename, [only]) = (self.mode, context.selected) {
+            let name = only.file_name()?.to_str()?;
+            return name
+                .strip_prefix(self.input.as_str())
+                .filter(|rest| !rest.is_empty())
+                .map(str::to_owned);
+        }
         let word = complete::word(self.mode, &self.input)?;
         if self.input.is_empty() {
             return None;

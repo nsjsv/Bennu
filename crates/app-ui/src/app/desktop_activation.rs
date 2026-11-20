@@ -51,6 +51,14 @@ impl FileBrowser {
                 );
                 self.merge_desktop_workspace(workspace)
             }
+            DesktopActivationEvent::OpenSuperBox(startup_id) => {
+                tracing::debug!(
+                    target: "app_ui::desktop_activation",
+                    startup_id = startup_id.as_str(),
+                    "desktop activation requested the super box"
+                );
+                Task::batch([self.focus_main_window(), self.open_super_box()])
+            }
             DesktopActivationEvent::OpenProperties(targets, startup_id) => {
                 tracing::debug!(
                     target: "app_ui::desktop_activation",

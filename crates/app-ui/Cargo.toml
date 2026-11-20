@@ -16,6 +16,7 @@ blake3.workspace = true
 chrono.workspace = true
 dark-light = "2.0.0"
 desktop-linux = { path = "../desktop-linux" }
+fend-core = "1.5"
 file-core = { path = "../file-core" }
 file-operations = { path = "../file-operations" }
 file-search = { path = "../file-search" }

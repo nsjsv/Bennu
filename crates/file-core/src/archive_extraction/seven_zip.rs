@@ -3,12 +3,12 @@
 
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
-use super::{ensure_destination_directory, ArchiveExtractionRequest};
+use super::{extraction_target, ArchiveExtractionRequest, ExtractionTarget};
 use crate::archive_listing::{list_seven_zip_entries, SevenZipListedEntry};
 use crate::seven_zip_job::{
     locate_seven_zip, run_seven_zip_job, seven_zip_failure, SevenZipJobFailure,
@@ -68,10 +68,10 @@ pub(super) async fn inspect_archive_with_seven_zip(
 }
 
 pub(super) async fn extract_archive_with_seven_zip(
-    request: ArchiveExtractionRequest,
+    request: &ArchiveExtractionRequest,
     mut controls: FileOperationControls,
     mut progress: impl FnMut(ArchiveProgress),
-) -> Result<PathBuf, FileError> {
+) -> Result<ExtractionTarget, FileError> {
     let program = locate_seven_zip()?;
     let entries = list_seven_zip_entries(
         &request.archive,
@@ -85,9 +85,10 @@ pub(super) async fn extract_archive_with_seven_zip(
         .filter(|entry| !entry.is_directory())
         .map(|entry| entry.member.len)
         .sum::<u64>();
-    ensure_destination_directory(&request.destination)?;
+    let members = entries.iter().map(|entry| entry.member.clone()).collect();
+    let target = extraction_target(request, async { Some(members) }).await?;
     let outcome = run_seven_zip_job(
-        seven_zip_extract_command(&program, &request),
+        seven_zip_extract_command(&program, request, &target),
         &mut controls,
         |sample| {
             progress(ArchiveProgress::Bytes {
@@ -119,8 +120,8 @@ pub(super) async fn extract_archive_with_seven_zip(
         }
     }
     // 7z 把不是 UTF-8 的名字原样写到磁盘上，解完改成显示用的名字。
-    display_names::rename_to_display_names(&request.destination, &entries)?;
-    Ok(request.destination)
+    display_names::rename_to_display_names(target.directory(), &entries)?;
+    Ok(target)
 }
 
 /// 试解代价最小的加密文件。solid block 里的文件只能从块头按顺序解，
@@ -149,15 +150,20 @@ fn password_probe_entry(entries: &[SevenZipListedEntry]) -> Option<&SevenZipList
 pub(super) fn seven_zip_extract_command(
     program: &Path,
     request: &ArchiveExtractionRequest,
+    target: &ExtractionTarget,
 ) -> Command {
     let mut command = Command::new(program);
     command.arg("x").arg("-y").arg("-bsp1").arg("-bso0");
+    if let ExtractionTarget::BesideArchive { .. } = target {
+        // 解进已有的文件夹时，遇到同名文件给解出来的那个改名（`a_1.jpg`），原有的不动。
+        command.arg("-aou");
+    }
     if let Some(password) = &request.password {
         command.arg(format!("-p{}", password.as_str()));
     }
     // `--` 之后都当文件名，`-o` 必须写在它前面。
     command
-        .arg(seven_zip_output_directory_switch(&request.destination))
+        .arg(seven_zip_output_directory_switch(target.directory()))
         .arg("--")
         .arg(&request.archive);
     command

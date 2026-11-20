@@ -135,7 +135,7 @@ pub(super) fn queued_operation_to_stored(operation: &QueuedFileOperation) -> Sto
         },
         QueuedFileOperation::ExtractArchive { request } => StoredOperation::ExtractArchive {
             archive: StoredPath::from_path(&request.archive),
-            destination: StoredPath::from_path(&request.destination),
+            destination: StoredPath::from_path(&request.landing_directory),
             password_required: request.password.is_some(),
         },
         // 成员提取是一次性动作,不参与重启恢复(恢复侧仍返回 None);

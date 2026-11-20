@@ -67,7 +67,12 @@ async fn queued_archive_creation_reports_source_bytes_and_entries() {
     .await;
     drop(output);
 
-    assert!(matches!(outcome, Ok(FileOperationOutcome::NoHistory)));
+    assert_eq!(
+        outcome,
+        Ok(FileOperationOutcome::CreatedArchive {
+            archive: directory.path().join("bundle.tar.gz"),
+        })
+    );
     let updates = collected_progress_updates(&mut messages, task_id).await;
     assert!(matches!(
         updates.first(),
@@ -114,11 +119,11 @@ async fn queued_archive_extraction_reports_bytes() {
         .await
         .unwrap();
         let archive_bytes = std::fs::metadata(&archive).unwrap().len();
-        let request = ArchiveExtractionRequest {
-            archive,
-            destination: directory.path().join(format!("extracted-{index}")),
-            password: None,
-        };
+        let request = ArchiveExtractionRequest::new(
+            &archive,
+            file_core::ArchiveExtractionPlacement::ArchiveFolder,
+        )
+        .unwrap();
         let task_id = 90 + index as u64;
         let (output, mut messages) = tokio::sync::mpsc::channel(32);
 
@@ -131,7 +136,10 @@ async fn queued_archive_extraction_reports_bytes() {
         .await;
         drop(output);
 
-        assert!(matches!(outcome, Ok(FileOperationOutcome::NoHistory)));
+        assert!(
+            matches!(&outcome, Ok(FileOperationOutcome::Extracted { placed }) if placed.is_dir()),
+            "{outcome:?}"
+        );
         let updates = collected_progress_updates(&mut messages, task_id).await;
         assert!(matches!(
             updates.first(),

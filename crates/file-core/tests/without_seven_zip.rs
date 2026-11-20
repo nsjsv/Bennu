@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use file_core::{
     create_archive_with_progress, extract_archive, list_archive_members, ArchiveCompressionLevel,
-    ArchiveCreationRequest, ArchiveExtractionRequest, ArchiveFormat, ExternalTool, FileError,
+    ArchiveCreationRequest, ArchiveExtractionPlacement, ArchiveExtractionRequest, ArchiveFormat,
+    ExternalTool, FileError,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -63,7 +64,7 @@ async fn zip_needs_seven_zip_while_tar_keeps_working() {
     assert_seven_zip_missing(list_archive_members(&zip).await);
     assert_seven_zip_missing(
         extract_archive(
-            ArchiveExtractionRequest::from_archive_path(&zip, None).unwrap(),
+            ArchiveExtractionRequest::new(&zip, ArchiveExtractionPlacement::Smart).unwrap(),
             CancellationToken::new(),
         )
         .await,
@@ -80,10 +81,13 @@ async fn zip_needs_seven_zip_while_tar_keeps_working() {
     .unwrap();
     assert_eq!(list_archive_members(&tar_gz).await.unwrap().len(), 1);
     let extracted = extract_archive(
-        ArchiveExtractionRequest::from_archive_path(&tar_gz, None).unwrap(),
+        ArchiveExtractionRequest::new(&tar_gz, ArchiveExtractionPlacement::Smart).unwrap(),
         CancellationToken::new(),
     )
     .await
     .unwrap();
-    assert_eq!(std::fs::read(extracted.join("note.txt")).unwrap(), b"hello");
+    assert_eq!(
+        std::fs::read(extracted.placed.join("note.txt")).unwrap(),
+        b"hello"
+    );
 }

@@ -20,19 +20,13 @@ pub use extract::{
     extract_archive_members_with_controls_and_progress, ArchiveMemberExtractionRequest,
 };
 
-/// 智能解压判定：包内所有成员是否都在同一个根目录下。
-/// 单根返回根目录名；散文件/多顶层条目/空包返回 `None`。
-pub async fn single_root_member_name(archive: &Path) -> Result<Option<String>, crate::FileError> {
-    let format = archive_extraction_format_for_path(archive).ok_or(
-        crate::FileError::Unsupported("archive format is not supported for listing"),
-    )?;
-    let members =
-        crate::archive_listing::list_archive_members_with_format(archive.to_path_buf(), format)
-            .await?;
-    let tree = tree::ArchiveMemberTree::build(members);
-    Ok(tree
-        .single_root_name()
-        .map(|name| name.to_string_lossy().into_owned()))
+/// 智能解压判定：包里所有成员都在同一个顶层文件夹下时返回它的显示名；
+/// 散文件、多个顶层条目、空包返回 `None`。
+pub(crate) fn single_root_folder(
+    members: Vec<crate::archive_listing::StoredMember>,
+) -> Option<std::ffi::OsString> {
+    let tree = tree::ArchiveMemberTree::build(crate::archive_listing::listing_entries(members));
+    tree.single_root_name().cloned()
 }
 
 /// 把包内成员（或文件夹子树）物化为可直接打开/预览的临时文件，
@@ -369,20 +363,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn single_root_member_name_reports_root_and_scatter() {
+    async fn single_root_folder_reports_root_and_scatter() {
         let workspace = tempfile::tempdir().unwrap();
+        let members = crate::archive_listing::list_tar_members;
 
         let single_path = workspace.path().join("single.tar");
         write_tar(&single_path, &[("root/", b""), ("root/a.txt", b"1")]);
         assert_eq!(
-            single_root_member_name(&single_path).await.unwrap(),
-            Some("root".to_owned())
+            single_root_folder(members(&single_path).await.unwrap()),
+            Some(std::ffi::OsString::from("root"))
         );
 
         let scattered_path = workspace.path().join("scattered.tar");
         write_tar(&scattered_path, &[("a.txt", b"1"), ("dir/", b"")]);
         assert_eq!(
-            single_root_member_name(&scattered_path).await.unwrap(),
+            single_root_folder(members(&scattered_path).await.unwrap()),
             None
         );
     }

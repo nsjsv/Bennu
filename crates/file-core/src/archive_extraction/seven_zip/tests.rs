@@ -2,6 +2,7 @@ use std::ffi::OsStr;
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::process::ExitStatusExt;
+use std::path::PathBuf;
 
 use super::*;
 use crate::archive_listing::StoredMember;
@@ -10,9 +11,22 @@ use crate::{ArchivePassword, FileKind};
 fn seven_zip_test_request(password: Option<ArchivePassword>) -> ArchiveExtractionRequest {
     ArchiveExtractionRequest {
         archive: PathBuf::from("/tmp/locked.7z"),
-        destination: PathBuf::from("/tmp/locked"),
+        landing_directory: PathBuf::from("/tmp"),
+        placement: crate::ArchiveExtractionPlacement::ArchiveFolder,
         password,
     }
+}
+
+fn new_folder_target() -> ExtractionTarget {
+    ExtractionTarget::NewFolder(PathBuf::from("/tmp/locked"))
+}
+
+fn arguments_of(command: &Command) -> Vec<OsString> {
+    command
+        .as_std()
+        .get_args()
+        .map(OsStr::to_os_string)
+        .collect()
 }
 
 fn seven_zip_exit_status(code: i32) -> std::process::ExitStatus {
@@ -22,13 +36,13 @@ fn seven_zip_exit_status(code: i32) -> std::process::ExitStatus {
 #[test]
 fn seven_zip_extract_output_switch_precedes_archive_operand() {
     let request = seven_zip_test_request(None);
-    let command = seven_zip_extract_command(Path::new("7z"), &request);
-    let arguments = command
-        .as_std()
-        .get_args()
-        .map(OsStr::to_os_string)
-        .collect::<Vec<_>>();
-    let output_switch = seven_zip_output_directory_switch(&request.destination);
+    let target = new_folder_target();
+    let arguments = arguments_of(&seven_zip_extract_command(
+        Path::new("7z"),
+        &request,
+        &target,
+    ));
+    let output_switch = seven_zip_output_directory_switch(target.directory());
     let output_index = arguments
         .iter()
         .position(|argument| argument == &output_switch)
@@ -55,9 +69,11 @@ fn seven_zip_extract_output_switch_preserves_destination_bytes() {
     for extension in ["7z", "rar"] {
         let mut request = seven_zip_test_request(None);
         request.archive = PathBuf::from(format!("/tmp/locked.{extension}"));
-        request.destination = PathBuf::from(OsString::from_vec(destination_bytes.clone()));
+        let target = ExtractionTarget::NewFolder(PathBuf::from(OsString::from_vec(
+            destination_bytes.clone(),
+        )));
 
-        let command = seven_zip_extract_command(Path::new("7z"), &request);
+        let command = seven_zip_extract_command(Path::new("7z"), &request, &target);
         let output_switch = command
             .as_std()
             .get_args()
@@ -66,6 +82,30 @@ fn seven_zip_extract_output_switch_preserves_destination_bytes() {
 
         assert_eq!(output_switch.as_bytes(), expected_bytes);
     }
+}
+
+/// 只有解进已有的文件夹时才不覆盖：新建的空文件夹里没有用户的文件。
+#[test]
+fn only_extraction_beside_the_archive_refuses_to_overwrite() {
+    let request = seven_zip_test_request(None);
+    let beside = ExtractionTarget::BesideArchive {
+        landing: PathBuf::from("/tmp"),
+        root: OsString::from("locked"),
+    };
+    let rename_switch = OsString::from("-aou");
+
+    assert!(arguments_of(&seven_zip_extract_command(
+        Path::new("7z"),
+        &request,
+        &beside
+    ))
+    .contains(&rename_switch));
+    assert!(!arguments_of(&seven_zip_extract_command(
+        Path::new("7z"),
+        &request,
+        &new_folder_target(),
+    ))
+    .contains(&rename_switch));
 }
 
 #[test]

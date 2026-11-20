@@ -7,7 +7,7 @@ use super::StoredMember;
 use crate::tar_job::{tar_command, tar_failure};
 use crate::{FileError, FileKind};
 
-pub(super) async fn list_tar_members(archive: &Path) -> Result<Vec<StoredMember>, FileError> {
+pub(crate) async fn list_tar_members(archive: &Path) -> Result<Vec<StoredMember>, FileError> {
     let output = tar_command()
         .arg("-t")
         .arg("-v")

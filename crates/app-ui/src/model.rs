@@ -751,14 +751,9 @@ pub(crate) enum Message {
     PaneUp(BrowserPaneId),
     NavigateTo(PathBuf),
     OpenPath(PathBuf),
-    /// 右键「智能解压到当前文件夹」：对选中集合中的每个归档做单根判定后入队。
+    /// 右键「智能解压到当前文件夹」。
     SmartExtractSelected,
-    /// 智能解压的单根判定回流：据此计算目的地并启动既有解压流。
-    SmartExtractDestinationResolved {
-        archive: PathBuf,
-        single_root: Result<Option<String>, String>,
-    },
-    /// 右键「解压到 <包名>/」：无条件在归档旁建包名文件夹后逐个解压。
+    /// 右键「解压到 <包名>/」：在归档旁新建包名文件夹后逐个解压。
     ExtractSelectedToArchiveFolder,
     TrashOpened,
     Back,

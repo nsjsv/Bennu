@@ -591,3 +591,80 @@ fn ungathering_that_removes_the_new_folder_has_no_warning() {
         .completion_warning(bennu_localization::UiLanguage::English)
         .is_none());
 }
+
+/// 转换、压缩、解压生成的东西：撤销 = 移到回收站，重做 = 从回收站拿回来（同 Nautilus 撤销压缩、解压）。
+#[test]
+fn made_files_go_to_the_trash_on_undo_and_come_back_on_redo() {
+    let made = [
+        (
+            FileOperationOutcome::Convert {
+                failures: Vec::new(),
+                outputs: vec![PathBuf::from("/music/a.m4a"), PathBuf::from("/music/b.m4a")],
+            },
+            vec![PathBuf::from("/music/a.m4a"), PathBuf::from("/music/b.m4a")],
+        ),
+        (
+            FileOperationOutcome::CreatedArchive {
+                archive: PathBuf::from("/docs/report.zip"),
+            },
+            vec![PathBuf::from("/docs/report.zip")],
+        ),
+        (
+            FileOperationOutcome::Extracted {
+                placed: PathBuf::from("/docs/photos"),
+            },
+            vec![PathBuf::from("/docs/photos")],
+        ),
+    ];
+    for (task_id, (outcome, paths)) in (1..).zip(made) {
+        let mut history = FileOperationHistory::new();
+        history.accept_completed(task_id, &outcome);
+
+        let (undo, pending) = history.take_undo_operation().expect("undo what was made");
+        assert!(
+            matches!(&undo, QueuedFileOperation::Trash { paths: trashed } if *trashed == paths),
+            "{undo:?}"
+        );
+
+        let entries = paths
+            .iter()
+            .map(|path| {
+                TrashRestoreEntry::from_historical_paths(
+                    PathBuf::from("/trash/files").join(path.file_name().unwrap()),
+                    PathBuf::from("/trash/info").join(path.file_name().unwrap()),
+                    path.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        history.track_pending(100 + task_id, pending);
+        history.accept_completed(
+            100 + task_id,
+            &FileOperationOutcome::Trash {
+                entries: entries.clone(),
+                untrashable: Vec::new(),
+            },
+        );
+
+        let (redo, _) = history
+            .take_redo_operation()
+            .expect("redo brings them back");
+        assert!(
+            matches!(&redo, QueuedFileOperation::Restore { entries: restored } if *restored == entries),
+            "{redo:?}"
+        );
+    }
+}
+
+/// 一个都没转成的转换没有可撤销的东西。
+#[test]
+fn a_conversion_that_made_nothing_leaves_no_undo() {
+    let mut history = FileOperationHistory::new();
+    history.accept_completed(
+        1,
+        &FileOperationOutcome::Convert {
+            failures: vec!["a.mp4: broken".to_owned()],
+            outputs: Vec::new(),
+        },
+    );
+    assert!(history.take_undo_operation().is_none());
+}

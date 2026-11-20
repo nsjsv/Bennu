@@ -248,7 +248,9 @@ async fn run_queued_extract_archive(
         extract_archive_with_controls_and_progress(request, controls, progress)
     })
     .await
-    .map(|_| FileOperationOutcome::NoHistory)
+    .map(|extracted| FileOperationOutcome::Extracted {
+        placed: extracted.placed,
+    })
     .map_err(|error| error.to_string())
 }
 
@@ -277,19 +279,19 @@ async fn run_queued_create_archive(
         )
     })
     .await
-    .map(|_| FileOperationOutcome::NoHistory)
+    .map(|archive| FileOperationOutcome::CreatedArchive { archive })
     .map_err(|error| error.to_string())
 }
 
 /// 压缩、解压、包内成员提取同一套转发：产出方随时写最新进度，这里按界面
 /// 间隔取最新的发出去；结束前补发最后一份，进度不会停在上一次节流点。
-pub(crate) async fn run_archive_operation<Operation>(
+pub(crate) async fn run_archive_operation<Operation, Produced>(
     task_id: u64,
     output: &FileOperationEventSender,
     start: impl FnOnce(Box<dyn FnMut(ArchiveProgress) + Send>) -> Operation,
-) -> Result<PathBuf, FileError>
+) -> Result<Produced, FileError>
 where
-    Operation: Future<Output = Result<PathBuf, FileError>>,
+    Operation: Future<Output = Result<Produced, FileError>>,
 {
     send_file_operation_progress(output, task_id, FileOperationProgressUpdate::Indeterminate).await;
     let (progress_sender, mut progress_receiver) = tokio::sync::watch::channel(None);

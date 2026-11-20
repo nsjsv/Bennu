@@ -50,9 +50,12 @@ pub(crate) enum FileOperationHistoryItem {
         original_paths: Vec<PathBuf>,
         restore_entries: Vec<TrashRestoreEntry>,
     },
-    Restore {
-        restore_entries: Vec<TrashRestoreEntry>,
-        restored_paths: Vec<PathBuf>,
+    /// 这次操作放出来的条目：从回收站还原的，或者转换、压缩、解压新生成的。撤销 = 移到回收站
+    /// （同 Nautilus 撤销压缩、解压），重做 = 从回收站拿回来。`trash_entries` 是撤销时它们在
+    /// 回收站里的位置，还没撤销过时为空。
+    Appeared {
+        paths: Vec<PathBuf>,
+        trash_entries: Vec<TrashRestoreEntry>,
     },
     Copy {
         transfers: Vec<CompletedTransfer>,
@@ -252,14 +255,24 @@ impl PendingHistoryOperation {
 }
 
 impl FileOperationHistoryItem {
+    fn appeared(paths: Vec<PathBuf>) -> Option<Self> {
+        (!paths.is_empty()).then_some(Self::Appeared {
+            paths,
+            trash_entries: Vec::new(),
+        })
+    }
+
     fn from_outcome(outcome: &FileOperationOutcome) -> Option<Self> {
         match outcome {
             // 撤销收纳只在撤销时发生，它本身不再进历史。
             FileOperationOutcome::NoHistory | FileOperationOutcome::NewFolderUngathered { .. } => {
                 None
             }
-            // 转换生成新文件,不可通过删除新文件安全撤销(可能有同名列/外部引用),不写历史。
-            FileOperationOutcome::Convert { .. } => None,
+            FileOperationOutcome::Convert { outputs, .. } => Self::appeared(outputs.clone()),
+            FileOperationOutcome::CreatedArchive { archive } => {
+                Self::appeared(vec![archive.clone()])
+            }
+            FileOperationOutcome::Extracted { placed } => Self::appeared(vec![placed.clone()]),
             FileOperationOutcome::Rename { from, to } => Some(Self::Rename {
                 from: from.clone(),
                 to: to.clone(),
@@ -300,14 +313,9 @@ impl FileOperationHistoryItem {
                 })
             }
             FileOperationOutcome::Trash { .. } => None,
-            FileOperationOutcome::Restore {
-                entries,
-                restored_paths,
-            } if !restored_paths.is_empty() => Some(Self::Restore {
-                restore_entries: entries.clone(),
-                restored_paths: restored_paths.clone(),
-            }),
-            FileOperationOutcome::Restore { .. } => None,
+            FileOperationOutcome::Restore { restored_paths, .. } => {
+                Self::appeared(restored_paths.clone())
+            }
             FileOperationOutcome::Copy {
                 transfers,
                 history_eligibility: FileOperationHistoryEligibility::Replayable,
@@ -373,8 +381,8 @@ impl FileOperationHistoryItem {
                 entries: restore_entries.clone(),
             }),
             Self::Trash { .. } => None,
-            Self::Restore { restored_paths, .. } => Some(QueuedFileOperation::Trash {
-                paths: restored_paths.clone(),
+            Self::Appeared { paths, .. } => Some(QueuedFileOperation::Trash {
+                paths: paths.clone(),
             }),
             Self::Copy { transfers } => Some(QueuedFileOperation::Trash {
                 paths: transfer_targets(transfers),
@@ -416,12 +424,12 @@ impl FileOperationHistoryItem {
             Self::Trash { original_paths, .. } => Some(QueuedFileOperation::Trash {
                 paths: original_paths.clone(),
             }),
-            Self::Restore {
-                restore_entries, ..
-            } if !restore_entries.is_empty() => Some(QueuedFileOperation::Restore {
-                entries: restore_entries.clone(),
-            }),
-            Self::Restore { .. } => None,
+            Self::Appeared { trash_entries, .. } if !trash_entries.is_empty() => {
+                Some(QueuedFileOperation::Restore {
+                    entries: trash_entries.clone(),
+                })
+            }
+            Self::Appeared { .. } => None,
             Self::Copy { transfers } => Some(QueuedFileOperation::Copy {
                 transfers: forward_transfers(transfers),
                 verification: FileOperationVerification::default(),
@@ -448,10 +456,10 @@ impl FileOperationHistoryItem {
                     restore_entries: Vec::new(),
                 }
             }
-            (Self::Restore { restored_paths, .. }, FileOperationOutcome::Trash { entries, .. }) => {
-                Self::Restore {
-                    restore_entries: entries.clone(),
-                    restored_paths,
+            (Self::Appeared { paths, .. }, FileOperationOutcome::Trash { entries, .. }) => {
+                Self::Appeared {
+                    paths,
+                    trash_entries: entries.clone(),
                 }
             }
             (item, _) => item,

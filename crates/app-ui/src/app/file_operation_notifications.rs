@@ -251,11 +251,11 @@ mod tests {
                 password: None,
             },
             QueuedFileOperation::ExtractArchive {
-                request: ArchiveExtractionRequest {
-                    archive: PathBuf::from("/tmp/report.zip"),
-                    destination: PathBuf::from("/tmp/report"),
-                    password: None,
-                },
+                request: ArchiveExtractionRequest::new(
+                    "/tmp/report.zip",
+                    file_core::ArchiveExtractionPlacement::Smart,
+                )
+                .unwrap(),
             },
         ]
     }

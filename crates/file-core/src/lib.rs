@@ -47,7 +47,7 @@ pub use archive_extraction::{
     archive_extraction_format_for_path, archive_folder_name, extract_archive,
     extract_archive_with_controls_and_progress, extract_archive_with_progress,
     inspect_archive_extraction, is_supported_archive_path, ArchiveExtractionFormat,
-    ArchiveExtractionRequest,
+    ArchiveExtractionPlacement, ArchiveExtractionRequest, ExtractedArchive,
 };
 pub use archive_listing::{
     list_archive_members, list_archive_members_with_format, sniff_archive_extraction_format,
@@ -56,7 +56,7 @@ pub use archive_listing::{
 pub use archive_progress::{ArchiveEntryProgress, ArchiveProgress};
 pub use archive_vfs::{
     archive_path_identity, extract_archive_members_with_controls_and_progress,
-    materialize_archive_member_for_open, real_directory_outside_archive, single_root_member_name,
+    materialize_archive_member_for_open, real_directory_outside_archive,
     ArchiveMemberExtractionRequest, ArchivePathIdentity,
 };
 pub use checksum::{

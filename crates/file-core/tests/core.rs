@@ -11,12 +11,13 @@ use file_core::{
     discover_directory_with_progress, discovered_sort_is_ready, extract_archive_with_progress,
     filter_hidden, is_transfer_target_available, rename_entry, resolve_directory_metadata,
     scan_directory, scan_directory_with_progress, sort_discovered_entry_indices, sort_entries,
-    watch_directory, ArchiveCompressionLevel, ArchiveCreationRequest, ArchiveExtractionRequest,
-    ArchiveFormat, ArchivePassword, ArchiveProgress, BatchRenameItem, DirectoryEntry,
-    DirectoryMetadataAvailability, DirectoryMetadataRequest, DirectoryMetadataRequirement,
-    DirectoryMetadataState, EntryMetadata, FileError, FileKind, FileOperationControls,
-    FileOperationRunState, FileOperationVerification, FileTransferOptions, ResolvedEntryChange,
-    ScanOptions, SortDirection, SortField, TransferConflictCheck, TransferConflictStrategy,
+    watch_directory, ArchiveCompressionLevel, ArchiveCreationRequest, ArchiveExtractionPlacement,
+    ArchiveExtractionRequest, ArchiveFormat, ArchivePassword, ArchiveProgress, BatchRenameItem,
+    DirectoryEntry, DirectoryMetadataAvailability, DirectoryMetadataRequest,
+    DirectoryMetadataRequirement, DirectoryMetadataState, EntryMetadata, FileError, FileKind,
+    FileOperationControls, FileOperationRunState, FileOperationVerification, FileTransferOptions,
+    ResolvedEntryChange, ScanOptions, SortDirection, SortField, TransferConflictCheck,
+    TransferConflictStrategy,
 };
 use tempfile::tempdir;
 

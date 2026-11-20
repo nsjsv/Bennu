@@ -262,7 +262,7 @@ impl FileBrowser {
             }
             QueuedFileOperation::ExtractArchive { request } => {
                 self.invalidate_list_directory_summary_subtree_and_ancestor_chain(
-                    &request.destination,
+                    &request.landing_directory,
                 );
             }
             QueuedFileOperation::ExtractArchiveMembers { destination, .. } => {

@@ -87,7 +87,7 @@ impl OperationPathLines for QueuedFileOperation {
             } => path_lines_from_archive(sources, target),
             Self::Convert { requests } => path_lines_from_conversions(requests),
             Self::ExtractArchive { request } => {
-                path_lines_from_extracted_archive(&request.archive, &request.destination)
+                path_lines_from_extracted_archive(&request.archive, &request.landing_directory)
             }
             Self::ExtractArchiveMembers {
                 sources,

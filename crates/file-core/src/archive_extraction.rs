@@ -2,9 +2,12 @@
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
+
+use crate::archive_listing::StoredMember;
 
 use self::seven_zip::{extract_archive_with_seven_zip, inspect_archive_with_seven_zip};
 use self::tar::extract_tar_archive;
@@ -39,47 +42,136 @@ const ARCHIVE_SUFFIXES: &[(&str, ArchiveExtractionFormat)] = &[
     (".rar", ArchiveExtractionFormat::Rar),
 ];
 
+/// 整包解压落在哪。两种都只在压缩包所在的文件夹里放一个原来没有的东西，从不解进已经
+/// 存在的文件夹：解进去的话，包里的同名文件会盖掉用户原有的文件。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchiveExtractionPlacement {
+    /// 包里只有一个顶层文件夹、而且这个名字在压缩包旁边还空着，就直接放在压缩包旁边；
+    /// 否则同 [`Self::ArchiveFolder`]。
+    Smart,
+    /// 在压缩包旁边新建一个以包名命名的文件夹解进去，名字被占用时按"名字 2"续编号。
+    ArchiveFolder,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveExtractionRequest {
     pub archive: PathBuf,
-    pub destination: PathBuf,
+    /// 压缩包所在的文件夹，解出来的东西放在这里面。
+    pub landing_directory: PathBuf,
+    pub placement: ArchiveExtractionPlacement,
     pub password: Option<ArchivePassword>,
 }
 
+/// 解压放出来的那一项：直接放在压缩包旁边的顶层文件夹，或者新建的包名文件夹。
+/// 撤销解压就是把它移到回收站。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtractedArchive {
+    pub placed: PathBuf,
+}
+
 impl ArchiveExtractionRequest {
-    pub fn from_archive_path(
+    /// 压缩包要有上级目录、名字能当文件夹名，在这里查一次。
+    pub fn new(
         archive: impl Into<PathBuf>,
-        password: Option<ArchivePassword>,
+        placement: ArchiveExtractionPlacement,
     ) -> Result<Self, FileError> {
         let archive = archive.into();
-        let destination = default_archive_extraction_directory(&archive)?;
+        let landing_directory = archive
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .ok_or_else(|| FileError::InvalidInput {
+                path: archive.clone(),
+                message: "archive path has no parent directory".to_owned(),
+            })?;
+        if archive_folder_name(&archive).is_none() {
+            return Err(FileError::InvalidInput {
+                path: archive,
+                message: "archive name is not usable as a directory name".to_owned(),
+            });
+        }
         Ok(Self {
             archive,
-            destination,
-            password,
+            landing_directory,
+            placement,
+            password: None,
         })
-    }
-
-    /// 右键解压语义：目的地由调用方计算（智能解压/包名文件夹），
-    /// 不再固定为归档同级目录。
-    pub fn with_destination(self, destination: PathBuf) -> Self {
-        Self {
-            destination,
-            ..self
-        }
     }
 
     pub fn with_password(&self, password: Option<ArchivePassword>) -> Self {
         Self {
-            archive: self.archive.clone(),
-            destination: self.destination.clone(),
             password,
+            ..self.clone()
         }
     }
 
     pub fn without_password(&self) -> Self {
         self.with_password(None)
     }
+}
+
+/// 这一次解进哪里，在解压真正开始时才定：排队期间同一个包可能已经被解过一次，
+/// 入队时看到的空位到这时不一定还空着。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ExtractionTarget {
+    /// 直接解进压缩包所在的文件夹：包里唯一的顶层文件夹 `root` 在那里还不存在。解压命令
+    /// 要用不覆盖的写法，万一这期间别处建了同名的东西，也不会被盖掉。
+    BesideArchive { landing: PathBuf, root: OsString },
+    /// 解进刚新建的空文件夹。
+    NewFolder(PathBuf),
+}
+
+impl ExtractionTarget {
+    pub(crate) fn directory(&self) -> &Path {
+        match self {
+            Self::BesideArchive { landing, .. } => landing,
+            Self::NewFolder(folder) => folder,
+        }
+    }
+
+    fn placed(self) -> PathBuf {
+        match self {
+            Self::BesideArchive { landing, root } => landing.join(root),
+            Self::NewFolder(folder) => folder,
+        }
+    }
+}
+
+/// `members` 是这个包列出的成员，只在智能解压时才会被等待：整包解进包名文件夹用不着它，
+/// tar 也就不用为此多读一遍包。
+pub(crate) async fn extraction_target(
+    request: &ArchiveExtractionRequest,
+    members: impl Future<Output = Option<Vec<StoredMember>>>,
+) -> Result<ExtractionTarget, FileError> {
+    if request.placement == ArchiveExtractionPlacement::Smart {
+        if let Some(root) = free_single_root(request, members.await) {
+            return Ok(ExtractionTarget::BesideArchive {
+                landing: request.landing_directory.clone(),
+                root,
+            });
+        }
+    }
+    let name = archive_folder_name(&request.archive).ok_or_else(|| FileError::InvalidInput {
+        path: request.archive.clone(),
+        message: "archive name is not usable as a directory name".to_owned(),
+    })?;
+    let folder =
+        crate::create_directory_at_available_name(request.landing_directory.join(name)).await?;
+    Ok(ExtractionTarget::NewFolder(folder))
+}
+
+/// 包里唯一的顶层文件夹（显示名，和包内浏览看到的一样），并且这个名字在压缩包旁边还空着。
+/// 列不出成员（坏包、头部加密又没给密码）时按多根处理，让解压本身报出具体错误。
+fn free_single_root(
+    request: &ArchiveExtractionRequest,
+    members: Option<Vec<StoredMember>>,
+) -> Option<OsString> {
+    let root = crate::archive_vfs::single_root_folder(members?)?;
+    let free = matches!(
+        fs::symlink_metadata(request.landing_directory.join(&root)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    );
+    free.then_some(root)
 }
 
 /// 名字里的压缩包后缀（含点，保留原来的大小写）和格式，按 [`ARCHIVE_SUFFIXES`] 认。
@@ -117,7 +209,7 @@ pub async fn inspect_archive_extraction(
 pub async fn extract_archive(
     request: ArchiveExtractionRequest,
     cancel: CancellationToken,
-) -> Result<PathBuf, FileError> {
+) -> Result<ExtractedArchive, FileError> {
     extract_archive_with_progress(request, cancel, |_| {}).await
 }
 
@@ -125,7 +217,7 @@ pub async fn extract_archive_with_progress(
     request: ArchiveExtractionRequest,
     cancel: CancellationToken,
     progress: impl FnMut(ArchiveProgress) + Send + 'static,
-) -> Result<PathBuf, FileError> {
+) -> Result<ExtractedArchive, FileError> {
     extract_archive_with_controls_and_progress(
         request,
         FileOperationControls::running(cancel),
@@ -138,20 +230,21 @@ pub async fn extract_archive_with_controls_and_progress(
     request: ArchiveExtractionRequest,
     mut controls: FileOperationControls,
     progress: impl FnMut(ArchiveProgress) + Send + 'static,
-) -> Result<PathBuf, FileError> {
+) -> Result<ExtractedArchive, FileError> {
     let format = extraction_format(&request)?;
     controls.wait_until_running().await?;
-    match format {
-        ArchiveExtractionFormat::Tar => {
-            reject_tar_password(&request)?;
-            extract_tar_archive(request, controls, progress).await
-        }
+    // 出错或取消时不删已经解出来的东西，也不删新建的文件夹：清理一旦有 bug 会多删用户文件。
+    let target = match format {
+        ArchiveExtractionFormat::Tar => extract_tar_archive(&request, controls, progress).await?,
         ArchiveExtractionFormat::Zip
         | ArchiveExtractionFormat::SevenZip
         | ArchiveExtractionFormat::Rar => {
-            extract_archive_with_seven_zip(request, controls, progress).await
+            extract_archive_with_seven_zip(&request, controls, progress).await?
         }
-    }
+    };
+    Ok(ExtractedArchive {
+        placed: target.placed(),
+    })
 }
 
 fn extraction_format(
@@ -160,25 +253,6 @@ fn extraction_format(
     archive_extraction_format_for_path(&request.archive).ok_or(FileError::Unsupported(
         "archive format is not supported for extraction",
     ))
-}
-
-fn default_archive_extraction_directory(archive: &Path) -> Result<PathBuf, FileError> {
-    let parent = archive
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty());
-    let Some(parent) = parent else {
-        return Err(FileError::InvalidInput {
-            path: archive.to_path_buf(),
-            message: "archive path has no parent directory".to_owned(),
-        });
-    };
-    let Some(name) = archive_folder_name(archive) else {
-        return Err(FileError::InvalidInput {
-            path: archive.to_path_buf(),
-            message: "archive name is not usable as a directory name".to_owned(),
-        });
-    };
-    Ok(parent.join(name))
 }
 
 /// 去掉压缩包后缀作为解压出来的文件夹名：`a.tar.gz` → `a`。
@@ -193,18 +267,6 @@ pub fn archive_folder_name(archive: &Path) -> Option<OsString> {
         }
     }
     archive.file_stem().map(OsStr::to_os_string)
-}
-
-/// 目的地允许已存在：右键智能解压的单根语义直接解入压缩包所在文件夹。
-/// 出错或取消时不删已经解出来的东西：清理一旦有 bug 会多删用户文件。
-fn ensure_destination_directory(destination: &Path) -> Result<(), FileError> {
-    if destination.is_dir() {
-        return Ok(());
-    }
-    fs::create_dir(destination).map_err(|source| FileError::CreateDirectory {
-        path: destination.to_path_buf(),
-        source,
-    })
 }
 
 fn reject_tar_password(request: &ArchiveExtractionRequest) -> Result<(), FileError> {
@@ -245,8 +307,8 @@ mod tests {
                 "{name}"
             );
             assert_eq!(
-                default_archive_extraction_directory(&path).unwrap(),
-                Path::new("/tmp").join(folder),
+                archive_folder_name(&path).unwrap(),
+                OsStr::new(folder),
                 "{name}"
             );
         }

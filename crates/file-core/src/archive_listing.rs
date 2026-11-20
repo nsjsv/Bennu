@@ -14,6 +14,7 @@ mod tar;
 
 pub(crate) use member_names::decode_member_names;
 pub(crate) use seven_zip::{list_seven_zip_entries, SevenZipListedEntry};
+pub(crate) use tar::list_tar_members;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiveListingEntry {
@@ -65,8 +66,13 @@ pub async fn list_archive_members_with_format(
                 .collect()
         }
     };
+    Ok(listing_entries(members))
+}
+
+/// 包里存的成员 → 显示用的条目：不是 UTF-8 的名字按识别出的编码转好。
+pub(crate) fn listing_entries(members: Vec<StoredMember>) -> Vec<ArchiveListingEntry> {
     let display_paths = decode_member_names(members.iter().map(|member| &member.stored_path[..]));
-    Ok(members
+    members
         .into_iter()
         .zip(display_paths)
         .map(|(member, path)| ArchiveListingEntry {
@@ -76,7 +82,7 @@ pub async fn list_archive_members_with_format(
             len: member.len,
             modified: member.modified,
         })
-        .collect())
+        .collect()
 }
 
 /// 读取文件头识别归档格式。调用方已确认该路径属于归档类型，

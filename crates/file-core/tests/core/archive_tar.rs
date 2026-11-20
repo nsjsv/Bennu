@@ -1,7 +1,9 @@
 //! tar 一类压缩包：走系统 tar（tar.gz 新建再接 gzip）。各发行版都有 tar 和 gzip；
 //! xz / zstd / bzip2 没装的格式跳过。
 
-use super::archive::{assert_monotonic, byte_counts, create, extract, request};
+use super::archive::{
+    assert_monotonic, byte_counts, create, extract, into_archive_folder, request, smart,
+};
 use super::*;
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -50,12 +52,36 @@ async fn tar_gz_creation_progress_follows_the_stream_and_round_trips() {
     assert_eq!(names, vec![("large.bin", 990), ("small.bin", 10)]);
     assert!(members.iter().all(|member| member.modified.is_some()));
 
-    let extraction_request = ArchiveExtractionRequest::from_archive_path(&archive, None).unwrap();
-    assert_eq!(extraction_request.destination, dir.path().join("progress"));
-    extract(extraction_request.clone()).await;
+    let extraction = extract(into_archive_folder(&archive)).await;
+    assert_eq!(extraction.placed, dir.path().join("progress"));
     assert_eq!(
-        fs::read(extraction_request.destination.join("large.bin")).unwrap(),
+        fs::read(extraction.placed.join("large.bin")).unwrap(),
         vec![2_u8; 990]
+    );
+}
+
+/// tar 也一样：唯一的顶层文件夹在压缩包旁边还没有，就直接放过去；已经有了就放进新文件夹，
+/// 原有的同名文件不动。
+#[tokio::test]
+async fn smart_tar_extraction_never_writes_into_an_existing_folder() {
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source");
+    let photos = source.join("photos");
+    fs::create_dir_all(&photos).unwrap();
+    fs::write(photos.join("a.jpg"), b"from the archive").unwrap();
+    let archive = dir.path().join("photos.tar.gz");
+    create(request(vec![photos], &archive, ArchiveFormat::TarGz, None)).await;
+
+    let beside = extract(smart(&archive)).await;
+    assert_eq!(beside.placed, dir.path().join("photos"));
+    fs::write(beside.placed.join("a.jpg"), b"mine").unwrap();
+
+    let wrapped = extract(smart(&archive)).await;
+    assert_eq!(wrapped.placed, dir.path().join("photos 2"));
+    assert_eq!(fs::read(dir.path().join("photos/a.jpg")).unwrap(), b"mine");
+    assert_eq!(
+        fs::read(wrapped.placed.join("photos/a.jpg")).unwrap(),
+        b"from the archive"
     );
 }
 
@@ -69,8 +95,7 @@ async fn tar_gz_extraction_reports_read_archive_bytes_and_entry_count() {
     create(request(vec![source], &archive, ArchiveFormat::TarGz, None)).await;
     let archive_bytes = fs::metadata(&archive).unwrap().len();
 
-    let updates =
-        extract(ArchiveExtractionRequest::from_archive_path(archive, None).unwrap()).await;
+    let updates = extract(into_archive_folder(&archive)).await.progress;
 
     assert_monotonic(&updates);
     assert_eq!(
@@ -129,13 +154,7 @@ async fn compressed_tars_list_extract_and_open_members() {
             "{name}"
         );
 
-        let destination = dir.path().join(format!("{name}-out"));
-        extract(ArchiveExtractionRequest {
-            archive: archive.clone(),
-            destination: destination.clone(),
-            password: None,
-        })
-        .await;
+        let destination = extract(into_archive_folder(&archive)).await.placed;
         assert_eq!(
             fs::read(destination.join("文件夹/说明.txt")).unwrap(),
             b"inside"
@@ -162,13 +181,7 @@ async fn tar_gz_keeps_non_utf8_entry_names_byte_for_byte() {
     let archive = dir.path().join("bundle.tar.gz");
     create(request(vec![source], &archive, ArchiveFormat::TarGz, None)).await;
 
-    let destination = dir.path().join("out");
-    extract(ArchiveExtractionRequest {
-        archive,
-        destination: destination.clone(),
-        password: None,
-    })
-    .await;
+    let destination = extract(into_archive_folder(&archive)).await.placed;
 
     let names = fs::read_dir(&destination)
         .unwrap()
@@ -290,13 +303,9 @@ async fn tar_gz_extraction_pauses_and_cancels_inside_a_large_entry() {
     let controls = FileOperationControls::new(cancel.clone(), run_state);
     let pause_sender = std::sync::Arc::new(run_state_sender);
     let pause_on_progress = pause_sender.clone();
-    let destination = dir.path().join("large-out");
+    let destination = dir.path().join("large");
     let extraction = tokio::spawn(file_core::extract_archive_with_controls_and_progress(
-        ArchiveExtractionRequest {
-            archive,
-            destination: destination.clone(),
-            password: None,
-        },
+        into_archive_folder(&archive),
         controls,
         move |progress| {
             if byte_counts(&progress).0 > 0 {

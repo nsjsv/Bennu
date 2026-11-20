@@ -20,18 +20,18 @@ pub(super) async fn run_queued_convert(
 
     let total_items = requests.len();
     let mut failures = Vec::new();
+    let mut outputs = Vec::new();
     for (index, request) in requests.into_iter().enumerate() {
-        if let Err(error) = convert_file_with_controls(request, &controls).await {
-            match error {
-                // 取消/停机让整个任务终止,由队列按取消语义收敛。
-                FileError::Cancelled | FileError::ApplicationStopping => {
-                    return Err(error.to_string());
-                }
-                other => failures.push(format_conversion_failure(
-                    &other,
-                    bennu_localization::current_language(),
-                )),
+        match convert_file_with_controls(request, &controls).await {
+            Ok(converted) => outputs.push(converted.output),
+            // 取消/停机让整个任务终止,由队列按取消语义收敛。
+            Err(error @ (FileError::Cancelled | FileError::ApplicationStopping)) => {
+                return Err(error.to_string());
             }
+            Err(other) => failures.push(format_conversion_failure(
+                &other,
+                bennu_localization::current_language(),
+            )),
         }
         send_convert_progress(output, task_id, index + 1, total_items).await;
     }
@@ -40,7 +40,7 @@ pub(super) async fn run_queued_convert(
     if total_items > 0 && failures.len() == total_items {
         return Err(failures.join("; "));
     }
-    Ok(FileOperationOutcome::Convert { failures })
+    Ok(FileOperationOutcome::Convert { failures, outputs })
 }
 
 /// 能说清的原因按产生时的界面语言写；ffmpeg 等外部原话照抄。

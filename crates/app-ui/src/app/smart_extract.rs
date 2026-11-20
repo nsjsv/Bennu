@@ -1,71 +1,15 @@
-//! 右键解压：智能解压（bandizip 语义）与「解压到 <包名>/」。
+//! 右键解压：智能解压与「解压到 <包名>/」。
 //!
-//! 两项共用既有 inspect→密码→入队 管线；智能解压的唯一差异是
-//! 目的地由「单根判定 + 重名递增」计算得出。
+//! 两项共用既有 inspect→密码→入队 管线，区别只在落法（`ArchiveExtractionPlacement`）。
+//! 落在哪里由 file-core 在解压真正开始时定：排队期间同一个包可能已经被解过，
+//! 入队时看到的空位到那时不一定还空着；而且只放进原来没有的位置，从不解进已有的文件夹。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use file_core::ArchiveExtractionRequest;
+use file_core::{ArchiveExtractionPlacement, ArchiveExtractionRequest};
 
 use super::FileBrowser;
 use crate::model::Message;
-
-/// 智能解压目的地：包内所有成员在同一根目录下时直接落压缩包所在文件夹
-/// （目录已存在，解压管线直接解入）；否则新建「<包名>/」文件夹
-/// （已存在则追加 `(2)`、`(3)`… 序号）。
-///
-/// 目的地固定按压缩包父目录计算而不是视图当前目录：搜索结果等视图里
-/// 右键时，视图根目录不是用户预期的解压位置。
-pub(super) fn smart_extraction_destination(
-    archive: &Path,
-    single_root_name: Option<String>,
-    destination_exists: impl Fn(&Path) -> bool,
-) -> PathBuf {
-    let target_directory = archive.parent().unwrap_or_else(|| Path::new("."));
-    match single_root_name {
-        Some(_) => target_directory.to_path_buf(),
-        None => {
-            let base = target_directory.join(archive_folder_name(archive));
-            unique_folder_destination(base, 2, destination_exists)
-        }
-    }
-}
-
-/// 「解压到 <包名>/」的目的地：无条件在压缩包所在文件夹包一层，重名自动递增。
-pub(super) fn archive_folder_destination(
-    archive: &Path,
-    destination_exists: impl Fn(&Path) -> bool,
-) -> PathBuf {
-    let base = archive
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(archive_folder_name(archive));
-    unique_folder_destination(base, 2, destination_exists)
-}
-
-fn unique_folder_destination(
-    base: PathBuf,
-    start_counter: u32,
-    destination_exists: impl Fn(&Path) -> bool,
-) -> PathBuf {
-    let mut candidate = base.clone();
-    let mut counter = start_counter;
-    while destination_exists(&candidate) {
-        candidate = base.with_file_name(format!(
-            "{} ({counter})",
-            base.file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "archive".to_owned())
-        ));
-        counter += 1;
-    }
-    candidate
-}
-
-/// 剥掉压缩包扩展名作为落地文件夹名，与整包解压的默认目的地同一套规则。
-fn archive_folder_name(archive: &Path) -> std::ffi::OsString {
-    file_core::archive_folder_name(archive).unwrap_or_else(|| "archive".into())
-}
 
 impl FileBrowser {
     /// 解压只落在真实目录里：回收站不是目录，压缩包里只读。
@@ -75,42 +19,35 @@ impl FileBrowser {
         })
     }
 
-    /// 右键「智能解压到当前文件夹」入口：对每个选中的归档异步判定
-    /// 单根，判定结果回流后计算目的地并走既有 inspect→密码→入队 流。
+    /// 右键「智能解压到当前文件夹」。
     pub(super) fn smart_extract_selected(&mut self) -> iced::Task<Message> {
+        self.extract_selected_archives(ArchiveExtractionPlacement::Smart)
+    }
+
+    /// 右键「解压到 <包名>/」。
+    pub(super) fn extract_selected_to_archive_folder(&mut self) -> iced::Task<Message> {
+        self.extract_selected_archives(ArchiveExtractionPlacement::ArchiveFolder)
+    }
+
+    fn extract_selected_archives(
+        &mut self,
+        placement: ArchiveExtractionPlacement,
+    ) -> iced::Task<Message> {
         self.context_menu = None;
         if !self.current_location_accepts_extraction() {
             return iced::Task::none();
         }
-        let archives = self.archive_selection_paths();
-        if archives.is_empty() {
-            return iced::Task::none();
-        }
-        iced::Task::batch(
-            archives
-                .into_iter()
-                .map(|archive| {
-                    iced::Task::perform(
-                        async move {
-                            let single_root = file_core::single_root_member_name(&archive)
-                                .await
-                                .map_err(|error| error.to_string());
-                            (archive, single_root)
-                        },
-                        move |(archive, single_root)| Message::SmartExtractDestinationResolved {
-                            archive,
-                            single_root,
-                        },
-                    )
-                })
-                .collect::<Vec<_>>(),
-        )
+        let commands = self
+            .archive_selection_paths()
+            .into_iter()
+            .map(|archive| self.begin_archive_extraction(archive, placement))
+            .collect::<Vec<_>>();
+        iced::Task::batch(commands)
     }
 
     /// 中键点击压缩包条目的解压入口：与右键智能解压同一套入口契约
-    /// （先清右键菜单、同一守卫），随后走同一条单根判定流，只是来源是
-    /// 单条目而不是选中集合——不清选中集，中键解压不改变现有选择。
-    /// 被点击 pane 的激活在 update 分支完成，守卫因此按点击 pane 判定。
+    /// （先清右键菜单、同一守卫），只是来源是单条目而不是选中集合——不清选中集，
+    /// 中键解压不改变现有选择。被点击 pane 的激活在 update 分支完成，守卫因此按点击 pane 判定。
     pub(super) fn extract_archive_from_middle_click(
         &mut self,
         archive: PathBuf,
@@ -124,74 +61,16 @@ impl FileBrowser {
         if !file_core::is_supported_archive_path(&archive) {
             return iced::Task::none();
         }
-        iced::Task::perform(
-            async move {
-                let single_root = file_core::single_root_member_name(&archive)
-                    .await
-                    .map_err(|error| error.to_string());
-                (archive, single_root)
-            },
-            move |(archive, single_root)| Message::SmartExtractDestinationResolved {
-                archive,
-                single_root,
-            },
-        )
-    }
-
-    /// 智能解压判定回流：按单根/多根计算目的地后启动既有解压流。
-    pub(super) fn accept_smart_extract_destination(
-        &mut self,
-        archive: PathBuf,
-        single_root: Result<Option<String>, String>,
-    ) -> iced::Task<Message> {
-        let single_root_name = match single_root {
-            Ok(single_root) => single_root,
-            Err(error) => {
-                // 列成员失败（坏包/无 7z 命令）按多根语义落到包名文件夹，
-                // 让后续解压环节给出结构化错误，而不是静默丢弃。
-                tracing::warn!(
-                    target: "app_ui::archive_extraction",
-                    event = "smart_extract_listing_failed",
-                    error = %error,
-                    "smart extract fell back to the archive-named folder"
-                );
-                None
-            }
-        };
-        let destination = smart_extraction_destination(&archive, single_root_name, |candidate| {
-            candidate.is_dir()
-        });
-        self.begin_archive_extraction(archive, destination)
-    }
-
-    /// 右键「解压到 <包名>/」入口：无条件包一层后走既有解压流。
-    pub(super) fn extract_selected_to_archive_folder(&mut self) -> iced::Task<Message> {
-        self.context_menu = None;
-        if !self.current_location_accepts_extraction() {
-            return iced::Task::none();
-        }
-        let archives = self.archive_selection_paths();
-        if archives.is_empty() {
-            return iced::Task::none();
-        }
-        let commands = archives
-            .into_iter()
-            .map(|archive| {
-                let destination =
-                    archive_folder_destination(&archive, |candidate| candidate.is_dir());
-                self.begin_archive_extraction(archive, destination)
-            })
-            .collect::<Vec<_>>();
-        iced::Task::batch(commands)
+        self.begin_archive_extraction(archive, ArchiveExtractionPlacement::Smart)
     }
 
     fn begin_archive_extraction(
         &mut self,
         archive: PathBuf,
-        destination: PathBuf,
+        placement: ArchiveExtractionPlacement,
     ) -> iced::Task<Message> {
-        let request = match ArchiveExtractionRequest::from_archive_path(&archive, None) {
-            Ok(request) => request.with_destination(destination),
+        let request = match ArchiveExtractionRequest::new(archive, placement) {
+            Ok(request) => request,
             Err(error) => {
                 self.show_global_error(error.to_string());
                 return iced::Task::none();
@@ -209,45 +88,6 @@ mod tests {
     use super::*;
     use crate::model::BrowserLocation;
     use crate::model::BrowserPaneId;
-
-    fn no_existing(_: &Path) -> bool {
-        false
-    }
-
-    #[test]
-    fn single_root_extracts_into_archive_parent_directory() {
-        let destination = smart_extraction_destination(
-            Path::new("/home/u/docs/photos.zip"),
-            Some("photos".to_owned()),
-            no_existing,
-        );
-        assert_eq!(destination, PathBuf::from("/home/u/docs"));
-    }
-
-    #[test]
-    fn scattered_members_create_archive_named_folder_beside_archive() {
-        let destination =
-            smart_extraction_destination(Path::new("/home/u/docs/photos.zip"), None, no_existing);
-        assert_eq!(destination, PathBuf::from("/home/u/docs/photos"));
-    }
-
-    #[test]
-    fn duplicate_destination_appends_counter() {
-        let destination =
-            smart_extraction_destination(Path::new("/home/u/docs/photos.zip"), None, |candidate| {
-                candidate
-                    .file_name()
-                    .is_none_or(|name| name != "photos (3)")
-            });
-        assert_eq!(destination, PathBuf::from("/home/u/docs/photos (3)"));
-    }
-
-    #[test]
-    fn archive_folder_destination_always_wraps_a_layer() {
-        let destination =
-            archive_folder_destination(Path::new("/home/u/docs/photos.zip"), no_existing);
-        assert_eq!(destination, PathBuf::from("/home/u/docs/photos"));
-    }
 
     fn browser() -> FileBrowser {
         FileBrowser::new(crate::config::default_user_config()).0
@@ -269,12 +109,14 @@ mod tests {
     #[test]
     fn extract_archive_from_middle_click_noops_inside_archive() {
         let mut browser = browser();
-        // 把当前目录指到压缩包路径上即可让 archive_path_identity 判定
-        // 进入包内/包根语义，无需真实文件存在。
-        browser.tab_mut().location =
-            BrowserLocation::Directory(PathBuf::from("/workspace/bundle.zip"));
+        // archive_path_identity 认的是真实存在的压缩包文件：路径不存在时它就是普通路径，
+        // 这里的守卫也就拦不住，所以要真的放一个文件。
+        let directory = tempfile::tempdir().expect("temp dir");
+        let archive = directory.path().join("bundle.zip");
+        std::fs::write(&archive, b"PK\x05\x06").expect("write archive");
+        browser.tab_mut().location = BrowserLocation::Directory(archive.clone());
 
-        drop(browser.extract_archive_from_middle_click(PathBuf::from("/workspace/bundle.zip")));
+        drop(browser.extract_archive_from_middle_click(archive));
 
         // 包内只读：解压目的地落在虚拟路径上没有意义，无动作。
         assert!(browser.archive_extraction.is_none());

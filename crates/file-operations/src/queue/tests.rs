@@ -1450,11 +1450,11 @@ fn transient_operation_driver_is_never_restarted() {
 #[test]
 fn archive_tasks_offer_pause_but_format_conversion_does_not() {
     let extract = QueuedFileOperation::ExtractArchive {
-        request: file_core::ArchiveExtractionRequest {
-            archive: PathBuf::from("/tmp/a.7z"),
-            destination: PathBuf::from("/tmp/a"),
-            password: None,
-        },
+        request: file_core::ArchiveExtractionRequest::new(
+            "/tmp/a.7z",
+            file_core::ArchiveExtractionPlacement::Smart,
+        )
+        .unwrap(),
     };
     let create = QueuedFileOperation::CreateArchive {
         sources: vec![PathBuf::from("/tmp/a")],

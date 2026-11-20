@@ -103,6 +103,16 @@ pub enum FileOperationOutcome {
     Convert {
         /// 逐文件失败的「源名: 原因」清单;空表示全部成功。
         failures: Vec<String>,
+        /// 转换出来的文件，按请求的顺序。撤销转换就是把它们移到回收站。
+        outputs: Vec<PathBuf>,
+    },
+    /// 新建的压缩包。撤销就是把它移到回收站。
+    CreatedArchive {
+        archive: PathBuf,
+    },
+    /// 解压放出来的那一项（压缩包旁边的顶层文件夹，或者新建的包名文件夹）。
+    Extracted {
+        placed: PathBuf,
     },
 }
 
@@ -221,7 +231,7 @@ impl FileOperationOutcome {
             ));
         }
 
-        let Self::Convert { failures } = self else {
+        let Self::Convert { failures, .. } = self else {
             return None;
         };
         if failures.is_empty() {
@@ -312,7 +322,9 @@ impl FileOperationOutcome {
             | Self::Copy { .. }
             | Self::GatheredIntoNewFolder { .. }
             | Self::NewFolderUngathered { .. }
-            | Self::Convert { .. } => Vec::new(),
+            | Self::Convert { .. }
+            | Self::CreatedArchive { .. }
+            | Self::Extracted { .. } => Vec::new(),
         }
     }
 }

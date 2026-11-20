@@ -20,7 +20,7 @@ pub(super) fn archive_extraction_panel(state: &ArchiveExtractionState) -> Elemen
     Dialog::new(tr!("Extract Archive"), body)
         .subtitle(dialog::into_subtitle(
             &dialog::path_name(&request.archive),
-            &request.destination,
+            &request.landing_directory,
         ))
         .actions(archive_extraction_actions(state))
         .into()

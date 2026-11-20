@@ -44,16 +44,33 @@ pub(super) async fn create(request: ArchiveCreationRequest) -> Vec<ArchiveProgre
     updates
 }
 
-pub(super) async fn extract(request: ArchiveExtractionRequest) -> Vec<ArchiveProgress> {
+pub(super) struct Extraction {
+    pub(super) placed: PathBuf,
+    pub(super) progress: Vec<ArchiveProgress>,
+}
+
+pub(super) async fn extract(request: ArchiveExtractionRequest) -> Extraction {
     let updates = Arc::new(Mutex::new(Vec::new()));
     let captured = updates.clone();
-    extract_archive_with_progress(request, CancellationToken::new(), move |progress| {
-        captured.lock().unwrap().push(progress)
-    })
-    .await
-    .unwrap();
-    let updates = updates.lock().unwrap().clone();
-    updates
+    let extracted =
+        extract_archive_with_progress(request, CancellationToken::new(), move |progress| {
+            captured.lock().unwrap().push(progress)
+        })
+        .await
+        .unwrap();
+    let progress = updates.lock().unwrap().clone();
+    Extraction {
+        placed: extracted.placed,
+        progress,
+    }
+}
+
+pub(super) fn into_archive_folder(archive: &Path) -> ArchiveExtractionRequest {
+    ArchiveExtractionRequest::new(archive, ArchiveExtractionPlacement::ArchiveFolder).unwrap()
+}
+
+pub(super) fn smart(archive: &Path) -> ArchiveExtractionRequest {
+    ArchiveExtractionRequest::new(archive, ArchiveExtractionPlacement::Smart).unwrap()
 }
 
 /// (已处理字节, 总字节, 已完成条目, 条目总数)。外部命令都按字节报进度。
@@ -136,17 +153,12 @@ async fn zip_round_trip_lists_extracts_and_opens_members_with_seven_zip() {
     assert_eq!(root.len, 300_000);
     assert!(root.modified.is_some());
 
-    let extraction_request = ArchiveExtractionRequest::from_archive_path(&archive, None).unwrap();
-    let extraction = extract(extraction_request.clone()).await;
-    assert_monotonic(&extraction);
+    let extraction = extract(into_archive_folder(&archive)).await;
+    assert_monotonic(&extraction.progress);
     assert_eq!(
-        fs::read(
-            extraction_request
-                .destination
-                .join("source/nested/中文.txt")
-        )
-        .unwrap()
-        .len(),
+        fs::read(extraction.placed.join("source/nested/中文.txt"))
+            .unwrap()
+            .len(),
         200_000
     );
 
@@ -198,13 +210,8 @@ async fn gbk_named_zip_shows_extracts_and_opens_chinese_names() {
         ]
     );
 
-    let destination = dir.path().join("out");
-    extract(ArchiveExtractionRequest {
-        archive: archive.clone(),
-        destination: destination.clone(),
-        password: None,
-    })
-    .await;
+    let destination = extract(into_archive_folder(&archive)).await.placed;
+    assert_eq!(destination, dir.path().join("windows"));
     assert_eq!(
         fs::read_to_string(destination.join("项目资料/年度工作总结报告.txt")).unwrap(),
         "内容：项目资料/年度工作总结报告.txt"
@@ -307,10 +314,8 @@ async fn aes_zip_password_check_extraction_and_member_open() {
         Some("secret"),
     ))
     .await;
-    let with_password = |password: Option<&str>| ArchiveExtractionRequest {
-        archive: archive.clone(),
-        destination: dir.path().join("locked-out"),
-        password: password.and_then(ArchivePassword::new),
+    let with_password = |password: Option<&str>| {
+        into_archive_folder(&archive).with_password(password.and_then(ArchivePassword::new))
     };
 
     assert!(matches!(
@@ -326,7 +331,7 @@ async fn aes_zip_password_check_extraction_and_member_open() {
         .unwrap();
     extract(with_password(Some("secret"))).await;
     assert_eq!(
-        fs::read(dir.path().join("locked-out/source/root.txt"))
+        fs::read(dir.path().join("locked/source/root.txt"))
             .unwrap()
             .len(),
         300_000
@@ -347,8 +352,60 @@ async fn aes_zip_password_check_extraction_and_member_open() {
     assert_eq!(fs::read(opened).unwrap().len(), 300_000);
 }
 
+/// 包里只有一个顶层文件夹、而它在压缩包旁边还没有：直接放在压缩包旁边，不多包一层。
 #[tokio::test]
-async fn zip_extraction_into_existing_destination_succeeds() {
+async fn smart_extraction_puts_a_free_single_folder_beside_the_archive() {
+    if !seven_zip_available() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let payload = write_payload(dir.path());
+    let archive = dir.path().join("bundle.zip");
+    create(request(
+        vec![payload.clone()],
+        &archive,
+        ArchiveFormat::Zip,
+        None,
+    ))
+    .await;
+    fs::remove_dir_all(&payload).unwrap();
+
+    let extraction = extract(smart(&archive)).await;
+
+    assert_eq!(extraction.placed, payload);
+    assert_eq!(fs::read(payload.join("root.txt")).unwrap().len(), 300_000);
+}
+
+/// 同名文件夹已经在了：不解进去（解进去会盖掉同名文件），改放进新建的包名文件夹。
+#[tokio::test]
+async fn smart_extraction_never_writes_into_an_existing_folder() {
+    if !seven_zip_available() {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let source = dir.path().join("source");
+    let photos = source.join("photos");
+    fs::create_dir_all(&photos).unwrap();
+    fs::write(photos.join("a.jpg"), b"from the archive").unwrap();
+    let archive = dir.path().join("photos.zip");
+    create(request(vec![photos], &archive, ArchiveFormat::Zip, None)).await;
+    let existing = dir.path().join("photos");
+    fs::create_dir(&existing).unwrap();
+    fs::write(existing.join("a.jpg"), b"mine").unwrap();
+
+    let extraction = extract(smart(&archive)).await;
+
+    assert_eq!(fs::read(existing.join("a.jpg")).unwrap(), b"mine");
+    assert_eq!(extraction.placed, dir.path().join("photos 2"));
+    assert_eq!(
+        fs::read(extraction.placed.join("photos/a.jpg")).unwrap(),
+        b"from the archive"
+    );
+}
+
+/// 散开的成员包一层；同一个包解两次，第二次放进新的文件夹，不解进第一次的结果。
+#[tokio::test]
+async fn extraction_always_lands_in_a_new_folder_when_not_beside_the_archive() {
     if !seven_zip_available() {
         return;
     }
@@ -358,29 +415,29 @@ async fn zip_extraction_into_existing_destination_succeeds() {
     let archive = dir.path().join("note.zip");
     create(request(vec![source], &archive, ArchiveFormat::Zip, None)).await;
 
-    // 智能解压单根语义：目的地是已存在的目录（如压缩包所在文件夹）。
-    let destination = dir.path().join("already-there");
-    fs::create_dir(&destination).unwrap();
-    fs::write(destination.join("keep.txt"), b"keep").unwrap();
-    extract(ArchiveExtractionRequest {
-        archive,
-        destination: destination.clone(),
-        password: None,
-    })
-    .await;
+    let first = extract(smart(&archive)).await;
+    fs::write(first.placed.join("note.txt"), b"edited").unwrap();
+    let second = extract(into_archive_folder(&archive)).await;
 
-    assert_eq!(fs::read(destination.join("keep.txt")).unwrap(), b"keep");
-    assert_eq!(fs::read(destination.join("note.txt")).unwrap(), b"content");
+    assert_eq!(first.placed, dir.path().join("note"));
+    assert_eq!(second.placed, dir.path().join("note 2"));
+    assert_eq!(fs::read(first.placed.join("note.txt")).unwrap(), b"edited");
+    assert_eq!(
+        fs::read(second.placed.join("note.txt")).unwrap(),
+        b"content"
+    );
 }
 
+/// 和顶层文件夹同名的是个普通文件：它原样留着，解出来的放进新文件夹。
 #[tokio::test]
-async fn failed_zip_extraction_keeps_pre_existing_destination() {
+async fn smart_extraction_leaves_an_entry_named_like_the_root_alone() {
     if !seven_zip_available() {
         return;
     }
     let dir = tempdir().unwrap();
-    let payload_dir = dir.path().join("payload");
-    fs::create_dir(&payload_dir).unwrap();
+    let source = dir.path().join("source");
+    let payload_dir = source.join("payload");
+    fs::create_dir_all(&payload_dir).unwrap();
     fs::write(payload_dir.join("inner.txt"), b"inner").unwrap();
     let archive = dir.path().join("payload.zip");
     create(request(
@@ -390,26 +447,16 @@ async fn failed_zip_extraction_keeps_pre_existing_destination() {
         None,
     ))
     .await;
+    let occupied = dir.path().join("payload");
+    fs::write(&occupied, b"precious").unwrap();
 
-    // 目的地已存在且内有同名普通文件，解压建目录必然失败；
-    // 目录不是本次创建的，失败后必须原样保留。
-    let destination = dir.path().join("occupied");
-    fs::create_dir(&destination).unwrap();
-    fs::write(destination.join("payload"), b"precious").unwrap();
+    let extraction = extract(smart(&archive)).await;
 
-    let outcome = extract_archive_with_progress(
-        ArchiveExtractionRequest {
-            archive,
-            destination: destination.clone(),
-            password: None,
-        },
-        CancellationToken::new(),
-        |_| {},
-    )
-    .await;
-
-    assert!(outcome.is_err());
-    assert_eq!(fs::read(destination.join("payload")).unwrap(), b"precious");
+    assert_eq!(fs::read(&occupied).unwrap(), b"precious");
+    assert_eq!(
+        fs::read(extraction.placed.join("payload/inner.txt")).unwrap(),
+        b"inner"
+    );
 }
 
 #[cfg(unix)]
@@ -507,22 +554,17 @@ async fn seven_zip_creation_and_extraction_report_byte_progress() {
         .iter()
         .all(|progress| matches!(byte_counts(progress), (_, 500_000, _, Some(4)))));
 
-    let destination = dir.path().join("plain-out");
-    let extraction = extract(ArchiveExtractionRequest {
-        archive,
-        destination: destination.clone(),
-        password: None,
-    })
-    .await;
+    let extraction = extract(into_archive_folder(&archive)).await;
 
     assert_eq!(
-        fs::read(destination.join("source/nested/中文.txt"))
+        fs::read(extraction.placed.join("source/nested/中文.txt"))
             .unwrap()
             .len(),
         200_000
     );
-    assert_monotonic(&extraction);
+    assert_monotonic(&extraction.progress);
     assert!(extraction
+        .progress
         .iter()
         .all(|progress| matches!(byte_counts(progress), (_, 500_000, _, Some(4)))));
 }
@@ -559,10 +601,8 @@ async fn seven_zip_password_check_tells_missing_wrong_and_right_passwords_apart(
     assert!(status.success());
 
     for archive in [header_encrypted, content_only] {
-        let with_password = |password: Option<&str>| ArchiveExtractionRequest {
-            archive: archive.clone(),
-            destination: dir.path().join("locked-out"),
-            password: password.and_then(ArchivePassword::new),
+        let with_password = |password: Option<&str>| {
+            into_archive_folder(&archive).with_password(password.and_then(ArchivePassword::new))
         };
         assert!(matches!(
             inspect_archive_extraction(with_password(None), CancellationToken::new()).await,
@@ -597,14 +637,10 @@ async fn failed_seven_zip_extraction_keeps_its_output() {
     .await;
     let bytes = fs::read(&archive).unwrap();
     fs::write(&archive, &bytes[..bytes.len() / 2]).unwrap();
-    let destination = dir.path().join("broken-out");
+    let destination = dir.path().join("broken");
 
     let outcome = extract_archive_with_progress(
-        ArchiveExtractionRequest {
-            archive,
-            destination: destination.clone(),
-            password: None,
-        },
+        into_archive_folder(&archive),
         CancellationToken::new(),
         |_| {},
     )

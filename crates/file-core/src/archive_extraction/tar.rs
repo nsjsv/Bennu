@@ -1,21 +1,22 @@
 //! tar 一类整包解压：本进程读包文件、送进 `tar -x -f -` 的 stdin。进度按送进去的包字节算，
 //! 对任何压缩方式都准；暂停就停送，取消就杀掉 tar。tar 自己挡住 `..` 和绝对路径的条目。
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use super::{ensure_destination_directory, ArchiveExtractionRequest};
+use super::{extraction_target, reject_tar_password, ArchiveExtractionRequest, ExtractionTarget};
+use crate::archive_listing::list_tar_members;
 use crate::tar_job::{collect_output, pump_with_controls, tar_command, tar_failure, PumpFailure};
 use crate::{ArchiveProgress, FileError, FileOperationControls};
 
 pub(super) async fn extract_tar_archive(
-    request: ArchiveExtractionRequest,
+    request: &ArchiveExtractionRequest,
     mut controls: FileOperationControls,
     mut progress: impl FnMut(ArchiveProgress),
-) -> Result<PathBuf, FileError> {
+) -> Result<ExtractionTarget, FileError> {
+    reject_tar_password(request)?;
     let archive_error = |source: std::io::Error| FileError::Archive {
         path: request.archive.clone(),
         message: source.to_string(),
@@ -28,16 +29,24 @@ pub(super) async fn extract_tar_archive(
     let decompress = decompress_option(&mut archive)
         .await
         .map_err(archive_error)?;
-    ensure_destination_directory(&request.destination)?;
+    let target = extraction_target(request, async {
+        list_tar_members(&request.archive).await.ok()
+    })
+    .await?;
 
     let mut command = tar_command();
     command.arg("-x").arg("-v").arg("--no-same-owner");
+    if let ExtractionTarget::BesideArchive { .. } = target {
+        // 解进已有的文件夹时遇到已有文件就报错停下，不覆盖。新建的空文件夹里不加：
+        // 追加过的 tar 里同一路径可以出现多次，后面的本来就该替换前面的。
+        command.arg("--keep-old-files");
+    }
     command.args(decompress);
     let mut child = command
         .arg("-f")
         .arg("-")
         .arg("-C")
-        .arg(&request.destination)
+        .arg(target.directory())
         .stdin(std::process::Stdio::piped())
         .spawn()
         .map_err(|source| FileError::Archive {
@@ -92,7 +101,7 @@ pub(super) async fn extract_tar_archive(
         return Err(tar_failure(&request.archive, status, &stderr));
     }
     report(&mut progress, total_bytes);
-    Ok(request.destination)
+    Ok(target)
 }
 
 /// `-v` 每解一个条目在 stdout 打一行名字（与错误分开，错误在 stderr）；目录以 `/` 结尾，不计。

@@ -247,10 +247,10 @@ impl FileBrowser {
         completion: FileOperationCompletion,
     ) -> Task<Message> {
         let completed_operation = self.operation_queue.operation(task_id).cloned();
-        self.super_box_task_ended(task_id, &completion);
+        let super_box_ended = self.super_box_task_ended(task_id, &completion);
         let queue_outcome = queue_finish_from_completion(&completion);
         let Some(terminal_status) = self.operation_queue.finish(task_id, queue_outcome) else {
-            return Task::none();
+            return super_box_ended;
         };
 
         let completed_successfully = matches!(completion, FileOperationCompletion::Succeeded(_));
@@ -265,7 +265,7 @@ impl FileBrowser {
 
         // 入队前定下的收尾动作(进入/新标签进入/只选中)替代默认的重命名态;
         // 历史重放和动作不消费收尾意图;创建失败时丢弃,避免遗留到无关操作。
-        let mut tasks: Vec<Task<Message>> = Vec::new();
+        let mut tasks: Vec<Task<Message>> = vec![super_box_ended];
         let creates_entry = completed_operation.as_ref().is_some_and(|operation| {
             matches!(
                 operation,

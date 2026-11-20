@@ -364,6 +364,8 @@ pub(crate) struct UserConfig {
     pub(crate) super_box_history: crate::super_box::SuperBoxHistory,
     /// 超级输入框打开时的模式。
     pub(crate) super_box_mode: crate::super_box::BoxMode,
+    /// 多栏视图里回车打开超级输入框找到的文件时去哪。
+    pub(crate) super_box_found_in_columns: crate::super_box::FoundInColumns,
     /// 最近一次搜索的范围记忆；打开下一个搜索工作区时恢复为默认档。
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
@@ -516,6 +518,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         search_history: SearchHistory::default(),
         super_box_history: Default::default(),
         super_box_mode: crate::super_box::BoxMode::Search,
+        super_box_found_in_columns: crate::super_box::FoundInColumns::ExpandFromFirstColumn,
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
@@ -578,6 +581,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         search_history: SearchHistory::default(),
         super_box_history: Default::default(),
         super_box_mode: crate::super_box::BoxMode::Search,
+        super_box_found_in_columns: crate::super_box::FoundInColumns::ExpandFromFirstColumn,
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,

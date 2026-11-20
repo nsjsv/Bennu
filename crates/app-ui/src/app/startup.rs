@@ -119,6 +119,7 @@ impl FileBrowser {
                     self.continue_file_operation_persistence(),
                     self.launch_ready_driver(),
                     self.load_transfer_history(),
+                    self.load_past_super_box_runs(),
                 ]);
             }
             Err(error) => {

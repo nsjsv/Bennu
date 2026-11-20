@@ -148,6 +148,9 @@ pub(crate) struct StoredUserPreferences {
     /// 超级输入框打开时的模式（`search` / `path`）；None = 旧版本数据。
     #[serde(default)]
     pub super_box_mode: Option<String>,
+    /// 多栏视图里回车打开找到的文件时去哪（`expand` / `folder_first` / `open`）；None = 旧版本数据。
+    #[serde(default)]
+    pub super_box_found_in_columns: Option<String>,
 }
 
 /// 收藏设备条目:fingerprint 是 LocalSend 设备身份(证书指纹)。
@@ -259,6 +262,7 @@ impl Default for StoredUserPreferences {
             convert_defaults: None,
             super_box_history: Vec::new(),
             super_box_mode: None,
+            super_box_found_in_columns: None,
         }
     }
 }

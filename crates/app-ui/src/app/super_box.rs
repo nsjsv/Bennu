@@ -39,6 +39,9 @@ pub(crate) enum SuperBoxMessage {
     },
     /// 命令模式的停止按钮。
     StopPressed,
+    PastRunsLoaded(Result<Vec<crate::super_box::PastRun>, String>),
+    /// 记命令结果没写进状态库时是原因。
+    PastRunSaved(Option<String>),
 }
 
 pub(crate) fn super_box_input_id() -> iced::widget::Id {
@@ -62,6 +65,21 @@ impl FileBrowser {
                 outcome,
             } => self.accept_super_box_found(generation, *outcome),
             SuperBoxMessage::StopPressed => self.stop_super_box_command(),
+            SuperBoxMessage::PastRunsLoaded(loaded) => {
+                self.accept_past_super_box_runs(loaded);
+                Task::none()
+            }
+            SuperBoxMessage::PastRunSaved(None) => Task::none(),
+            // 只是重启后看不到这次的输出，不打断用户。
+            SuperBoxMessage::PastRunSaved(Some(error)) => {
+                tracing::warn!(
+                    target: "app_ui::super_box",
+                    event = "command_run_not_saved",
+                    error = %error,
+                    "a command result could not be saved"
+                );
+                Task::none()
+            }
             SuperBoxMessage::RowPressed(index) => {
                 if let Some(super_box) = &mut self.super_box {
                     super_box.select(index);
@@ -104,6 +122,18 @@ impl FileBrowser {
             return Task::none();
         }
         self.user_config.super_box_mode = mode;
+        self.persist_user_preferences_command()
+    }
+
+    /// 设置页“多栏视图里打开找到的文件”。
+    pub(super) fn select_super_box_found_in_columns(
+        &mut self,
+        choice: crate::super_box::FoundInColumns,
+    ) -> Task<Message> {
+        if self.user_config.super_box_found_in_columns == choice {
+            return Task::none();
+        }
+        self.user_config.super_box_found_in_columns = choice;
         self.persist_user_preferences_command()
     }
 

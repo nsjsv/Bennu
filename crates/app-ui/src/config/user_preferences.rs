@@ -84,6 +84,7 @@ pub(crate) struct UserPreferences {
     pub(crate) search_history: crate::model::SearchHistory,
     pub(crate) super_box_history: crate::super_box::SuperBoxHistory,
     pub(crate) super_box_mode: crate::super_box::BoxMode,
+    pub(crate) super_box_found_in_columns: crate::super_box::FoundInColumns,
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
@@ -148,6 +149,7 @@ impl UserPreferences {
             search_history: config.search_history.clone(),
             super_box_history: config.super_box_history.clone(),
             super_box_mode: config.super_box_mode,
+            super_box_found_in_columns: config.super_box_found_in_columns,
             last_search_scope: config.last_search_scope.clone(),
             theme_mode: config.theme_mode,
             color_scheme: config.color_scheme,
@@ -207,6 +209,7 @@ impl UserPreferences {
         config.search_history = self.search_history.clone();
         config.super_box_history = self.super_box_history.clone();
         config.super_box_mode = self.super_box_mode;
+        config.super_box_found_in_columns = self.super_box_found_in_columns;
         config.last_search_scope = self.last_search_scope.clone();
         config.theme_mode = self.theme_mode;
         config.color_scheme = self.color_scheme;
@@ -308,6 +311,8 @@ impl UserPreferences {
         stored.search_history = self.search_history.entries().to_vec();
         stored.super_box_history = self.super_box_history.entries().to_vec();
         stored.super_box_mode = Some(self.super_box_mode.config_value().to_owned());
+        stored.super_box_found_in_columns =
+            Some(self.super_box_found_in_columns.config_value().to_owned());
         stored.last_search_scope = self.last_search_scope.as_ref().map(|scope| match scope {
             LastSearchScope::Global => StoredLastSearchScope::Global,
             LastSearchScope::Directory(path) => StoredLastSearchScope::Directory {
@@ -522,6 +527,15 @@ impl UserPreferences {
             super_box_history: crate::super_box::SuperBoxHistory::from_persisted(
                 stored.super_box_history.clone(),
             ),
+            // None = 旧版本数据，用默认值。
+            super_box_found_in_columns: match stored.super_box_found_in_columns.as_deref() {
+                None => default_preferences.super_box_found_in_columns,
+                Some(value) => unrecognized.value_or_default(
+                    "super_box_found_in_columns",
+                    crate::super_box::FoundInColumns::from_config_value(value),
+                    default_preferences.super_box_found_in_columns,
+                ),
+            },
             // None = 旧版本数据，用默认的搜索。
             super_box_mode: match stored.super_box_mode.as_deref() {
                 None => default_preferences.super_box_mode,

@@ -502,6 +502,7 @@ pub(crate) enum Message {
     LetterInputDeadlinePassed,
     LetterModeSelected(crate::shortcuts::LetterMode),
     SuperBoxDefaultModeSelected(crate::super_box::BoxMode),
+    SuperBoxFoundInColumnsSelected(crate::super_box::FoundInColumns),
     ShortcutCaptureStarted(crate::shortcuts::ShortcutTarget, CaptureSlot),
     ShortcutCaptureCanceled,
     ShortcutCapturedKeyRemoved,

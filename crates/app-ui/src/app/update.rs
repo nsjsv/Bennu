@@ -583,6 +583,9 @@ impl FileBrowser {
             }
             Message::LetterModeSelected(mode) => self.select_letter_mode(mode),
             Message::SuperBoxDefaultModeSelected(mode) => self.select_super_box_default_mode(mode),
+            Message::SuperBoxFoundInColumnsSelected(choice) => {
+                self.select_super_box_found_in_columns(choice)
+            }
             Message::ShortcutCaptureStarted(action, slot) => {
                 self.start_shortcut_capture(action, slot)
             }

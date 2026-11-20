@@ -274,7 +274,7 @@ async fn a_command_gets_the_selection_as_arguments_and_shows_its_output() {
     );
     assert!(!root.join("pwned").exists() && !root.join("pwned2").exists());
     match run_state(&browser) {
-        crate::super_box::RunState::Finished(output) => {
+        crate::super_box::RunState::Ended(crate::super_box::RunEnd::Finished(output)) => {
             assert_eq!(output.text, "bennu has 1\ncareful");
         }
         other => panic!("{other:?}"),
@@ -297,7 +297,7 @@ async fn a_failing_command_says_why_in_the_box() {
     let mut browser = browser_listing(&root).await;
     type_and_run(&mut browser, "s:echo broken >&2; exit 3").await;
     match run_state(&browser) {
-        crate::super_box::RunState::Failed(reason) => {
+        crate::super_box::RunState::Ended(crate::super_box::RunEnd::Failed(reason)) => {
             assert!(
                 reason.contains('3') && reason.contains("broken"),
                 "{reason}"
@@ -447,4 +447,160 @@ async fn ctrl_enter_does_not_also_run_the_selected_result() {
 
     assert!(browser.active_search().is_some(), "the search page is open");
     assert_eq!(browser.user_config.super_box_history.entries(), ["f:找到"]);
+}
+
+fn file_hit(path: &Path) -> file_search::SearchHit {
+    file_search::SearchHit {
+        path: path.to_path_buf(),
+        display_name: path.file_name().unwrap().to_string_lossy().into_owned(),
+        kind: file_search::SearchFileKind::File,
+        size: 0,
+        modified_ms: None,
+        accessed_ms: None,
+        created_ms: None,
+        rank: 1.0,
+        snippet: None,
+        match_source: file_search::MatchSource::Name,
+    }
+}
+
+/// 在框里“找到”这个文件并按回车（不走搜索服务，结果直接交给框）。
+async fn open_found(browser: &mut FileBrowser, file: &Path) {
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    send(browser, SuperBoxMessage::InputChanged("f:x".to_owned())).await;
+    let generation = browser.super_box.as_ref().unwrap().generation();
+    drop(browser.accept_super_box_found(
+        generation,
+        crate::model::IndexedSearchOutcome::Batch(file_search::SearchResultBatch {
+            query_id: generation,
+            hits: vec![file_hit(file)],
+            next_cursor: None,
+            finished: true,
+        }),
+    ));
+    enter(browser).await;
+}
+
+fn nested_tree() -> (tempfile::TempDir, PathBuf) {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    std::fs::create_dir_all(root.join("work/proj/src")).unwrap();
+    std::fs::create_dir_all(root.join("work/docs")).unwrap();
+    std::fs::write(root.join("work/proj/src/main.rs"), b"fn main() {}").unwrap();
+    std::fs::write(root.join("work/docs/a.md"), b"# a").unwrap();
+    (directory, root)
+}
+
+#[tokio::test]
+async fn in_columns_a_found_file_opens_column_by_column_from_the_first_one() {
+    let (_directory, root) = nested_tree();
+    let mut browser = browser_listing(&root.join("work")).await;
+    assert_eq!(
+        browser.tab().view_mode(),
+        crate::model::BrowserViewMode::Columns
+    );
+
+    open_found(&mut browser, &root.join("work/proj/src/main.rs")).await;
+
+    assert!(browser.super_box.is_none());
+    assert_eq!(
+        crate::three_column_view::column_directories(&browser),
+        [
+            root.join("work"),
+            root.join("work/proj"),
+            root.join("work/proj/src")
+        ]
+    );
+    assert!(browser.is_path_selected(&root.join("work/proj/src/main.rs")));
+    assert!(browser
+        .entry_for_path(&root.join("work/proj/src/main.rs"))
+        .is_some());
+}
+
+#[tokio::test]
+async fn in_columns_a_file_elsewhere_opens_from_the_common_folder() {
+    let (_directory, root) = nested_tree();
+    let mut browser = browser_listing(&root.join("work/proj")).await;
+
+    open_found(&mut browser, &root.join("work/docs/a.md")).await;
+
+    assert_eq!(
+        crate::three_column_view::column_directories(&browser),
+        [root.join("work"), root.join("work/docs")]
+    );
+    assert!(browser.is_path_selected(&root.join("work/docs/a.md")));
+}
+
+#[tokio::test]
+async fn the_setting_can_make_its_folder_the_first_column() {
+    let (_directory, root) = nested_tree();
+    let mut browser = browser_listing(&root.join("work")).await;
+    browser.user_config.super_box_found_in_columns =
+        crate::super_box::FoundInColumns::FolderAsFirstColumn;
+
+    open_found(&mut browser, &root.join("work/proj/src/main.rs")).await;
+
+    assert_eq!(
+        crate::three_column_view::column_directories(&browser),
+        [root.join("work/proj/src")]
+    );
+    assert!(browser.is_path_selected(&root.join("work/proj/src/main.rs")));
+}
+
+#[tokio::test]
+async fn other_views_open_the_folder_and_select_the_file() {
+    let (_directory, root) = nested_tree();
+    let mut browser = browser_listing(&root.join("work")).await;
+    drop(browser.select_browser_view_mode(
+        browser.active_pane_id(),
+        crate::model::BrowserViewMode::List,
+    ));
+    // 多栏视图的设置在别的视图里不起作用。
+    browser.user_config.super_box_found_in_columns = crate::super_box::FoundInColumns::OpenFile;
+
+    open_found(&mut browser, &root.join("work/proj/src/main.rs")).await;
+
+    assert_eq!(
+        browser.tab().location,
+        BrowserLocation::Directory(root.join("work/proj/src"))
+    );
+    assert!(browser.is_path_selected(&root.join("work/proj/src/main.rs")));
+}
+
+#[tokio::test]
+async fn a_command_result_is_kept_even_when_the_box_was_closed() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let mut browser = browser_listing(&root).await;
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    send(
+        &mut browser,
+        SuperBoxMessage::InputChanged("s:echo kept".to_owned()),
+    )
+    .await;
+    let enter_key = iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter);
+    let queued = browser
+        .super_box_key(&enter_key, iced::keyboard::Modifiers::empty())
+        .unwrap();
+    drop(browser.update(Message::DismissFloating));
+    drive(&mut browser, queued).await;
+
+    let past = browser
+        .super_box_commands
+        .past("echo kept")
+        .expect("the result is remembered");
+    match &past.end {
+        crate::super_box::RunEnd::Finished(output) => assert_eq!(output.text, "kept"),
+        other => panic!("{other:?}"),
+    }
+
+    // 命令模式里选中这条历史就能看到它（框重新打开，历史行是它）。
+    drop(browser.invoke_shortcut(ShortcutAction::OpenSuperBox));
+    for _ in 0..4 {
+        send(&mut browser, SuperBoxMessage::ModePressed).await;
+    }
+    assert_eq!(
+        browser.super_box.as_ref().unwrap().selected_row(),
+        Some(&crate::super_box::BoxRow::History("s:echo kept".to_owned()))
+    );
 }

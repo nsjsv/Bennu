@@ -250,11 +250,30 @@ fn super_box_settings_card(browser: &FileBrowser) -> Element<'_, Message> {
         ),
         None => tr!("Tab switches the mode while the super box is open."),
     };
-    settings_card(vec![choice_row(
-        tr!("Super Box Opens In"),
-        Some(RowNote::Hint(hint)),
-        choices,
-    )])
+    let found_in_columns = browser.user_config().super_box_found_in_columns;
+    let found_choices = crate::super_box::FoundInColumns::ALL
+        .into_iter()
+        .map(|choice| SegmentedChoice {
+            label: choice.label(),
+            selected: choice == found_in_columns,
+            message: Some(Message::SuperBoxFoundInColumnsSelected(choice)),
+            tooltip: None,
+        })
+        .collect();
+    settings_card(vec![
+        choice_row(
+            tr!("Super Box Opens In"),
+            Some(RowNote::Hint(hint)),
+            choices,
+        ),
+        choice_row(
+            tr!("Opening a Found File in Columns View"),
+            Some(RowNote::Hint(tr!(
+                "Other views always open its folder and select it."
+            ))),
+            found_choices,
+        ),
+    ])
 }
 
 fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {

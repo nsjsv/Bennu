@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use super::super_box::SuperBoxMessage;
 use super::FileBrowser;
-use crate::model::{IndexedSearchOutcome, Message, NavigationMode};
-use crate::super_box::{BoxLookup, BoxMode};
+use crate::model::{BrowserViewMode, IndexedSearchOutcome, Message, NavigationMode};
+use crate::super_box::{BoxLookup, BoxMode, FoundInColumns};
 
 /// 打字停这么久才查：连着打的时候不发一串查询。
 const FIND_PAUSE: Duration = Duration::from_millis(150);
@@ -98,11 +98,35 @@ impl FileBrowser {
         Task::none()
     }
 
-    /// 回车：文件夹打开，文件用默认程序打开。
+    /// 回车：进入所在文件夹并选中它（找到的是文件夹就进入它）。多栏视图按设置来：从第一栏往下
+    /// 展开、所在文件夹作第一栏、或者直接打开文件。
     pub(super) fn open_super_box_found(&mut self, hit: SearchHit) -> Task<Message> {
-        match hit.kind {
-            SearchFileKind::Directory => self.navigate_to(hit.path, NavigationMode::RecordHistory),
-            _ => crate::commands::open_file_command(hit.path, self.terminal_emulator),
+        let (folder, selection) = match hit.kind {
+            SearchFileKind::Directory => (hit.path, None),
+            _ => match hit.path.parent() {
+                Some(parent) => (parent.to_path_buf(), Some(hit.path)),
+                None => return Task::none(),
+            },
+        };
+        let columns = self.tab().view_mode() == BrowserViewMode::Columns;
+        match (
+            columns,
+            self.user_config.super_box_found_in_columns,
+            selection,
+        ) {
+            (true, FoundInColumns::ExpandFromFirstColumn, selection) => {
+                self.reveal_in_columns(folder, selection)
+            }
+            (true, FoundInColumns::OpenFile, Some(file)) => {
+                crate::commands::open_file_command(file, self.terminal_emulator)
+            }
+            (_, _, selection) => {
+                let navigation = self.navigate_to(folder, NavigationMode::RecordHistory);
+                if let Some(selection) = selection {
+                    self.select_path(selection);
+                }
+                navigation
+            }
         }
     }
 

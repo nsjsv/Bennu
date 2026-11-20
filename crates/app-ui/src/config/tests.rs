@@ -251,6 +251,7 @@ fn user_preferences_round_trip_through_sqlite() {
     config.search_history.record_submission("images");
     config.super_box_history.record_submission("g:~/下载");
     config.super_box_mode = crate::super_box::BoxMode::Path;
+    config.super_box_found_in_columns = crate::super_box::FoundInColumns::OpenFile;
     config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
     config.shortcuts.set_keys(
         ShortcutAction::FocusPathInput,
@@ -331,6 +332,10 @@ fn user_preferences_round_trip_through_sqlite() {
     assert_eq!(loaded.search_history.entries(), ["images", "report"]);
     assert_eq!(loaded.super_box_history.entries(), ["g:~/下载"]);
     assert_eq!(loaded.super_box_mode, crate::super_box::BoxMode::Path);
+    assert_eq!(
+        loaded.super_box_found_in_columns,
+        crate::super_box::FoundInColumns::OpenFile
+    );
     assert_eq!(
         loaded.last_search_scope,
         Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")))

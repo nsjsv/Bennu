@@ -1,14 +1,18 @@
-//! 超级输入框的浮层：上面是模式按钮和输入框，下面是结果行。行和选中都由模型算好，这里只画。
+//! 超级输入框的浮层：上面是模式按钮和输入框，下面是结果行，命令模式再往下是输出。行和选中都由模型
+//! 算好，这里只画。
 
 use std::path::Path;
+use std::time::{Duration, UNIX_EPOCH};
 
 use iced::widget::{button, container, mouse_area, row, Column, Space};
-use iced::{Alignment, Element, Length, Theme};
+use iced::{Alignment, Element, Font, Length, Theme};
 
-use crate::app::{super_box_input_id, SuperBoxMessage};
-use crate::formatting::format_middle_ellipsized_text;
+use crate::app::{super_box_input_id, FileBrowser, SuperBoxMessage};
+use crate::formatting::{format_middle_ellipsized_text, format_system_time};
 use crate::model::Message;
-use crate::super_box::{BoxMode, BoxRow, FindStatus, NewEntry, RunState, SuperBox};
+use crate::super_box::{
+    read_history, BoxMode, BoxRow, FindStatus, NewEntry, RunEnd, RunState, SuperBox,
+};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::{normal_button, text_field, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
@@ -25,31 +29,45 @@ pub(super) const SUPER_BOX_WIDTH: f32 = 560.0;
 /// 框的上沿离内容区顶部的距离。
 pub(super) const SUPER_BOX_TOP: f32 = 12.0;
 const PATH_MAX_CHARS: usize = 64;
+/// 输出不超过这么多行就直接排开，再多就放进滚动区。
+const OUTPUT_LINES_WITHOUT_SCROLLING: usize = 12;
+const OUTPUT_SCROLL_HEIGHT: f32 = 240.0;
 
 fn message(message: SuperBoxMessage) -> Message {
     Message::SuperBox(message)
 }
 
-/// 输出不超过这么多行就直接排开，再多就放进滚动区。
-const OUTPUT_LINES_WITHOUT_SCROLLING: usize = 12;
-const OUTPUT_SCROLL_HEIGHT: f32 = 240.0;
+/// 画一行要知道的主窗口情况。
+struct RowContext<'a> {
+    home: &'a Path,
+    /// 命令在哪个文件夹里执行。
+    folder: Option<&'a Path>,
+    /// 主窗口里选中了几项（命令模式说明它们会作为参数）。
+    selected_items: usize,
+}
 
-/// `selected` 是主窗口里选中了几项（命令模式说明它们会作为参数）。
 pub(super) fn super_box_panel<'a>(
+    browser: &'a FileBrowser,
     super_box: &'a SuperBox,
-    home: &Path,
-    selected: usize,
 ) -> Element<'a, Message> {
     let mode = super_box.mode();
+    let context = RowContext {
+        home: &browser.home_dir,
+        folder: browser.tab().current_directory(),
+        selected_items: browser.tab().selected_paths.len(),
+    };
     let mode_button = iced::widget::tooltip(
         normal_button(readable_text(mode.label())).on_press(message(SuperBoxMessage::ModePressed)),
         tooltip_bubble(tr!("Tab switches the mode")),
         iced::widget::tooltip::Position::Bottom,
     );
-    let input = text_field(&placeholder(mode), super_box.input())
+    let mut input = text_field(&placeholder(mode), super_box.input())
         .id(super_box_input_id())
         .on_input(|text| message(SuperBoxMessage::InputChanged(text)))
         .width(Length::Fill);
+    if mode == BoxMode::Shell {
+        input = input.font(Font::MONOSPACE);
+    }
     let mut content = Column::new()
         .push(
             row![mode_button, input]
@@ -70,12 +88,24 @@ pub(super) fn super_box_panel<'a>(
             index,
             row,
             super_box.selected() == Some(index),
-            home,
-            selected,
+            &context,
         ));
     }
+    // 命令模式：这次跑的那条的结果；没跑过时，选中的那条历史上次的结果。
     if let Some(run) = super_box.run() {
-        content = content.push(run_panel(&run.command, &run.state));
+        content = content.push(match &run.state {
+            RunState::Running => running_line(&run.command),
+            RunState::Ended(end) => end_panel(tr!("Finished, exit status 0"), end),
+        });
+    } else if let (BoxMode::Shell, Some(BoxRow::History(entry))) = (mode, super_box.selected_row())
+    {
+        if let Some(past) = browser.super_box_commands.past(read_history(entry).1) {
+            let at = UNIX_EPOCH + Duration::from_millis(past.at_ms.max(0) as u64);
+            content = content.push(end_panel(
+                tr!("Last run %1", format_system_time(at)),
+                &past.end,
+            ));
+        }
     }
     container(content)
         .padding(8)
@@ -118,22 +148,42 @@ fn empty_hint(super_box: &SuperBox) -> String {
     }
 }
 
-fn result_row<'a>(
-    super_box: &'a SuperBox,
-    index: usize,
-    row: &'a BoxRow,
-    selected: bool,
-    home: &Path,
-    selected_items: usize,
-) -> Element<'a, Message> {
-    let (icon, title, detail, hint) = match row {
+/// 一行的内容：图标、名字（命令用等宽字）、名字后面的灰字、最右边的灰字。
+struct RowParts {
+    icon: Option<IconSymbol>,
+    title: String,
+    monospace: bool,
+    detail: Option<String>,
+    hint: Option<String>,
+}
+
+impl RowParts {
+    fn plain(icon: IconSymbol, title: String) -> Self {
+        Self {
+            icon: Some(icon),
+            title,
+            monospace: false,
+            detail: None,
+            hint: None,
+        }
+    }
+}
+
+fn row_parts(super_box: &SuperBox, row: &BoxRow, context: &RowContext<'_>) -> RowParts {
+    match row {
         BoxRow::Entry(entry_index) => {
             let entry = super_box.entry(*entry_index);
             let mut hint = entry.kind.label();
             if let Some(key) = &entry.key_hint {
                 hint = format!("{hint} · {key}");
             }
-            (None, entry.title.clone(), entry.detail.clone(), Some(hint))
+            RowParts {
+                icon: None,
+                title: entry.title.clone(),
+                monospace: false,
+                detail: entry.detail.clone(),
+                hint: Some(hint),
+            }
         }
         BoxRow::Found(found_index) => {
             let hit = super_box.found(*found_index);
@@ -141,63 +191,84 @@ fn result_row<'a>(
                 file_search::SearchFileKind::Directory => IconSymbol::Folder,
                 _ => IconSymbol::File,
             };
-            let folder = hit.path.parent().map(|parent| short_path(parent, home));
-            (Some(icon), hit.display_name.clone(), folder, None)
+            RowParts {
+                detail: hit
+                    .path
+                    .parent()
+                    .map(|parent| short_path(parent, context.home)),
+                ..RowParts::plain(icon, hit.display_name.clone())
+            }
         }
         BoxRow::Run(command) => {
-            let hint = match selected_items {
-                0 => tr!("Ctrl+Enter runs it in the terminal"),
-                count => tr!("The %1 selected items are its arguments", count),
+            let mut hint = match context.folder {
+                Some(folder) => tr!("In %1", short_path(folder, context.home)),
+                None => String::new(),
             };
-            (
-                Some(IconSymbol::Terminal),
-                tr!("Run %1", command),
-                None,
-                Some(hint),
-            )
+            if context.selected_items > 0 {
+                hint = format!(
+                    "{hint} · {}",
+                    tr!("%1 selected as arguments", context.selected_items)
+                );
+            }
+            RowParts {
+                monospace: true,
+                hint: Some(hint),
+                ..RowParts::plain(IconSymbol::Terminal, format!("$ {command}"))
+            }
         }
-        BoxRow::History(text) => (Some(IconSymbol::RotateCcw), text.clone(), None, None),
-        BoxRow::JumpTo(path) => (
-            Some(IconSymbol::ArrowRight),
-            tr!("Go to %1", short_path(path, home)),
-            None,
-            None,
+        // 模式按钮已经说明了是哪种，前缀不再写。
+        BoxRow::History(entry) => RowParts {
+            monospace: super_box.mode() == BoxMode::Shell,
+            ..RowParts::plain(IconSymbol::RotateCcw, read_history(entry).1.to_owned())
+        },
+        BoxRow::JumpTo(path) => RowParts::plain(
+            IconSymbol::ArrowRight,
+            tr!("Go to %1", short_path(path, context.home)),
         ),
         BoxRow::JumpSuggestion(path) => {
-            (Some(IconSymbol::Folder), short_path(path, home), None, None)
+            RowParts::plain(IconSymbol::Folder, short_path(path, context.home))
         }
-        BoxRow::Create(NewEntry::File(name)) => (
-            Some(IconSymbol::Plus),
-            tr!("New file “%1”", name),
-            None,
-            None,
-        ),
-        BoxRow::Create(NewEntry::Folder(name)) => (
-            Some(IconSymbol::Plus),
-            tr!("New folder “%1”", name),
-            None,
-            None,
-        ),
-        BoxRow::Problem(reason) => return error_text(reason.clone()),
-    };
-    let mut line = row![].spacing(8).align_y(Alignment::Center);
-    match icon {
-        Some(icon) => {
-            line = line.push(themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE));
+        BoxRow::Create(NewEntry::File(name)) => {
+            RowParts::plain(IconSymbol::Plus, tr!("New file “%1”", name))
         }
-        None => line = line.push(Space::new().width(Length::Fixed(MENU_ICON_SIZE))),
+        BoxRow::Create(NewEntry::Folder(name)) => {
+            RowParts::plain(IconSymbol::Plus, tr!("New folder “%1”", name))
+        }
+        BoxRow::Problem(reason) => RowParts::plain(IconSymbol::TriangleAlert, reason.clone()),
     }
-    let mut label = row![readable_text(title)]
-        .spacing(8)
-        .align_y(Alignment::Center);
-    if let Some(detail) = detail {
+}
+
+fn result_row<'a>(
+    super_box: &'a SuperBox,
+    index: usize,
+    row: &'a BoxRow,
+    selected: bool,
+    context: &RowContext<'_>,
+) -> Element<'a, Message> {
+    if let BoxRow::Problem(reason) = row {
+        return error_text(reason.clone());
+    }
+    let parts = row_parts(super_box, row, context);
+    let mut line = row![].spacing(8).align_y(Alignment::Center);
+    line = match parts.icon {
+        Some(icon) => line.push(themed_icon(icon, IconTone::Normal, MENU_ICON_SIZE)),
+        None => line.push(Space::new().width(Length::Fixed(MENU_ICON_SIZE))),
+    };
+    let title = readable_text(parts.title);
+    let title = if parts.monospace {
+        title.font(Font::MONOSPACE)
+    } else {
+        title
+    };
+    let mut label = row![title].spacing(8).align_y(Alignment::Center);
+    if let Some(detail) = parts.detail {
         label = label.push(muted(format_middle_ellipsized_text(
             &detail,
             PATH_MAX_CHARS,
         )));
     }
     line = line.push(container(label).width(Length::Fill));
-    if let Some(hint) = hint {
+    if let Some(hint) = parts.hint.filter(|hint| !hint.is_empty()) {
         line = line.push(muted(hint));
     }
     let style = if selected {
@@ -216,44 +287,49 @@ fn result_row<'a>(
     .into()
 }
 
-/// 命令的结果：正在跑时可以停；跑完是退出码和输出的末尾（标准输出在前，标准错误在后）。
-fn run_panel<'a>(command: &str, state: &'a RunState) -> Element<'a, Message> {
-    let body: Element<'a, Message> = match state {
-        RunState::Running => row![
-            readable_text(tr!("Running %1", command)).width(Length::Fill),
+/// 正在跑：命令和“停止”。
+fn running_line(command: &str) -> Element<'static, Message> {
+    container(
+        row![
+            readable_text(tr!("Running %1", command))
+                .font(Font::MONOSPACE)
+                .width(Length::Fill),
             normal_button(readable_text(tr!("Stop")))
                 .on_press(message(SuperBoxMessage::StopPressed)),
         ]
         .spacing(8)
-        .align_y(Alignment::Center)
-        .into(),
-        RunState::Failed(reason) => return error_text(reason.clone()),
-        RunState::Finished(output) => {
-            let mut finished = Column::new()
-                .push(muted(tr!("Finished, exit status 0")))
-                .spacing(4);
-            if !output.text.trim().is_empty() {
-                // 借用框里的字，不每帧复制；输出里常有中文文件名，按复杂文字排版。
-                let text = iced::widget::text(output.text.as_str())
-                    .shaping(iced::widget::text::Shaping::Advanced)
-                    .size(CAPTION_SIZE)
-                    .font(iced::Font::MONOSPACE);
-                // 短的直接排开；长的放进固定高度的滚动区，停在最后面（看末尾）。
-                finished = if output.lines <= OUTPUT_LINES_WITHOUT_SCROLLING {
-                    finished.push(text)
-                } else {
-                    finished.push(
-                        iced::widget::scrollable(text)
-                            .anchor_bottom()
-                            .height(Length::Fixed(OUTPUT_SCROLL_HEIGHT))
-                            .width(Length::Fill),
-                    )
-                };
-            }
-            finished.into()
+        .align_y(Alignment::Center),
+    )
+    .padding([4, 8])
+    .into()
+}
+
+/// 跑完的结果：标题一行（这次跑完 / 上次的时间），下面是输出的末尾或失败原因。
+fn end_panel(heading: String, end: &RunEnd) -> Element<'_, Message> {
+    let mut panel = Column::new().push(muted(heading)).spacing(4);
+    match end {
+        RunEnd::Failed(reason) => panel = panel.push(error_text(reason.clone())),
+        RunEnd::Finished(output) if !output.text.trim().is_empty() => {
+            // 借用框里的字，不每帧复制；输出里常有中文文件名，按复杂文字排版。
+            let text = iced::widget::text(output.text.as_str())
+                .shaping(iced::widget::text::Shaping::Advanced)
+                .size(CAPTION_SIZE)
+                .font(Font::MONOSPACE);
+            // 短的直接排开；长的放进固定高度的滚动区，停在最后面（看末尾）。
+            panel = if output.lines <= OUTPUT_LINES_WITHOUT_SCROLLING {
+                panel.push(text)
+            } else {
+                panel.push(
+                    iced::widget::scrollable(text)
+                        .anchor_bottom()
+                        .height(Length::Fixed(OUTPUT_SCROLL_HEIGHT))
+                        .width(Length::Fill),
+                )
+            };
         }
-    };
-    container(body).padding([4, 8]).into()
+        RunEnd::Finished(_) => {}
+    }
+    container(panel).padding([4, 8]).into()
 }
 
 /// 主目录下的路径写成 `~/…`，太长时从中间省略。

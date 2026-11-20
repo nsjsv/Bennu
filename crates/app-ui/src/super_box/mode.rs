@@ -100,7 +100,7 @@ pub(crate) fn history_text(mode: BoxMode, text: &str) -> String {
     }
 }
 
-/// 一条历史属于哪个模式、框里该显示的字。
+/// 一条历史属于哪个模式、框里该显示的字（不带前缀：模式按钮已经说明了）。
 pub(crate) fn read_history(entry: &str) -> (BoxMode, &str) {
     split_prefix(entry).unwrap_or((BoxMode::Search, entry))
 }

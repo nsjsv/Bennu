@@ -6,6 +6,7 @@
 //! 这里不读盘：路径补全、路径检查、索引查询都由应用层在后台做，结果按 `generation` 对号交回来。
 
 mod find;
+mod found;
 mod matching;
 mod mode;
 mod rows;
@@ -18,8 +19,9 @@ use file_operations::CommandOutput;
 use file_search::{SearchHit, SearchTextScope};
 
 pub(crate) use find::{read_find_query, FindQuery};
+pub(crate) use found::FoundInColumns;
 pub(crate) use matching::{BoxEntry, BoxTarget, EntryKind, MOST_ROWS};
-pub(crate) use mode::BoxMode;
+pub(crate) use mode::{read_history, BoxMode};
 pub(crate) use shell::shell_invocation;
 pub(crate) use targets::NewEntry;
 
@@ -95,6 +97,12 @@ pub(crate) struct CommandRun {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RunState {
     Running,
+    Ended(RunEnd),
+}
+
+/// 一条命令怎么结束的。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RunEnd {
     /// 退出码 0：要显示的输出，结束时拼好一次。
     Finished(ShownOutput),
     /// 退出码不是 0、没启动起来、被停止：给用户看的原因。
@@ -110,7 +118,28 @@ pub(crate) struct ShownOutput {
 
 const SHOWN_OUTPUT_LINES: usize = 200;
 
-impl RunState {
+impl ShownOutput {
+    /// 存起来的输出读回来时用。
+    pub(crate) fn from_text(text: String) -> Self {
+        let lines = text.lines().count();
+        Self { text, lines }
+    }
+}
+
+/// 以前跑过的一条命令最后一次的结果。存在状态库里，重启后还在；命令模式里选中那条历史时显示。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PastRun {
+    /// 框里打的命令（不带模式前缀）。
+    pub(crate) command: String,
+    /// Unix 毫秒。
+    pub(crate) at_ms: i64,
+    pub(crate) end: RunEnd,
+}
+
+/// 记几条命令的结果。
+pub(crate) const PAST_RUNS_KEPT: usize = 20;
+
+impl RunEnd {
     pub(crate) fn finished(output: &CommandOutput) -> Self {
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -329,9 +358,9 @@ impl SuperBox {
     }
 
     /// 队列里的任务结束了；不是这个框发的就不管。
-    pub(crate) fn finish_run(&mut self, task_id: u64, state: RunState) {
+    pub(crate) fn finish_run(&mut self, task_id: u64, end: RunEnd) {
         if let Some(run) = self.run.as_mut().filter(|run| run.task_id == task_id) {
-            run.state = state;
+            run.state = RunState::Ended(end);
         }
     }
 

@@ -94,16 +94,60 @@ impl FileBrowser {
             return Task::none();
         }
         self.set_deepest_open_column_directory(Some(path.clone()));
+        let load = self.load_column(path);
+        Task::batch([
+            load,
+            self.focus_latest_column(),
+            self.request_browser_session_save(),
+            self.reveal_address_bar_current_segment(self.active_pane_id()),
+        ])
+    }
 
+    /// 多栏视图里一路展开到 `folder`（它成为最后一栏），再选中 `selection`。`folder` 在当前第一栏
+    /// 下面时第一栏不动；不在时从两者共同的上级开始（第一栏换成它）。
+    pub(in crate::app) fn reveal_in_columns(
+        &mut self,
+        folder: PathBuf,
+        selection: Option<PathBuf>,
+    ) -> Task<Message> {
+        let current = self.tab().current_directory().map(Path::to_path_buf);
+        let root = match &current {
+            Some(current) if folder.starts_with(current) => current.clone(),
+            Some(current) => common_ancestor(current, &folder),
+            None => folder.clone(),
+        };
+        let mut tasks = Vec::new();
+        if current.as_ref() != Some(&root) {
+            tasks.push(self.navigate_to(root.clone(), NavigationMode::RecordHistory));
+        }
+        let mut chain = folder
+            .ancestors()
+            .take_while(|directory| *directory != root)
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
+        chain.reverse();
+        for directory in &chain {
+            tasks.push(self.load_column(directory.clone()));
+        }
+        self.set_deepest_open_column_directory(chain.last().cloned());
+        if let Some(selection) = selection {
+            self.select_path(selection);
+        }
+        tasks.extend([
+            self.focus_latest_column(),
+            self.request_browser_session_save(),
+            self.reveal_address_bar_current_segment(self.active_pane_id()),
+        ]);
+        Task::batch(tasks)
+    }
+
+    /// 让这一栏显示出来：已经有了就展开，没有就建一份“加载中”并去读。
+    fn load_column(&mut self, path: PathBuf) -> Task<Message> {
         if let Some(expanded) = self.tab_mut().expanded_directories.get_mut(&path) {
             expanded.is_expanded = true;
             expanded.is_collapsing = false;
             expanded.animation_progress = 1.0;
-            return Task::batch([
-                self.focus_latest_column(),
-                self.request_browser_session_save(),
-                self.reveal_address_bar_current_segment(self.active_pane_id()),
-            ]);
+            return Task::none();
         }
 
         let mut expanded = ExpandedDirectory {
@@ -129,12 +173,7 @@ impl FileBrowser {
             &mut expanded,
         );
         self.tab_mut().expanded_directories.insert(path, expanded);
-        Task::batch([
-            load_expanded_directory_command(request, self.options.clone(), cancellation),
-            self.focus_latest_column(),
-            self.request_browser_session_save(),
-            self.reveal_address_bar_current_segment(self.active_pane_id()),
-        ])
+        load_expanded_directory_command(request, self.options.clone(), cancellation)
     }
 
     pub(super) fn open_preview(&mut self) -> Task<Message> {
@@ -338,6 +377,14 @@ impl FileBrowser {
         ));
         Some(window_command)
     }
+}
+
+/// 两个路径最深的共同上级（绝对路径至少有 `/`）。
+fn common_ancestor(left: &Path, right: &Path) -> PathBuf {
+    left.ancestors()
+        .find(|ancestor| right.starts_with(ancestor))
+        .unwrap_or(Path::new("/"))
+        .to_path_buf()
 }
 
 #[cfg(test)]

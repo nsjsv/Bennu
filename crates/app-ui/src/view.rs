@@ -428,11 +428,7 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
     } else if let Some(super_box) = &browser.super_box {
         floating_input = BrowserFloatingInput::DismissibleBlocking;
         floating.push(FloatingContent {
-            element: super_box::super_box_panel(
-                super_box,
-                &browser.home_dir,
-                browser.tab().selected_paths.len(),
-            ),
+            element: super_box::super_box_panel(browser, super_box),
             placement: FloatingPlacement::TopCenter {
                 top: super_box::SUPER_BOX_TOP,
             },

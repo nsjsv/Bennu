@@ -481,12 +481,12 @@ fn a_command_run_belongs_to_its_task() {
     super_box.set_input("make".to_owned(), &context);
     assert_eq!(super_box.history_text(), "s:make");
     super_box.start_run(7, "make".to_owned());
-    super_box.finish_run(8, RunState::Failed("other".to_owned()));
+    super_box.finish_run(8, RunEnd::Failed("other".to_owned()));
     assert_eq!(super_box.run().unwrap().state, RunState::Running);
-    super_box.finish_run(7, RunState::finished(&Default::default()));
+    super_box.finish_run(7, RunEnd::finished(&Default::default()));
     assert!(matches!(
         super_box.run().unwrap().state,
-        RunState::Finished(_)
+        RunState::Ended(RunEnd::Finished(_))
     ));
 
     let nowhere = BoxContext {
@@ -506,7 +506,7 @@ fn the_shown_output_is_the_last_lines_with_errors_after() {
             .into_bytes(),
         stderr: b"warning: careful\n".to_vec(),
     };
-    let RunState::Finished(shown) = RunState::finished(&output) else {
+    let RunEnd::Finished(shown) = RunEnd::finished(&output) else {
         panic!("finished");
     };
     assert_eq!(shown.lines, 200);

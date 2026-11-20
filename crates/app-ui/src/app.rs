@@ -236,6 +236,8 @@ pub(crate) struct FileBrowser {
     pub(crate) open_with: Option<OpenWithState>,
     /// 超级输入框（Alt+Space）。可关闭的阻断浮层，同 `open_with`。
     pub(crate) super_box: Option<crate::super_box::SuperBox>,
+    /// 框发出的命令和它们最后一次的结果；不跟着框关掉。
+    pub(crate) super_box_commands: super_box_shell::SuperBoxCommands,
     pub(crate) file_drop_prompt: Option<FileDropPrompt>,
     pub(crate) archive_creation: Option<ArchiveCreationState>,
     pub(crate) convert: Option<ConvertState>,
@@ -666,6 +668,7 @@ impl FileBrowser {
             context_menu: None,
             open_with: None,
             super_box: None,
+            super_box_commands: Default::default(),
             file_drop_prompt: None,
             archive_creation: None,
             convert: None,

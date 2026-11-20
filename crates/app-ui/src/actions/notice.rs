@@ -28,6 +28,7 @@ enum NoticeVariable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NoticeTemplate {
+    text: String,
     segments: Vec<Segment<NoticeVariable>>,
 }
 
@@ -56,7 +57,14 @@ impl NoticeTemplate {
             },
             "{action} {count} {name} {dir} {failed}",
         )?;
-        Ok(Self { segments })
+        Ok(Self {
+            text: text.to_owned(),
+            segments,
+        })
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
     }
 
     pub(crate) fn render(&self, values: NoticeValues<'_>) -> String {

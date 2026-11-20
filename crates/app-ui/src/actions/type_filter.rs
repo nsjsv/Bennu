@@ -69,6 +69,16 @@ impl TypePattern {
         well_formed(subtype).then(|| Self::Type(types.canonical(text)))
     }
 
+    /// 写进文件的样子（`Type` 是规范名）。
+    pub(crate) fn text(&self) -> String {
+        match self {
+            Self::Type(mime) => mime.clone(),
+            Self::Group(group) => format!("{group}/*"),
+            Self::AllFiles => ALL_FILES.to_owned(),
+            Self::Anything => "all/all".to_owned(),
+        }
+    }
+
     fn matches(&self, item: &ResolvedType) -> bool {
         match self {
             Self::Anything => true,
@@ -116,12 +126,7 @@ impl TypeFilter {
             Self::Anything => tr!("Everything"),
             Self::Patterns(patterns) => patterns
                 .iter()
-                .map(|pattern| match pattern {
-                    TypePattern::Type(mime) => mime.clone(),
-                    TypePattern::Group(group) => format!("{group}/*"),
-                    TypePattern::AllFiles => ALL_FILES.to_owned(),
-                    TypePattern::Anything => "all/all".to_owned(),
-                })
+                .map(TypePattern::text)
                 .collect::<Vec<_>>()
                 .join(" "),
         }

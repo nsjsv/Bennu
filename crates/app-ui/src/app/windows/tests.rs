@@ -1422,11 +1422,14 @@ fn selecting_settings_category_clears_open_subpage() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     browser.selected_settings_category = SettingsCategory::Files;
     drop(browser.select_settings_subpage(SettingsSubpage::Preview));
-    assert_eq!(browser.settings_subpage, Some(SettingsSubpage::Preview));
+    assert!(matches!(
+        browser.settings_subpage,
+        Some(SettingsSubpage::Preview)
+    ));
 
     drop(browser.select_settings_category(SettingsCategory::Appearance));
 
-    assert_eq!(browser.settings_subpage, None);
+    assert!(browser.settings_subpage.is_none());
     assert_eq!(
         browser.selected_settings_category,
         SettingsCategory::Appearance
@@ -1443,7 +1446,7 @@ fn header_back_button_returns_from_settings_subpage_and_keeps_the_window() {
 
     drop(browser.update(Message::SettingsSubpageClosed));
 
-    assert_eq!(browser.settings_subpage, None);
+    assert!(browser.settings_subpage.is_none());
     assert_eq!(browser.selected_settings_category, SettingsCategory::Files);
     assert_eq!(browser.settings_window, Some(settings_window));
 }
@@ -1458,7 +1461,7 @@ fn escape_returns_from_settings_subpage_before_closing_settings_window() {
     drop(browser.select_settings_subpage(SettingsSubpage::Preview));
 
     drop(browser.handle_focused_window_escape_pressed());
-    assert_eq!(browser.settings_subpage, None);
+    assert!(browser.settings_subpage.is_none());
     assert_eq!(browser.settings_window, Some(settings_window));
 
     drop(browser.handle_focused_window_escape_pressed());

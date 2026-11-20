@@ -262,6 +262,9 @@ impl FileBrowser {
     }
 
     pub(super) fn select_settings_category(&mut self, category: SettingsCategory) -> Task<Message> {
+        if self.action_editor_holds_back(category) {
+            return Task::none();
+        }
         self.shortcut_capture = None;
         self.search_service.cancel_force_restart_confirmation();
         if category != SettingsCategory::General {
@@ -280,6 +283,10 @@ impl FileBrowser {
     }
 
     pub(super) fn close_settings_subpage(&mut self) -> Task<Message> {
+        // 编辑页是“动作”分类下的二级页：返回就是回到动作列表。
+        if self.action_editor_holds_back(SettingsCategory::Actions) {
+            return Task::none();
+        }
         self.settings_subpage = None;
         self.reset_settings_detail_scroll()
     }

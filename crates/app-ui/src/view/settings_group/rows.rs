@@ -124,6 +124,22 @@ pub(in crate::view) fn entry_row(entry: EntryRow<'_>) -> SettingsRow<'_> {
     framed(value)
 }
 
+/// 表单里的输入行：上面小字标题，下面是输入框，再下面是附注（错误、展开后的预览）。
+/// 和 [`entry_row`] 不同，没有单独的 ✓：表单整页一起保存。
+pub(in crate::view) fn field_row<'a>(
+    title: String,
+    field: impl Into<Element<'a, Message>>,
+    note: Option<RowNote>,
+) -> SettingsRow<'a> {
+    let mut value = column![caption(title, muted_text_color), field.into()]
+        .spacing(4)
+        .width(Length::Fill);
+    if let Some(note) = note {
+        value = value.push(note_text(note));
+    }
+    framed(value)
+}
+
 pub(in crate::view) fn navigation_row(
     title: String,
     note: Option<RowNote>,

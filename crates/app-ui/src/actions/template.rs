@@ -16,6 +16,16 @@ pub(crate) struct RunValues {
     pub(crate) home: PathBuf,
 }
 
+impl RunValues {
+    /// 现在开始的一次运行（编辑页的预览也按“现在开始”算）。
+    pub(crate) fn starting_now() -> Self {
+        Self {
+            date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            home: file_core::app_dirs::home_dir(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Variable {
     File,

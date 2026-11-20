@@ -8,8 +8,8 @@ mod rows;
 
 pub(super) use rows::{
     action_row, choice_row, control_row, custom_row, destructive_action_row, entry_row,
-    expander_row, expander_rows, label_row, link_row, meter_row, navigation_row, notice_row,
-    switch_row, value_row, EntryRow,
+    expander_row, expander_rows, field_row, label_row, link_row, meter_row, navigation_row,
+    notice_row, switch_row, value_row, EntryRow,
 };
 
 use iced::widget::{button, column, container, Column, Space};

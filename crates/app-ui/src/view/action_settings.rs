@@ -1,17 +1,22 @@
-//! 设置「动作」页：动作文件夹里有哪些动作、各自做什么、绑了什么键；读到了哪些 Dolphin 服务菜单；
-//! 用不了的文件和原因。这一页只看不改：动作和服务菜单都是普通的文本文件，直接改文件。
+//! 设置「动作」页：动作文件夹里有哪些动作、各自做什么、绑了什么键（点开进编辑页）；从模板新建；
+//! 读到了哪些 Dolphin 服务菜单；用不了的文件和原因。服务菜单是 Dolphin 的文件，这里只列出来。
 
 use iced::Element;
 
+use crate::actions::editor::ActionTemplate;
 use crate::actions::{
     action_folder, ActionDefinition, ActionFileProblem, ActionId, ServiceMenuAction,
 };
-use crate::app::actions::ActionMessage;
+use crate::app::actions::{ActionMessage, EditorMessage};
 use crate::app::FileBrowser;
 use crate::model::Message;
 use crate::shortcuts::ShortcutTarget;
+use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::normal_button;
 
-use super::settings_group::{action_row, label_row, settings_card, settings_group, RowNote};
+use super::settings_group::{
+    action_row, control_row, label_row, navigation_row, settings_card, settings_group, RowNote,
+};
 
 pub(super) fn action_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {
     let folder = action_folder();
@@ -19,15 +24,13 @@ pub(super) fn action_settings_sections(browser: &FileBrowser) -> Vec<Element<'_,
     let mut sections = vec![settings_group(
         tr!("Actions"),
         Some(tr!(
-            "Each .toml file in %1 is an action: it shows up in the context menu of the items it fits, and can have a shortcut on the Shortcuts page. Changes take effect as soon as a file is saved.",
+            "An action shows up in the context menu of the items it fits, and can have a shortcut. Each one is a .toml file in %1: edit it here or as text, changes take effect as soon as it is saved.",
             folder.display()
         )),
         if definitions.is_empty() {
             vec![label_row(
                 tr!("No actions yet"),
-                Some(RowNote::Hint(tr!(
-                    "Open the folder and add a file; the documentation has examples."
-                ))),
+                Some(RowNote::Hint(tr!("Start from one of the templates below."))),
             )]
         } else {
             definitions
@@ -36,6 +39,20 @@ pub(super) fn action_settings_sections(browser: &FileBrowser) -> Vec<Element<'_,
                 .collect()
         },
     )];
+    sections.push(settings_group(
+        tr!("New Action"),
+        None,
+        ActionTemplate::ALL
+            .into_iter()
+            .map(|template| {
+                navigation_row(
+                    template.label(),
+                    None,
+                    Message::Action(ActionMessage::Editor(EditorMessage::New(template))),
+                )
+            })
+            .collect(),
+    ));
     let mut service_menus = browser.action_library.service_menus().to_vec();
     if !service_menus.is_empty() {
         service_menus.sort_by(|left, right| left.name.cmp(&right.name));
@@ -66,7 +83,7 @@ pub(super) fn action_settings_sections(browser: &FileBrowser) -> Vec<Element<'_,
     sections
 }
 
-/// 名字；下面一行是文件名、对哪些项、步骤和键。
+/// 名字；下面一行是文件名、对哪些项、步骤和键。点开进编辑页。
 fn action_summary_row(
     browser: &FileBrowser,
     definition: &ActionDefinition,
@@ -83,9 +100,12 @@ fn action_summary_row(
         steps,
     ];
     details.extend(key_labels(browser, definition.id.clone()));
-    label_row(
+    navigation_row(
         definition.name.clone(),
         Some(RowNote::Hint(details.join(" · "))),
+        Message::Action(ActionMessage::Editor(EditorMessage::Open(
+            definition.id.clone(),
+        ))),
     )
 }
 
@@ -113,13 +133,28 @@ fn key_labels(browser: &FileBrowser, id: ActionId) -> Option<String> {
     (!keys.is_empty()).then(|| keys.join(" / "))
 }
 
+/// 写错的文件不能用表单打开（读不出来），给“打开文件”，用文本编辑器改。
 fn problem_row(problem: &ActionFileProblem) -> super::settings_group::SettingsRow<'static> {
     let name = file_name(&problem.file);
     let title = match problem.line {
         Some(line) => tr!("%1, line %2", name, line),
         None => name,
     };
-    label_row(title, Some(RowNote::Error(problem.reason.clone())))
+    let note = Some(RowNote::Error(problem.reason.clone()));
+    let is_file = problem
+        .file
+        .extension()
+        .is_some_and(|extension| extension == "toml" || extension == "desktop");
+    if !is_file {
+        return label_row(title, note);
+    }
+    control_row(
+        title,
+        note,
+        normal_button(readable_text(tr!("Open the File"))).on_press(Message::Action(
+            ActionMessage::FileOpenRequested(problem.file.clone()),
+        )),
+    )
 }
 
 fn file_name(path: &std::path::Path) -> String {

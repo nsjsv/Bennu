@@ -118,10 +118,7 @@ impl FileBrowser {
             .unwrap_or_else(file_core::app_dirs::home_dir);
         let context = StepContext {
             selected: items.clone(),
-            values: RunValues {
-                date: chrono::Local::now().format("%Y-%m-%d").to_string(),
-                home: file_core::app_dirs::home_dir(),
-            },
+            values: RunValues::starting_now(),
             working_directory,
         };
         let queue = &self.operation_queue;

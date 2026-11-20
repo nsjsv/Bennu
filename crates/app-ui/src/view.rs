@@ -1,4 +1,6 @@
 mod about_settings;
+mod action_editor;
+mod action_editor_steps;
 mod action_settings;
 mod address_bar;
 mod advanced_new_folder;

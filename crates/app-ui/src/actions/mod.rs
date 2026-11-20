@@ -9,6 +9,7 @@
 mod action_file;
 mod convert_format;
 mod definition;
+pub(crate) mod editor;
 pub(crate) mod handed_on;
 mod library;
 pub(crate) mod notice;
@@ -16,10 +17,12 @@ pub(crate) mod service_menu;
 pub(crate) mod template;
 pub(crate) mod type_filter;
 
-pub(crate) use convert_format::ConvertFormat;
+pub(crate) use action_file::COMPRESS_FORMATS;
+pub(crate) use convert_format::{ConvertFormat, CONVERT_FORMATS};
 pub(crate) use definition::{ActionDefinition, ActionId, ActionStep, TrashScope};
 pub(crate) use library::{
-    action_folder, ActionFileProblem, ActionLibrary, ActionSources, ApplicableActions,
+    action_folder, ensure_action_folder, ActionFileProblem, ActionLibrary, ActionSources,
+    ApplicableActions,
 };
 pub(crate) use notice::{ActionNotice, NoticeValues};
 pub(crate) use service_menu::ServiceMenuAction;

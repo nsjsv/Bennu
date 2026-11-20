@@ -145,7 +145,7 @@ pub(crate) fn view_settings_window(
 
 /// 内容顶栏：标题是当前分类；二级页左边放后退，回上一级的入口和标题在同一条上。
 fn settings_content_header(browser: &FileBrowser) -> HeaderBar<'static, Message> {
-    match browser.settings_subpage {
+    match &browser.settings_subpage {
         Some(SettingsSubpage::Preview) => HeaderBar::new().title(tr!("Preview settings")).start(
             icon_button(super::themed_icon(
                 IconSymbol::ArrowLeft,
@@ -154,6 +154,9 @@ fn settings_content_header(browser: &FileBrowser) -> HeaderBar<'static, Message>
             ))
             .on_press(Message::SettingsSubpageClosed),
         ),
+        Some(SettingsSubpage::ActionEditor(editor)) => {
+            super::action_editor::action_editor_header(editor)
+        }
         None => HeaderBar::new().title(browser.selected_settings_category.label()),
     }
 }
@@ -173,16 +176,21 @@ fn settings_category_detail(browser: &FileBrowser) -> Element<'_, Message> {
     match browser.selected_settings_category {
         SettingsCategory::General => settings_page(general_settings_sections(browser)),
         SettingsCategory::Appearance => settings_page(appearance_settings_sections(browser)),
-        SettingsCategory::Files if browser.settings_subpage == Some(SettingsSubpage::Preview) => {
+        SettingsCategory::Files
+            if matches!(browser.settings_subpage, Some(SettingsSubpage::Preview)) =>
+        {
             settings_page(preview_settings_subpage_sections(browser))
         }
         SettingsCategory::Files => settings_page(files_settings_sections(browser)),
         SettingsCategory::Transfer => settings_page(transfer_settings_sections(browser)),
         SettingsCategory::Search => settings_page(search_settings_sections(browser)),
         SettingsCategory::Shortcuts => settings_page(shortcut_settings_sections(browser)),
-        SettingsCategory::Actions => {
-            settings_page(super::action_settings::action_settings_sections(browser))
-        }
+        SettingsCategory::Actions => match &browser.settings_subpage {
+            Some(SettingsSubpage::ActionEditor(editor)) => {
+                super::action_editor::action_editor_page(browser, editor)
+            }
+            _ => settings_page(super::action_settings::action_settings_sections(browser)),
+        },
         SettingsCategory::Logs => settings_page(application_logs_sections(browser)),
         SettingsCategory::About => settings_page(about_settings_sections()),
     }

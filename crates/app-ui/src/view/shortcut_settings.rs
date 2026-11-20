@@ -50,7 +50,7 @@ pub(super) fn shortcut_settings_sections(browser: &FileBrowser) -> Vec<Element<'
     sections
 }
 
-fn push_target_rows(
+pub(super) fn push_target_rows(
     browser: &FileBrowser,
     rows: &mut Vec<SettingsRow<'static>>,
     target: ShortcutTarget,

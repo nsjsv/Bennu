@@ -21,6 +21,16 @@ pub(crate) fn action_folder() -> PathBuf {
     file_core::app_dirs::app_config_dir().join("actions")
 }
 
+/// 建好动作文件夹（只有自己能进）。“打开动作文件夹”和保存新动作都先调它。会写盘。
+pub(crate) fn ensure_action_folder(folder: &Path) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(folder)
+        .map_err(|error| tr!("%1: %2", folder.display(), error))
+}
+
 /// 动作从哪读：哪个动作文件夹、哪些数据目录（找服务菜单）、Dolphin 的开关文件，用什么语言。
 /// 这些变了就要整份重读，所以它也是读取订阅的键。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -65,6 +75,8 @@ pub(crate) struct ActionFileProblem {
 
 #[derive(Clone)]
 pub(crate) struct ActionLibrary {
+    /// 从哪个动作文件夹读的；编辑器保存新动作也放在这里。
+    folder: PathBuf,
     /// 按名字排序。
     definitions: Vec<Arc<ActionDefinition>>,
     /// 按 KIO 找文件的顺序；菜单里怎么排由菜单决定。
@@ -103,6 +115,7 @@ impl ActionLibrary {
     /// 第一次读完之前：没有动作。
     pub(crate) fn empty() -> Self {
         Self {
+            folder: action_folder(),
             definitions: Vec::new(),
             service_menus: Vec::new(),
             problems: Vec::new(),
@@ -113,6 +126,7 @@ impl ActionLibrary {
     #[cfg(test)]
     pub(crate) fn from_definitions(definitions: Vec<ActionDefinition>) -> Self {
         Self {
+            folder: action_folder(),
             definitions: definitions.into_iter().map(Arc::new).collect(),
             service_menus: Vec::new(),
             problems: Vec::new(),
@@ -142,6 +156,7 @@ impl ActionLibrary {
 
     fn load_action_folder(folder: &Path) -> Self {
         let mut library = Self {
+            folder: folder.to_path_buf(),
             definitions: Vec::new(),
             service_menus: Vec::new(),
             problems: Vec::new(),
@@ -205,6 +220,15 @@ impl ActionLibrary {
         let (text, _) = read_trusted_text(file).map_err(|reason| problem(None, reason))?;
         parse_action_file(ActionId::from_file_stem(stem), file, &text, &self.types)
             .map_err(|mistake| problem(mistake.line, mistake.reason))
+    }
+
+    pub(crate) fn folder(&self) -> &Path {
+        &self.folder
+    }
+
+    /// 读取时拿到的类型库；编辑器检查类型时也用它，不在界面线程上读系统库。
+    pub(crate) fn types(&self) -> &Arc<MimeDatabase> {
+        &self.types
     }
 
     pub(crate) fn definitions(&self) -> &[Arc<ActionDefinition>] {

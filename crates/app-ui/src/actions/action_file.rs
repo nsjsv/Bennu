@@ -46,6 +46,38 @@ struct RawStep {
 
 const STEP_KEYS: &str = "convert compress extract copy_to move_to trash run copy_paths";
 
+/// 文件里 `compress`、`extract`、`trash` 的写法。读（这里）和编辑器写共用，`compress` 写的是扩展名。
+pub(crate) const COMPRESS_FORMATS: [ArchiveFormat; 3] = [
+    ArchiveFormat::Zip,
+    ArchiveFormat::SevenZip,
+    ArchiveFormat::TarGz,
+];
+pub(crate) const EXTRACT_PLACEMENTS: [(&str, ArchiveExtractionPlacement); 2] = [
+    ("here", ArchiveExtractionPlacement::Smart),
+    ("folder", ArchiveExtractionPlacement::ArchiveFolder),
+];
+pub(crate) const TRASH_SCOPES: [(&str, TrashScope); 2] = [
+    ("current", TrashScope::Current),
+    ("selected", TrashScope::Selected),
+];
+
+/// 按写法查值。
+pub(crate) fn spelled<T: Copy>(table: &[(&str, T)], text: &str) -> Option<T> {
+    table
+        .iter()
+        .find(|(spelling, _)| *spelling == text)
+        .map(|(_, value)| *value)
+}
+
+/// 值的写法。表里每个值都有。
+pub(crate) fn spelling<T: Copy + PartialEq>(table: &[(&'static str, T)], value: T) -> &'static str {
+    table
+        .iter()
+        .find(|(_, entry)| *entry == value)
+        .map(|(spelling, _)| *spelling)
+        .expect("every value has a spelling")
+}
+
 struct Source<'a> {
     text: &'a str,
 }
@@ -120,18 +152,21 @@ fn parse_types(
     list.get_ref()
         .iter()
         .map(|pattern| {
-            TypePattern::parse(pattern.get_ref(), types).ok_or_else(|| {
-                source.mistake(
-                    pattern,
-                    tr!(
-                        "“%1” is not a MIME type (for example video/*, image/png or inode/directory)",
-                        pattern.get_ref()
-                    ),
-                )
-            })
+            parse_type_pattern(pattern.get_ref(), types)
+                .map_err(|reason| source.mistake(pattern, reason))
         })
         .collect::<Result<_, _>>()
         .map(TypeFilter::Patterns)
+}
+
+/// `types` 里的一项。编辑器的“其他类型”也用它，说法和读文件时一样。
+pub(crate) fn parse_type_pattern(text: &str, types: &MimeDatabase) -> Result<TypePattern, String> {
+    TypePattern::parse(text, types).ok_or_else(|| {
+        tr!(
+            "“%1” is not a MIME type (for example video/*, image/png or inode/directory)",
+            text
+        )
+    })
 }
 
 fn parse_steps(
@@ -189,27 +224,24 @@ fn parse_step(source: &Source<'_>, step: &Spanned<RawStep>) -> Result<ActionStep
             });
     }
     if let Some(format) = &raw.compress {
-        return match format.get_ref().as_str() {
-            "zip" => Ok(ActionStep::Compress(ArchiveFormat::Zip)),
-            "7z" => Ok(ActionStep::Compress(ArchiveFormat::SevenZip)),
-            "tar.gz" => Ok(ActionStep::Compress(ArchiveFormat::TarGz)),
-            other => Err(invalid(
-                format,
-                tr!(
-                    "Unknown archive format “%1”. You can use: zip 7z tar.gz",
-                    other
-                ),
-            )),
-        };
+        return COMPRESS_FORMATS
+            .into_iter()
+            .find(|known| known.extension() == format.get_ref())
+            .map(ActionStep::Compress)
+            .ok_or_else(|| {
+                invalid(
+                    format,
+                    tr!(
+                        "Unknown archive format “%1”. You can use: zip 7z tar.gz",
+                        format.get_ref()
+                    ),
+                )
+            });
     }
     if let Some(placement) = &raw.extract {
-        return match placement.get_ref().as_str() {
-            "here" => Ok(ActionStep::Extract(ArchiveExtractionPlacement::Smart)),
-            "folder" => Ok(ActionStep::Extract(
-                ArchiveExtractionPlacement::ArchiveFolder,
-            )),
-            _ => Err(invalid(placement, tr!("extract is “here” or “folder”"))),
-        };
+        return spelled(&EXTRACT_PLACEMENTS, placement.get_ref())
+            .map(ActionStep::Extract)
+            .ok_or_else(|| invalid(placement, tr!("extract is “here” or “folder”")));
     }
     if let Some(folder) = &raw.copy_to {
         return PathTemplate::parse(folder.get_ref())
@@ -222,11 +254,9 @@ fn parse_step(source: &Source<'_>, step: &Spanned<RawStep>) -> Result<ActionStep
             .map_err(|error| invalid(folder, error.0));
     }
     if let Some(scope) = &raw.trash {
-        return match scope.get_ref().as_str() {
-            "current" => Ok(ActionStep::Trash(TrashScope::Current)),
-            "selected" => Ok(ActionStep::Trash(TrashScope::Selected)),
-            _ => Err(invalid(scope, tr!("trash is “current” or “selected”"))),
-        };
+        return spelled(&TRASH_SCOPES, scope.get_ref())
+            .map(ActionStep::Trash)
+            .ok_or_else(|| invalid(scope, tr!("trash is “current” or “selected”")));
     }
     if let Some(command) = &raw.run {
         return CommandTemplate::parse(command.get_ref())

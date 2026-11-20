@@ -39,8 +39,11 @@ impl SettingsCategory {
     }
 }
 
-/// 设置详情区的二级页面；一级仍是 SettingsCategory 分类页。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 设置详情区的二级页面；一级仍是 SettingsCategory 分类页。二级页自己的状态放在这里，
+/// “在哪一页”和“那一页的状态”只有一个主人。
+#[derive(Debug, Clone)]
 pub(crate) enum SettingsSubpage {
     Preview,
+    /// “动作”分类下编辑一个动作。
+    ActionEditor(Box<crate::actions::editor::ActionEditor>),
 }

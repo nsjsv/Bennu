@@ -1,6 +1,7 @@
 //! 自定义动作接到文件管理器上：读动作文件夹、从菜单和快捷键开始一次运行、一步一步跑、
 //! 结束时通知。动作文件本身的模型在 `crate::actions`。
 
+mod editor;
 mod library_loading;
 mod notify;
 mod run;
@@ -12,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use iced::Task;
 
+pub(crate) use editor::EditorMessage;
 pub(crate) use library_loading::action_library_subscription;
 pub(crate) use run::ActionRuns;
 pub(crate) use steps::PreparedStep;
@@ -49,6 +51,9 @@ pub(crate) enum ActionMessage {
     /// 设置页的“打开动作文件夹”：不存在时先建好（只有自己能进），再在新标签页里打开。
     FolderOpenRequested,
     FolderReady(Result<PathBuf, String>),
+    /// 用默认程序打开一个动作文件（编辑页、写错的文件）。
+    FileOpenRequested(PathBuf),
+    Editor(EditorMessage),
 }
 
 /// 按了动作的快捷键、它却不适用时，底栏显示一会儿的说明。不弹窗：不打断正在做的事。
@@ -69,25 +74,26 @@ impl FileBrowser {
             }
             ActionMessage::Invoked { action, subject } => self.invoke_action(&action, subject),
             ActionMessage::StepPrepared { run, prepared } => self.accept_action_step(run, prepared),
-            ActionMessage::FolderOpenRequested => Task::perform(
-                async {
-                    let folder = crate::actions::action_folder();
-                    let created = folder.clone();
-                    tokio::task::spawn_blocking(move || {
-                        use std::os::unix::fs::DirBuilderExt;
-                        std::fs::DirBuilder::new()
-                            .recursive(true)
-                            .mode(0o700)
-                            .create(&created)
-                    })
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .map_err(|error| tr!("%1: %2", folder.display(), error))?;
-                    Ok(folder)
-                },
-                |ready| Message::Action(ActionMessage::FolderReady(ready)),
-            ),
+            ActionMessage::FolderOpenRequested => {
+                let folder = self.action_library.folder().to_path_buf();
+                Task::perform(
+                    async move {
+                        let created = folder.clone();
+                        tokio::task::spawn_blocking(move || {
+                            crate::actions::ensure_action_folder(&created)
+                        })
+                        .await
+                        .map_err(|error| error.to_string())??;
+                        Ok(folder)
+                    },
+                    |ready| Message::Action(ActionMessage::FolderReady(ready)),
+                )
+            }
             ActionMessage::FolderReady(Ok(folder)) => self.open_directory_in_new_tab(folder),
+            ActionMessage::FileOpenRequested(file) => {
+                crate::commands::open_file_command(file, self.terminal_emulator)
+            }
+            ActionMessage::Editor(message) => self.handle_editor_message(message),
             ActionMessage::FolderReady(Err(error)) => {
                 self.show_global_error(error);
                 Task::none()

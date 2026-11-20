@@ -56,11 +56,13 @@ pub(crate) enum AdvancedNewFolderMode {
     Numbered,
 }
 
-/// 创建完成后的收尾动作：None = 默认进重命名态。
+/// 新建的项建好后做什么，入队前定下：None = 默认进重命名态。高级新建文件夹选进入，
+/// 超级输入框的新建已经写好名字，只选中。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AdvancedNewFolderAfter {
+pub(crate) enum CreatedEntryAfter {
     Enter,
     EnterInNewTab,
+    Select,
 }
 
 #[derive(Debug, Clone)]
@@ -303,7 +305,7 @@ pub(crate) enum AdvancedNewFolderMessage {
     /// 鼠标进入/离开分裂按钮:只管整体提亮。
     SplitButtonHoverChanged(bool),
     /// 带收尾动作的确认(创建后进入 / 新标签进入)。
-    ConfirmedWithAfter(AdvancedNewFolderAfter),
+    ConfirmedWithAfter(CreatedEntryAfter),
     /// 嵌套链父目录的内容探测回执:预览据此提前标注叶子段磁盘重名或读不了。
     NestedNamesProbed {
         prefix: String,

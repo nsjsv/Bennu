@@ -249,6 +249,8 @@ fn user_preferences_round_trip_through_sqlite() {
         .set_limit(crate::config::PreviewSizeLimitKind::Sqlite, 8 * 1024 * 1024);
     config.search_history.record_submission("report");
     config.search_history.record_submission("images");
+    config.super_box_history.record_submission("g:~/下载");
+    config.super_box_mode = crate::super_box::BoxMode::Path;
     config.last_search_scope = Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")));
     config.shortcuts.set_keys(
         ShortcutAction::FocusPathInput,
@@ -327,6 +329,8 @@ fn user_preferences_round_trip_through_sqlite() {
     assert!(loaded.network_list_thumbnail_downloads_enabled);
     assert_eq!(loaded.preview_size_limits.sqlite_bytes, 8 * 1024 * 1024);
     assert_eq!(loaded.search_history.entries(), ["images", "report"]);
+    assert_eq!(loaded.super_box_history.entries(), ["g:~/下载"]);
+    assert_eq!(loaded.super_box_mode, crate::super_box::BoxMode::Path);
     assert_eq!(
         loaded.last_search_scope,
         Some(LastSearchScope::Directory(PathBuf::from("/srv/projects")))

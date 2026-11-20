@@ -46,6 +46,9 @@ impl FileBrowser {
         if self.shortcut_help_open {
             return self.shortcut_help_key(&key, modifiers);
         }
+        if let Some(task) = self.super_box_key(&key, modifiers) {
+            return task;
+        }
         if let Some(task) = self.file_context_menu_key(&key, modifiers) {
             return task;
         }
@@ -243,6 +246,7 @@ impl FileBrowser {
             || self.advanced_new_folder.is_some()
             || self.network_connection_editor.is_some()
             || self.open_with.is_some()
+            || self.super_box.is_some()
             || self.shortcut_help_open
     }
 
@@ -354,6 +358,7 @@ impl FileBrowser {
             ShortcutAction::ToggleSidebar => self.toggle_sidebar(),
             ShortcutAction::OpenSettings => self.open_settings(),
             ShortcutAction::ShowShortcuts => self.toggle_shortcut_help(),
+            ShortcutAction::OpenSuperBox => self.toggle_super_box(),
             ShortcutAction::OpenContextMenu => self.open_context_menu_from_keyboard(),
         }
     }

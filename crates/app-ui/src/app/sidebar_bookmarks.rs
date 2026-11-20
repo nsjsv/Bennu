@@ -396,7 +396,7 @@ impl FileBrowser {
         visual_offset
     }
 
-    fn sidebar_favorite_locations(&self) -> Vec<SidebarLocation> {
+    pub(super) fn sidebar_favorite_locations(&self) -> Vec<SidebarLocation> {
         self.sidebar_locations
             .iter()
             .filter(|location| location.kind.is_user_favorite())

@@ -82,6 +82,7 @@ mod split_commands;
 mod split_resize;
 mod startup;
 mod startup_settings;
+mod super_box;
 mod tabs;
 #[cfg(test)]
 mod task_driving_tests;
@@ -107,6 +108,7 @@ mod x11_dnd;
 
 use auxiliary_window::AuxiliaryWindow;
 pub(crate) use runtime::run;
+pub(crate) use super_box::{super_box_input_id, SuperBoxMessage};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -164,9 +166,9 @@ use crate::config;
 use crate::config::UiLanguage;
 use crate::model::ConvertState;
 use crate::model::{
-    AdvancedNewFolderAfter, AdvancedNewFolderState, ApplicationLogViewState, BatchRenameState,
-    BreadcrumbDropTargetBounds, BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab,
-    ColumnEntryBounds, ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuState,
+    AdvancedNewFolderState, ApplicationLogViewState, BatchRenameState, BreadcrumbDropTargetBounds,
+    BrowserPane, BrowserPaneId, BrowserPaneLayout, BrowserTab, ColumnEntryBounds,
+    ContextMenuSettingsDragState, ContextMenuSettingsPage, ContextMenuState, CreatedEntryAfter,
     DestructiveActionConfirmation, DirectoryOrderPhase, FileAreaMenuItem, FileDragSpringHover,
     FileDragState, FileDropPrompt, FileDropSessionState, FilePropertiesState,
     IconGridExpansionState, IconGridViewport, ListColumnKind, Message, PaneAddressBarTransition,
@@ -230,6 +232,8 @@ pub(crate) struct FileBrowser {
     list_expansion_follow: Option<view_modes::ListExpansionFollowPlan>,
     pub(crate) context_menu: Option<ContextMenuState>,
     pub(crate) open_with: Option<OpenWithState>,
+    /// 超级输入框（Alt+Space）。可关闭的阻断浮层，同 `open_with`。
+    pub(crate) super_box: Option<crate::super_box::SuperBox>,
     pub(crate) file_drop_prompt: Option<FileDropPrompt>,
     pub(crate) archive_creation: Option<ArchiveCreationState>,
     pub(crate) convert: Option<ConvertState>,
@@ -239,7 +243,7 @@ pub(crate) struct FileBrowser {
     pub(crate) batch_rename: Option<BatchRenameState>,
     pub(crate) advanced_new_folder: Option<AdvancedNewFolderState>,
     /// 确认时选定的收尾动作(创建后进入/新标签进入),完成边界消费一次。
-    pending_advanced_new_folder_after: Option<AdvancedNewFolderAfter>,
+    pending_created_entry_after: Option<CreatedEntryAfter>,
     pub(crate) sidebar_locations: Vec<SidebarLocation>,
     pub(crate) sidebar_devices: SidebarDeviceState,
     pub(crate) network_connections: NetworkConnectionState,
@@ -659,6 +663,7 @@ impl FileBrowser {
             list_expansion_follow: None,
             context_menu: None,
             open_with: None,
+            super_box: None,
             file_drop_prompt: None,
             archive_creation: None,
             convert: None,
@@ -667,7 +672,7 @@ impl FileBrowser {
             archive_member_password: None,
             batch_rename: None,
             advanced_new_folder: None,
-            pending_advanced_new_folder_after: None,
+            pending_created_entry_after: None,
             sidebar_locations: Vec::new(),
             sidebar_devices: SidebarDeviceState::loading(),
             network_connections: NetworkConnectionState::default(),

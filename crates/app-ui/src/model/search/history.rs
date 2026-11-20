@@ -1,13 +1,18 @@
+//! 最近提交过的输入，最新的在前：去掉首尾空白、同样的只留最新一条、最多 `LIMIT` 条。
+//! 搜索框和超级输入框各用一份，规则相同。
+
 use std::collections::HashSet;
 
 pub(crate) const SEARCH_HISTORY_LIMIT: usize = 10;
 
+pub(crate) type SearchHistory = InputHistory<SEARCH_HISTORY_LIMIT>;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SearchHistory {
+pub(crate) struct InputHistory<const LIMIT: usize> {
     entries: Vec<String>,
 }
 
-impl SearchHistory {
+impl<const LIMIT: usize> InputHistory<LIMIT> {
     pub(crate) fn from_persisted(entries: Vec<String>) -> Self {
         let mut seen = HashSet::new();
         let entries = entries
@@ -15,7 +20,7 @@ impl SearchHistory {
             .map(|entry| entry.trim().to_owned())
             .filter(|entry| !entry.is_empty())
             .filter(|entry| seen.insert(entry.clone()))
-            .take(SEARCH_HISTORY_LIMIT)
+            .take(LIMIT)
             .collect();
         Self { entries }
     }
@@ -39,7 +44,7 @@ impl SearchHistory {
         }
         self.entries.retain(|entry| entry != keyword);
         self.entries.insert(0, keyword.to_owned());
-        self.entries.truncate(SEARCH_HISTORY_LIMIT);
+        self.entries.truncate(LIMIT);
         true
     }
 

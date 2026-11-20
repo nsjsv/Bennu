@@ -564,6 +564,10 @@ impl FileBrowser {
             return Some(Task::none());
         }
 
+        if self.super_box.take().is_some() {
+            return Some(Task::none());
+        }
+
         if self.destructive_action_confirmation.is_some() {
             self.destructive_action_confirmation = None;
             return Some(Task::none());

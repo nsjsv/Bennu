@@ -127,6 +127,7 @@ More tutorials live in `docs/`:
 - [Matugen color scheme](docs/matugen.md): generate a palette from your wallpaper, hot-reloaded across all windows
 - [Niri floating windows](docs/niri.md): open settings, properties, and preview windows as floating windows
 - [Custom actions](docs/actions.md) (in Chinese): chain conversion, compression, copying, moving and commands into your own context menu entries with shortcuts
+- [Super box](docs/super-box.md) (in Chinese): Alt+Space finds features, actions and settings, goes to paths and makes new files from the keyboard
 
 ## Building from source
 

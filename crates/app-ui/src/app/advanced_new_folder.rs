@@ -18,12 +18,12 @@ impl FileBrowser {
     ) -> Task<Message> {
         match message {
             AdvancedNewFolderMessage::Confirmed => {
-                self.pending_advanced_new_folder_after = None;
+                self.pending_created_entry_after = None;
                 self.confirm_advanced_new_folder()
             }
             AdvancedNewFolderMessage::ConfirmedWithAfter(after) => {
                 self.update_advanced_new_folder(|state| state.after_menu_open = false);
-                self.pending_advanced_new_folder_after = Some(after);
+                self.pending_created_entry_after = Some(after);
                 self.confirm_advanced_new_folder()
             }
             AdvancedNewFolderMessage::Cancel => {
@@ -189,7 +189,7 @@ async fn directory_names(path: &Path) -> std::io::Result<HashSet<String>> {
 mod tests {
     use super::*;
     use crate::config;
-    use crate::model::AdvancedNewFolderAfter;
+    use crate::model::CreatedEntryAfter;
 
     #[tokio::test]
     async fn a_missing_parent_is_empty_and_an_unreadable_one_is_reported() {
@@ -286,7 +286,7 @@ mod tests {
         ));
 
         drop(browser.handle_advanced_new_folder_message(
-            AdvancedNewFolderMessage::ConfirmedWithAfter(AdvancedNewFolderAfter::Enter),
+            AdvancedNewFolderMessage::ConfirmedWithAfter(CreatedEntryAfter::Enter),
         ));
 
         assert!(browser.advanced_new_folder.is_some());

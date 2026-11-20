@@ -8,6 +8,7 @@ mod operations;
 mod preview;
 mod search;
 mod settings;
+mod super_box;
 mod tools;
 mod transfer;
 
@@ -19,6 +20,7 @@ pub(crate) const TABLES: &[&[(&str, &str)]] = &[
     preview::ENTRIES,
     search::ENTRIES,
     settings::ENTRIES,
+    super_box::ENTRIES,
     tools::ENTRIES,
     transfer::ENTRIES,
 ];

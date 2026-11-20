@@ -582,6 +582,7 @@ impl FileBrowser {
                 Task::none()
             }
             Message::LetterModeSelected(mode) => self.select_letter_mode(mode),
+            Message::SuperBoxDefaultModeSelected(mode) => self.select_super_box_default_mode(mode),
             Message::ShortcutCaptureStarted(action, slot) => {
                 self.start_shortcut_capture(action, slot)
             }
@@ -616,6 +617,7 @@ impl FileBrowser {
             Message::ArchiveCreation(message) => self.handle_archive_creation_message(message),
             Message::Convert(message) => self.handle_convert_message(message),
             Message::Action(message) => self.handle_action_message(message),
+            Message::SuperBox(message) => self.handle_super_box_message(message),
             Message::Checksum(message) => self.handle_checksum_message(message),
             Message::ArchiveExtraction(message) => self.handle_archive_extraction_message(message),
             Message::ArchiveMemberPassword(message) => {

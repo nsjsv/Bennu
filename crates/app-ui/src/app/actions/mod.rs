@@ -132,15 +132,21 @@ impl FileBrowser {
         }
     }
 
+    /// 用键盘（快捷键、超级输入框）执行动作时作用在什么上：有选中项时对选中项，没有时对当前文件夹。
+    pub(super) fn keyboard_action_subject(&self) -> Option<ActionSubject> {
+        if self.selected_paths_for_operation().is_empty() {
+            self.tab()
+                .current_directory()
+                .map(|directory| ActionSubject::Folder(directory.to_path_buf()))
+        } else {
+            Some(ActionSubject::Selection)
+        }
+    }
+
     /// 动作的快捷键：有选中项时对选中项，没有时对当前文件夹。
     pub(super) fn invoke_action_from_keyboard(&mut self, action: &ActionId) -> Task<Message> {
-        let subject = if self.selected_paths_for_operation().is_empty() {
-            match self.tab().current_directory() {
-                Some(directory) => ActionSubject::Folder(directory.to_path_buf()),
-                None => return Task::none(),
-            }
-        } else {
-            ActionSubject::Selection
+        let Some(subject) = self.keyboard_action_subject() else {
+            return Task::none();
         };
         if let Some(task) = self.start_if_applicable(action, &subject) {
             return task;

@@ -104,8 +104,8 @@ mod file_entry_content_modifier;
 pub(crate) use file_entry_content_modifier::FileEntryContentModifier;
 mod advanced_new_folder;
 pub(crate) use advanced_new_folder::{
-    AdvancedNewFolderAfter, AdvancedNewFolderMessage, AdvancedNewFolderMode,
-    AdvancedNewFolderState, NestedParentListing, PlannedFolder, PlannedFolderStatus,
+    AdvancedNewFolderMessage, AdvancedNewFolderMode, AdvancedNewFolderState, CreatedEntryAfter,
+    NestedParentListing, PlannedFolder, PlannedFolderStatus,
 };
 mod convert;
 pub(crate) use convert::{
@@ -184,13 +184,13 @@ pub(crate) use file_core::log_detail::{
 };
 pub(crate) mod search;
 pub(crate) use search::{
-    DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, LastSearchScope,
-    SearchDateField, SearchDatePreset, SearchDirectoryScope, SearchEntryTypePreset,
-    SearchFilterMenu, SearchFilterPick, SearchHistory, SearchHistoryInteraction, SearchHitDetail,
-    SearchInputFocus, SearchInputFocusCheckOrigin, SearchInputFocusCheckRequest,
-    SearchInputStabilizationRequest, SearchInputStabilizationSubject, SearchResultCompletion,
-    SearchRunId, SearchSizePreset, SearchWorkspaceSessionId, SearchWorkspaceState,
-    SEARCH_RESULT_TOTAL_LIMIT,
+    DirectoryFallbackOutcome, IndexedSearchOutcome, IndexedSearchRequest, InputHistory,
+    LastSearchScope, SearchDateField, SearchDatePreset, SearchDirectoryScope,
+    SearchEntryTypePreset, SearchFilterMenu, SearchFilterPick, SearchHistory,
+    SearchHistoryInteraction, SearchHitDetail, SearchInputFocus, SearchInputFocusCheckOrigin,
+    SearchInputFocusCheckRequest, SearchInputStabilizationRequest, SearchInputStabilizationSubject,
+    SearchResultCompletion, SearchRunId, SearchSizePreset, SearchWorkspaceSessionId,
+    SearchWorkspaceState, SEARCH_RESULT_TOTAL_LIMIT,
 };
 mod search_service;
 pub(crate) use search_service::{
@@ -501,6 +501,7 @@ pub(crate) enum Message {
     /// 跟着消失）。
     LetterInputDeadlinePassed,
     LetterModeSelected(crate::shortcuts::LetterMode),
+    SuperBoxDefaultModeSelected(crate::super_box::BoxMode),
     ShortcutCaptureStarted(crate::shortcuts::ShortcutTarget, CaptureSlot),
     ShortcutCaptureCanceled,
     ShortcutCapturedKeyRemoved,
@@ -514,6 +515,7 @@ pub(crate) enum Message {
     ArchiveCreation(ArchiveCreationMessage),
     Convert(ConvertMessage),
     Action(crate::app::actions::ActionMessage),
+    SuperBox(crate::app::SuperBoxMessage),
     Checksum(ChecksumMessage),
     ArchiveExtraction(ArchiveExtractionMessage),
     /// 成员密码弹窗的内部流转(输入/提交/Open 重试终态)。

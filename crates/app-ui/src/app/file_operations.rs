@@ -14,7 +14,7 @@ use super::task_end::TaskOwner;
 use super::FileBrowser;
 use crate::commands::{file_operation_driver_task, file_operation_persistence_command};
 use crate::model::{
-    AdvancedNewFolderAfter, BrowserLocation, BrowserViewMode, DestructiveActionConfirmation,
+    BrowserLocation, BrowserViewMode, CreatedEntryAfter, DestructiveActionConfirmation,
     IconGridExpansionMigration, Message, NavigationMode,
 };
 use crate::operation_history::TaskEnd;
@@ -262,20 +262,25 @@ impl FileBrowser {
             })
             .flatten();
 
-        // 高级新建的收尾动作(进入/新标签进入)替代默认的重命名态;
+        // 入队前定下的收尾动作(进入/新标签进入/只选中)替代默认的重命名态;
         // 历史重放和动作不消费收尾意图;创建失败时丢弃,避免遗留到无关操作。
         let mut tasks: Vec<Task<Message>> = Vec::new();
-        let is_create_directories = completed_operation.as_ref().is_some_and(|operation| {
-            matches!(operation, QueuedFileOperation::CreateDirectories { .. })
+        let creates_entry = completed_operation.as_ref().is_some_and(|operation| {
+            matches!(
+                operation,
+                QueuedFileOperation::CreateDirectory { .. }
+                    | QueuedFileOperation::CreateDirectories { .. }
+                    | QueuedFileOperation::CreateEmptyFile { .. }
+            )
         });
-        let after = if user_task && is_create_directories {
-            self.pending_advanced_new_folder_after.take()
+        let after = if user_task && creates_entry {
+            self.pending_created_entry_after.take()
         } else {
             None
         }
         .filter(|_| completed_successfully);
         match (after, created_path.clone()) {
-            (Some(AdvancedNewFolderAfter::Enter), Some(path)) => {
+            (Some(CreatedEntryAfter::Enter), Some(path)) => {
                 // 多栏视图:在另一栏打开新文件夹;其他视图:直接进入。
                 if self.tab().view_mode() == BrowserViewMode::Columns {
                     tasks.push(self.open_column_for_directory(path));
@@ -283,8 +288,11 @@ impl FileBrowser {
                     tasks.push(self.navigate_to(path, NavigationMode::RecordHistory));
                 }
             }
-            (Some(AdvancedNewFolderAfter::EnterInNewTab), Some(path)) => {
+            (Some(CreatedEntryAfter::EnterInNewTab), Some(path)) => {
                 tasks.push(self.open_directory_in_new_tab(path));
+            }
+            (Some(CreatedEntryAfter::Select), Some(path)) => {
+                self.select_operation_result_paths(vec![path]);
             }
             (_, _) => {
                 if let Some(path) = created_path {

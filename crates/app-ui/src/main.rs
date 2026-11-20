@@ -67,6 +67,7 @@ mod sidebar_devices;
 mod startup_probe_cache;
 mod startup_rendering;
 mod startup_trace;
+mod super_box;
 mod terminal_detach;
 mod terminal_panel;
 // 纯搬移：文本预览模型已下沉 bennu-preview，re-export 维持

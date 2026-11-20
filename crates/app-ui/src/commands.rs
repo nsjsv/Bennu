@@ -669,7 +669,7 @@ async fn load_sidebar_locations(
     locations
 }
 
-async fn load_path_suggestions(input: String, current_dir: PathBuf) -> Vec<PathBuf> {
+pub(crate) async fn load_path_suggestions(input: String, current_dir: PathBuf) -> Vec<PathBuf> {
     let Some((directory, prefix)) = suggestion_directory_and_prefix(&input, &current_dir) else {
         return Vec::new();
     };

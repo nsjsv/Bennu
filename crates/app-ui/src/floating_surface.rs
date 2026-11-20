@@ -37,6 +37,7 @@ fn fallback_floating_scroll<'a, Message: Clone + 'a>(
     let auto_positioned = matches!(
         floating.placement,
         FloatingPlacement::Center
+            | FloatingPlacement::TopCenter { .. }
             | FloatingPlacement::At(_)
             | FloatingPlacement::BesideParent { .. }
             | FloatingPlacement::BottomLeft { .. }
@@ -227,6 +228,11 @@ enum BackgroundUpdateDecision {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum FloatingPlacement {
     Center,
+    /// 水平居中，上沿钉在内容区顶部往下 `top` 处：内容变高变矮时只往下长，不上下跳
+    /// （超级输入框的结果行随打字变多变少）。
+    TopCenter {
+        top: f32,
+    },
     At(Point),
     Free(Point),
     /// 右下角钉在 anchor 上,元素往锚点左上展开;布局后按实际尺寸
@@ -693,6 +699,7 @@ fn floating_max_size(placement: FloatingPlacement, bounds: Size, area: FloatingA
     match placement {
         FloatingPlacement::Free(_) | FloatingPlacement::AnchorBottomRight { .. } => bounds,
         FloatingPlacement::Center
+        | FloatingPlacement::TopCenter { .. }
         | FloatingPlacement::At(_)
         | FloatingPlacement::BesideParent { .. }
         | FloatingPlacement::BottomLeft { .. }
@@ -717,6 +724,9 @@ fn floating_position(
             (surface.width - size.width) / 2.0,
             area_top + (available_height - size.height) / 2.0,
         ),
+        FloatingPlacement::TopCenter { top } => {
+            Point::new((surface.width - size.width) / 2.0, area_top + top)
+        }
         FloatingPlacement::At(position) | FloatingPlacement::Free(position) => position,
         FloatingPlacement::AnchorBottomRight { anchor } => {
             Point::new(anchor.x - size.width, anchor.y - size.height)

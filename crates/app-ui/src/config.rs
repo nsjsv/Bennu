@@ -361,6 +361,9 @@ pub(crate) struct UserConfig {
     pub(crate) search_content_indexing_enabled: bool,
     pub(crate) search_max_extract_bytes: u64,
     pub(crate) search_history: SearchHistory,
+    pub(crate) super_box_history: crate::super_box::SuperBoxHistory,
+    /// 超级输入框打开时的模式。
+    pub(crate) super_box_mode: crate::super_box::BoxMode,
     /// 最近一次搜索的范围记忆；打开下一个搜索工作区时恢复为默认档。
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
@@ -511,6 +514,8 @@ pub(crate) fn default_user_config() -> UserConfig {
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,
         search_history: SearchHistory::default(),
+        super_box_history: Default::default(),
+        super_box_mode: crate::super_box::BoxMode::Search,
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
@@ -571,6 +576,8 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         search_content_indexing_enabled: true,
         search_max_extract_bytes: DEFAULT_SEARCH_MAX_EXTRACT_BYTES,
         search_history: SearchHistory::default(),
+        super_box_history: Default::default(),
+        super_box_mode: crate::super_box::BoxMode::Search,
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,

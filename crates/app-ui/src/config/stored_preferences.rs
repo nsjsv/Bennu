@@ -142,6 +142,12 @@ pub(crate) struct StoredUserPreferences {
     /// 转换对话框记住的设置;None = 旧数据或从没转换过。
     #[serde(default)]
     pub convert_defaults: Option<super::convert_defaults::StoredConvertDefaults>,
+    /// 超级输入框执行过的输入，带模式前缀，最新的在前。
+    #[serde(default)]
+    pub super_box_history: Vec<String>,
+    /// 超级输入框打开时的模式（`search` / `path`）；None = 旧版本数据。
+    #[serde(default)]
+    pub super_box_mode: Option<String>,
 }
 
 /// 收藏设备条目:fingerprint 是 LocalSend 设备身份(证书指纹)。
@@ -251,6 +257,8 @@ impl Default for StoredUserPreferences {
             transfer_accept_mode: default_transfer_accept_mode(),
             transfer_receive_pin: None,
             convert_defaults: None,
+            super_box_history: Vec::new(),
+            super_box_mode: None,
         }
     }
 }

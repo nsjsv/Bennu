@@ -8,7 +8,7 @@ mod overrides;
 
 #[cfg(test)]
 pub(crate) use action::ShortcutGroup;
-pub(crate) use action::{DeclaredContext, ShortcutAction};
+pub(crate) use action::{DeclaredContext, ShortcutAction, ShortcutScope};
 pub(crate) use fixed_keys::{
     fixed_key, is_reserved, FixedKey, MoveExtent, MoveStep, SelectionMove,
 };

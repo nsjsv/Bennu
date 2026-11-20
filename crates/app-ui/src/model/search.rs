@@ -16,7 +16,7 @@ pub(crate) use filters::{
     SearchSizePreset,
 };
 mod history;
-pub(crate) use history::SearchHistory;
+pub(crate) use history::{InputHistory, SearchHistory};
 mod filter_menu;
 pub(crate) use filter_menu::{SearchFilterMenu, SearchFilterPick};
 mod order;

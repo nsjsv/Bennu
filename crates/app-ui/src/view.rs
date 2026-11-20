@@ -45,6 +45,7 @@ mod settings_window;
 mod shortcut_help;
 mod shortcut_settings;
 mod sidebar_panel;
+mod super_box;
 mod tab_bar;
 pub(crate) mod tab_motion;
 mod toolbar_controls;
@@ -422,6 +423,15 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         floating.push(FloatingContent {
             element: open_with_panel(open_with),
             placement: FloatingPlacement::Center,
+            captures_pointer: true,
+        });
+    } else if let Some(super_box) = &browser.super_box {
+        floating_input = BrowserFloatingInput::DismissibleBlocking;
+        floating.push(FloatingContent {
+            element: super_box::super_box_panel(super_box, &browser.home_dir),
+            placement: FloatingPlacement::TopCenter {
+                top: super_box::SUPER_BOX_TOP,
+            },
             captures_pointer: true,
         });
     }

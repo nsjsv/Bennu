@@ -8,8 +8,8 @@ use crate::appearance::{
     enhanced_vertical_scrollbar_direction, muted_text_color,
 };
 use crate::model::{
-    invalid_entry_name_label, AdvancedNewFolderAfter, AdvancedNewFolderMessage,
-    AdvancedNewFolderMode, AdvancedNewFolderState, Message, PlannedFolder, PlannedFolderStatus,
+    invalid_entry_name_label, AdvancedNewFolderMessage, AdvancedNewFolderMode,
+    AdvancedNewFolderState, CreatedEntryAfter, Message, PlannedFolder, PlannedFolderStatus,
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::{anchored_popup_expanding, dismiss_on_outside_press};
@@ -311,10 +311,10 @@ fn advanced_menu_width(labels: &[String], font_size: f32, padding: f32) -> f32 {
 
 fn after_create_menu(disabled: bool) -> Element<'static, Message> {
     let choices = [
-        (tr!("Enter after creation"), AdvancedNewFolderAfter::Enter),
+        (tr!("Enter after creation"), CreatedEntryAfter::Enter),
         (
             tr!("Open in new tab after creation"),
-            AdvancedNewFolderAfter::EnterInNewTab,
+            CreatedEntryAfter::EnterInNewTab,
         ),
     ];
     // 容器宽 = 最长项文字宽:各项 Fill 后等宽,整行都是可点热区。

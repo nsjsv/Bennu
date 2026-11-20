@@ -223,7 +223,38 @@ fn general_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>>
         None,
         terminal_shell_dropdown(browser.user_config().terminal_shell.clone()),
     ));
-    vec![settings_card(rows)]
+    vec![settings_card(rows), super_box_settings_card(browser)]
+}
+
+/// 超级输入框打开时的模式；打开后 Tab 照样能切。
+fn super_box_settings_card(browser: &FileBrowser) -> Element<'_, Message> {
+    let selected = browser.user_config().super_box_mode;
+    let choices = crate::super_box::BoxMode::DEFAULT_CHOICES
+        .into_iter()
+        .map(|mode| SegmentedChoice {
+            label: mode.label(),
+            selected: mode == selected,
+            message: Some(Message::SuperBoxDefaultModeSelected(mode)),
+            tooltip: None,
+        })
+        .collect();
+    let key = browser
+        .keymap()
+        .keys(crate::shortcuts::ShortcutAction::OpenSuperBox)
+        .first()
+        .map(|key| key.display_label());
+    let hint = match key {
+        Some(key) => tr!(
+            "%1 opens the super box; Tab switches the mode while it is open.",
+            key
+        ),
+        None => tr!("Tab switches the mode while the super box is open."),
+    };
+    settings_card(vec![choice_row(
+        tr!("Super Box Opens In"),
+        Some(RowNote::Hint(hint)),
+        choices,
+    )])
 }
 
 fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Message>> {

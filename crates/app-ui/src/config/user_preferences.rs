@@ -82,6 +82,8 @@ pub(crate) struct UserPreferences {
     pub(crate) shortcuts: ShortcutConfig,
     pub(crate) letter_mode: crate::shortcuts::LetterMode,
     pub(crate) search_history: crate::model::SearchHistory,
+    pub(crate) super_box_history: crate::super_box::SuperBoxHistory,
+    pub(crate) super_box_mode: crate::super_box::BoxMode,
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
@@ -144,6 +146,8 @@ impl UserPreferences {
             shortcuts: config.shortcuts.clone(),
             letter_mode: config.letter_mode,
             search_history: config.search_history.clone(),
+            super_box_history: config.super_box_history.clone(),
+            super_box_mode: config.super_box_mode,
             last_search_scope: config.last_search_scope.clone(),
             theme_mode: config.theme_mode,
             color_scheme: config.color_scheme,
@@ -201,6 +205,8 @@ impl UserPreferences {
         config.shortcuts = self.shortcuts.clone();
         config.letter_mode = self.letter_mode;
         config.search_history = self.search_history.clone();
+        config.super_box_history = self.super_box_history.clone();
+        config.super_box_mode = self.super_box_mode;
         config.last_search_scope = self.last_search_scope.clone();
         config.theme_mode = self.theme_mode;
         config.color_scheme = self.color_scheme;
@@ -300,6 +306,8 @@ impl UserPreferences {
         stored.shortcut_overrides = Some(stored_shortcut_overrides(&self.shortcuts));
         stored.letter_keys = self.letter_mode.config_value().to_owned();
         stored.search_history = self.search_history.entries().to_vec();
+        stored.super_box_history = self.super_box_history.entries().to_vec();
+        stored.super_box_mode = Some(self.super_box_mode.config_value().to_owned());
         stored.last_search_scope = self.last_search_scope.as_ref().map(|scope| match scope {
             LastSearchScope::Global => StoredLastSearchScope::Global,
             LastSearchScope::Directory(path) => StoredLastSearchScope::Directory {
@@ -511,6 +519,18 @@ impl UserPreferences {
             search_history: crate::model::SearchHistory::from_persisted(
                 stored.search_history.clone(),
             ),
+            super_box_history: crate::super_box::SuperBoxHistory::from_persisted(
+                stored.super_box_history.clone(),
+            ),
+            // None = 旧版本数据，用默认的搜索。
+            super_box_mode: match stored.super_box_mode.as_deref() {
+                None => default_preferences.super_box_mode,
+                Some(value) => unrecognized.value_or_default(
+                    "super_box_mode",
+                    crate::super_box::BoxMode::from_config_value(value),
+                    default_preferences.super_box_mode,
+                ),
+            },
             last_search_scope: stored.last_search_scope.as_ref().map(|scope| match scope {
                 StoredLastSearchScope::Global => LastSearchScope::Global,
                 StoredLastSearchScope::Directory { path } => {

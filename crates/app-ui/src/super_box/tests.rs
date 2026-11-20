@@ -1,0 +1,324 @@
+use std::time::Instant;
+
+use super::matching::ranked;
+use super::mode::{fold, split_prefix};
+use super::targets::{jump_path, read_new_entry};
+use super::*;
+use crate::actions::ActionId;
+use crate::model::SettingsCategory;
+use crate::shortcuts::ShortcutAction;
+
+fn context<'a>(taken: &'a dyn Fn(&str) -> bool) -> BoxContext<'a> {
+    BoxContext {
+        current_dir: Some(Path::new("/home/me/work")),
+        home: Path::new("/home/me"),
+        cannot_create: None,
+        taken,
+    }
+}
+
+fn nothing_taken(_: &str) -> bool {
+    false
+}
+
+fn feature(title: &str, key: &str) -> BoxEntry {
+    BoxEntry::new(
+        EntryKind::Feature,
+        title.to_owned(),
+        BoxTarget::Builtin(ShortcutAction::NewFolder),
+    )
+    .with_keywords(key)
+}
+
+fn titles(entries: &[BoxEntry], text: &str) -> Vec<String> {
+    ranked(entries, text)
+        .into_iter()
+        .map(|index| entries[index].title.clone())
+        .collect()
+}
+
+#[test]
+fn prefixes_switch_modes_with_either_colon() {
+    assert_eq!(split_prefix("g:~/下载"), Some((BoxMode::Path, "~/下载")));
+    assert_eq!(split_prefix("G：  /tmp"), Some((BoxMode::Path, "/tmp")));
+    assert_eq!(split_prefix("n: 笔记.md"), Some((BoxMode::New, "笔记.md")));
+    assert_eq!(split_prefix("x: 别的"), None);
+    assert_eq!(split_prefix("g"), None);
+    assert_eq!(split_prefix("go:"), None);
+}
+
+#[test]
+fn tab_goes_round_the_modes_both_ways() {
+    let mut mode = BoxMode::Search;
+    let mut seen = Vec::new();
+    for _ in 0..BoxMode::ALL.len() {
+        mode = mode.next();
+        seen.push(mode);
+    }
+    assert_eq!(seen, [BoxMode::Path, BoxMode::New, BoxMode::Search]);
+    assert_eq!(BoxMode::Search.previous(), BoxMode::New);
+    for mode in BoxMode::ALL {
+        assert_eq!(mode.next().previous(), mode);
+        assert_eq!(BoxMode::from_config_value(mode.config_value()), Some(mode));
+    }
+}
+
+#[test]
+fn full_width_letters_and_case_fold_away() {
+    assert_eq!(fold("ＸＪ Ｗｊ　New"), "xj wj new");
+}
+
+#[test]
+fn matches_rank_start_then_word_then_pinyin_then_anywhere_then_keywords() {
+    let entries = vec![
+        feature("复制路径", "copy_path"),
+        feature("新建文件夹", "new_folder"),
+        feature("打开新标签页", "new_tab"),
+        feature("新建文件", "new_file"),
+        feature("Show Hidden Files", "toggle_hidden_files"),
+    ];
+    assert_eq!(titles(&entries, "新建"), ["新建文件", "新建文件夹"]);
+    assert_eq!(titles(&entries, "xjwjj"), ["新建文件夹"]);
+    assert_eq!(titles(&entries, "hidden"), ["Show Hidden Files"]);
+    assert_eq!(titles(&entries, "标签"), ["打开新标签页"]);
+    // 中文界面里打英文配置名：排在名字命中的后面。
+    assert_eq!(
+        titles(&entries, "new"),
+        ["新建文件", "新建文件夹", "打开新标签页"]
+    );
+    assert!(titles(&entries, "   ").is_empty());
+}
+
+#[test]
+fn a_whole_match_comes_before_a_longer_one_of_any_kind() {
+    let entries = vec![
+        feature("快捷键一览", "show_shortcuts"),
+        BoxEntry::new(
+            EntryKind::Setting,
+            "快捷键".to_owned(),
+            BoxTarget::Settings(SettingsCategory::Shortcuts),
+        ),
+        feature("Search", "search"),
+        feature("Searching Again", "search_again"),
+    ];
+    assert_eq!(titles(&entries, "kjj"), ["快捷键", "快捷键一览"]);
+    assert_eq!(titles(&entries, "快捷键"), ["快捷键", "快捷键一览"]);
+    assert_eq!(titles(&entries, "search"), ["Search", "Searching Again"]);
+}
+
+#[test]
+fn within_a_tier_features_come_before_actions_settings_and_favorites() {
+    let entries = vec![
+        BoxEntry::new(
+            EntryKind::Favorite,
+            "Downloads".to_owned(),
+            BoxTarget::Folder(PathBuf::from("/home/me/Downloads")),
+        ),
+        BoxEntry::new(
+            EntryKind::Setting,
+            "Display".to_owned(),
+            BoxTarget::Settings(SettingsCategory::Appearance),
+        ),
+        BoxEntry::new(
+            EntryKind::Action,
+            "Deploy".to_owned(),
+            BoxTarget::Action(ActionId::from_file_stem("deploy")),
+        ),
+        feature("Delete", "delete"),
+    ];
+    assert_eq!(
+        titles(&entries, "d"),
+        ["Delete", "Deploy", "Display", "Downloads"]
+    );
+}
+
+#[test]
+fn matching_stays_well_under_a_millisecond_per_keystroke() {
+    let entries = (0..120)
+        .map(|index| feature(&format!("新建文件夹 动作 {index}"), "new_folder_action"))
+        .collect::<Vec<_>>();
+    let typed = "xjwjj dz 1";
+    let started = Instant::now();
+    for end in 1..=typed.len() {
+        std::hint::black_box(ranked(&entries, &typed[..end]));
+    }
+    let per_keystroke = started.elapsed() / typed.len() as u32;
+    assert!(
+        per_keystroke.as_micros() < 1000,
+        "{per_keystroke:?} per keystroke"
+    );
+}
+
+#[test]
+fn jump_paths_expand_the_home_folder_and_follow_the_current_folder() {
+    let home = Path::new("/home/me");
+    let here = Some(Path::new("/home/me/work"));
+    assert_eq!(jump_path("~", here, home), Some(PathBuf::from("/home/me")));
+    assert_eq!(
+        jump_path(" ~/下载 ", here, home),
+        Some(PathBuf::from("/home/me/下载"))
+    );
+    assert_eq!(jump_path("/tmp", None, home), Some(PathBuf::from("/tmp")));
+    assert_eq!(
+        jump_path("src", here, home),
+        Some(PathBuf::from("/home/me/work/src"))
+    );
+    assert_eq!(jump_path("src", None, home), None);
+    assert_eq!(jump_path("  ", here, home), None);
+}
+
+#[test]
+fn new_names_are_checked_against_the_rules_and_the_folder() {
+    let taken = |name: &str| name == "已有.txt";
+    assert_eq!(
+        read_new_entry(" 笔记.md ", taken),
+        Ok(NewEntry::File("笔记.md".to_owned()))
+    );
+    assert_eq!(
+        read_new_entry("素材/", taken),
+        Ok(NewEntry::Folder("素材".to_owned()))
+    );
+    assert!(read_new_entry("已有.txt", taken).is_err());
+    for bad in ["", "/", "..", ".", "a/b", "a/b/"] {
+        assert!(read_new_entry(bad, taken).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let mut super_box = SuperBox::open(BoxMode::Search, Vec::new(), Vec::new(), &context);
+    let lookup = super_box.set_input("g:~/下载".to_owned(), &context);
+    assert_eq!(super_box.mode(), BoxMode::Path);
+    assert_eq!(super_box.input(), "~/下载");
+    assert_eq!(
+        lookup,
+        Some(JumpLookup {
+            generation: super_box.generation(),
+            path: "/home/me/下载".to_owned()
+        })
+    );
+    assert_eq!(
+        super_box.selected_row(),
+        Some(&BoxRow::JumpTo(PathBuf::from("/home/me/下载")))
+    );
+
+    super_box.set_input("n:素材/".to_owned(), &context);
+    assert_eq!(super_box.mode(), BoxMode::New);
+    assert_eq!(
+        super_box.rows(),
+        [BoxRow::Create(NewEntry::Folder("素材".to_owned()))]
+    );
+    assert_eq!(super_box.history_text(), "n:素材/");
+
+    let mut search = SuperBox::open(BoxMode::Search, Vec::new(), Vec::new(), &context);
+    search.set_input("/tmp".to_owned(), &context);
+    assert_eq!(search.mode(), BoxMode::Path);
+    assert_eq!(search.input(), "/tmp");
+}
+
+#[test]
+fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let entries = vec![feature("新建文件夹", "new_folder")];
+    let mut super_box = SuperBox::open(BoxMode::Search, entries, Vec::new(), &context);
+    super_box.set_input("新建".to_owned(), &context);
+    assert_eq!(super_box.rows(), [BoxRow::Entry(0)]);
+    super_box.next_mode(&context);
+    assert_eq!(super_box.input(), "新建");
+    assert!(matches!(super_box.rows(), [BoxRow::JumpTo(_)]));
+    super_box.next_mode(&context);
+    assert_eq!(
+        super_box.rows(),
+        [BoxRow::Create(NewEntry::File("新建".to_owned()))]
+    );
+    super_box.previous_mode(&context);
+    assert_eq!(super_box.mode(), BoxMode::Path);
+}
+
+#[test]
+fn an_empty_box_lists_the_history_of_its_mode() {
+    let taken = nothing_taken;
+    let context = context(&taken);
+    let history = vec![
+        "g:~/下载".to_owned(),
+        "新建".to_owned(),
+        "g:/tmp".to_owned(),
+    ];
+    let super_box = SuperBox::open(BoxMode::Path, Vec::new(), history.clone(), &context);
+    assert_eq!(
+        super_box.rows(),
+        [
+            BoxRow::History("g:~/下载".to_owned()),
+            BoxRow::History("g:/tmp".to_owned())
+        ]
+    );
+    let super_box = SuperBox::open(BoxMode::Search, Vec::new(), history, &context);
+    assert_eq!(super_box.rows(), [BoxRow::History("新建".to_owned())]);
+}
+
+#[test]
+fn stale_suggestions_are_dropped_and_problems_cannot_be_selected() {
+    let taken = |name: &str| name == "已有";
+    let context = context(&taken);
+    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), &context);
+    let first = super_box.set_input("~/d".to_owned(), &context).unwrap();
+    super_box.set_input("~/do".to_owned(), &context);
+    super_box.accept_suggestions(
+        first.generation,
+        vec![PathBuf::from("/home/me/desktop")],
+        &context,
+    );
+    assert_eq!(super_box.rows().len(), 1, "the older lookup is ignored");
+    super_box.accept_suggestions(
+        super_box.generation(),
+        vec![
+            PathBuf::from("/home/me/documents"),
+            PathBuf::from("/home/me/downloads"),
+        ],
+        &context,
+    );
+    assert_eq!(super_box.rows().len(), 3);
+    super_box.select_next();
+    super_box.select_next();
+    super_box.select_next();
+    assert_eq!(super_box.selected(), Some(0), "selection wraps round");
+    super_box.select_previous();
+    assert_eq!(super_box.selected(), Some(2));
+
+    super_box.set_input("n:已有".to_owned(), &context);
+    assert!(matches!(super_box.rows(), [BoxRow::Problem(_)]));
+    assert_eq!(super_box.selected(), None);
+    super_box.select_next();
+    super_box.select(0);
+    assert_eq!(super_box.selected(), None);
+}
+
+#[test]
+fn nothing_is_created_where_creating_is_not_possible() {
+    let taken = nothing_taken;
+    let context = BoxContext {
+        cannot_create: Some("回收站里不能新建".to_owned()),
+        ..context(&taken)
+    };
+    let mut super_box = SuperBox::open(BoxMode::New, Vec::new(), Vec::new(), &context);
+    super_box.set_input("a.txt".to_owned(), &context);
+    assert_eq!(
+        super_box.rows(),
+        [BoxRow::Problem("回收站里不能新建".to_owned())]
+    );
+}
+
+#[test]
+fn the_history_keeps_a_hundred_distinct_entries() {
+    let mut history = SuperBoxHistory::default();
+    for index in 0..150 {
+        history.record_submission(&format!("g:/tmp/{index}"));
+    }
+    history.record_submission("g:/tmp/120");
+    assert_eq!(history.entries().len(), 100);
+    assert_eq!(history.entries()[0], "g:/tmp/120");
+    assert_eq!(history.entries()[1], "g:/tmp/149");
+}

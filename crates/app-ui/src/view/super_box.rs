@@ -296,7 +296,7 @@ fn empty_hint(super_box: &SuperBox) -> String {
             "Type a command. It runs in this folder with your shell, the selected items are its arguments (\"$@\", in fish $argv). Tab completes, → takes the faded suggestion. Full-screen programs move to the terminal panel; Ctrl+Enter runs the command there."
         ),
         BoxMode::Search => tr!(
-            "Type to find what to do. Start with f:, g:, n: or s: to find files, go to a path, make a new item or run a command; Tab in an empty box lists them."
+            "Type to find what to do. Start with f:, g:, n: or s: to find files, go to a path, make a new item or run a command; Tab in an empty box lists them. *.mp4 | an action runs actions on files."
         ),
         BoxMode::Path => tr!(
             "Type a path, or start with / or ~ in search. Tab completes it, → takes the faded suggestion."
@@ -387,6 +387,18 @@ fn row_parts(super_box: &SuperBox, row: &BoxRow, context: &RowContext<'_>) -> Ro
                 ..RowParts::plain(IconSymbol::RotateCcw, text.to_owned())
             }
         }
+        BoxRow::Pipe => RowParts {
+            title: tr!(
+                "%1 items → %2",
+                super_box.picked().map_or(0, <[_]>::len),
+                super_box
+                    .pipe()
+                    .map(|pipe| pipe.labels.join(" → "))
+                    .unwrap_or_default()
+            ),
+            hint: Some(tr!("Enter runs it · Ctrl+S saves it as an action")),
+            ..RowParts::plain(IconSymbol::ArrowRight, String::new())
+        },
         BoxRow::JumpTo(path) => RowParts::plain(
             IconSymbol::ArrowRight,
             tr!("Go to %1", short_path(path, context.home)),

@@ -453,6 +453,15 @@ impl ActionDraft {
         }
     }
 
+    /// 步骤已经有了的新动作（超级输入框的管道存成动作）：对所有项显示、默认通知。
+    pub(crate) fn with_steps(name: String, steps: &[ActionStep], types: &MimeDatabase) -> Self {
+        Self {
+            name,
+            steps: steps.iter().map(StepDraft::from_step).collect(),
+            ..Self::empty(types)
+        }
+    }
+
     /// 读文件时校验过的定义，模板和类型都带着原文。
     pub(crate) fn from_definition(definition: &ActionDefinition, types: &MimeDatabase) -> Self {
         Self {

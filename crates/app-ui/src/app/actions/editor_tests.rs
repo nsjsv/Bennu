@@ -1,10 +1,10 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::Arc;
 
 use super::*;
 use crate::actions::editor::{EditTarget, EditorStatus, StepKind};
 use crate::actions::{ActionLibrary, ActionSources};
+use crate::app::actions::RunPlan;
 use crate::app::task_driving_tests::drive;
 use crate::config::{self, UiLanguage};
 use crate::model::BrowserLocation;
@@ -104,7 +104,7 @@ async fn a_new_action_is_saved_privately_loaded_and_runs() {
     let note = work.join("note.txt");
     std::fs::write(&note, b"hello").unwrap();
     browser.tab_mut().location = BrowserLocation::Directory(work.clone());
-    let run = browser.start_action_run(Arc::clone(&definition), vec![note.clone()]);
+    let run = browser.start_action_run(RunPlan::from(&*definition), vec![note.clone()]);
     drive(&mut browser, run).await;
     assert_eq!(std::fs::read(work.join("归档/note.txt")).unwrap(), b"hello");
 }

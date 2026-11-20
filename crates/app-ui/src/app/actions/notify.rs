@@ -37,8 +37,8 @@ pub(super) fn action_notification(
     run: &FinishedRun,
     window_in_front: bool,
 ) -> Option<ActionNotification> {
-    let name = &run.definition.name;
-    match (&run.definition.notice, &run.stop) {
+    let name = &run.plan.name;
+    match (&run.plan.notice, &run.stop) {
         (ActionNotice::Silent, _) | (_, Some(RunStop::Canceled)) => None,
         (_, Some(RunStop::Failed(reason))) => Some(ActionNotification {
             summary: tr!("%1 failed", name),

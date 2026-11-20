@@ -1,12 +1,13 @@
 //! 像 fish 那样补全：Tab 补框里最后那个词，边打边在后面淡淡地显示建议，→ 接受。路径模式里整段字是
 //! 一个路径；命令模式里第一个词是命令名（在 PATH 里找），后面的词是路径，空格这些用反斜杠转义（POSIX
-//! shell 和 fish 都认）。光标位置拿不到，补的总是最后那个词。
+//! shell 和 fish 都认）；管道里补最后一段的开头（动作名、步骤的写法），复制到、移动到后面补路径。
+//! 光标位置拿不到，补的总是最后那个词。
 //!
 //! 候选由应用层在后台列（`BoxLookup::List`），这里只看字。
 
 use std::path::{Path, PathBuf};
 
-use super::{targets, BoxMode};
+use super::{pipe, targets, BoxMode};
 
 /// 列出来的一个名字。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,11 +39,24 @@ pub(crate) enum ListSource {
 pub(crate) struct Word {
     /// 词在框里从哪儿开始（字节）。
     start: usize,
-    /// 词里文件夹那一截，原样留着（命令模式里还转义着）；命令名没有。
-    folder_text: Option<String>,
+    place: Place,
     /// 要补的名字已经打了的开头，去掉了转义。
     pub(crate) name: String,
+    /// 命令模式：名字里的空格这些用反斜杠转义。
     escaped: bool,
+    /// 只有一个候选、补全了以后接着打下一个词：命令模式的词、管道里一段的开头。
+    space_after: bool,
+}
+
+/// 到哪里找这个词的候选。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Place {
+    /// 命令名：PATH 里。
+    Programs,
+    /// 管道里一段的开头：动作名和步骤的写法，框自己就有。
+    Stages,
+    /// 词里文件夹那一截，原样留着（命令模式里还转义着）。
+    Folder(String),
 }
 
 pub(crate) fn word(mode: BoxMode, input: &str) -> Option<Word> {
@@ -54,15 +68,46 @@ pub(crate) fn word(mode: BoxMode, input: &str) -> Option<Word> {
             if input[..start].trim().is_empty() && !raw.contains('/') {
                 return Some(Word {
                     start,
-                    folder_text: None,
+                    place: Place::Programs,
                     name: unescape(raw),
                     escaped: true,
+                    space_after: true,
                 });
             }
             Some(path_word(input, start, true))
         }
-        BoxMode::Search | BoxMode::Files | BoxMode::New => None,
+        BoxMode::Search | BoxMode::Files => stage_word(input),
+        BoxMode::New => None,
     }
+}
+
+/// 管道最后一段：还在打开头时补动作名和步骤的写法；复制到、移动到后面补文件夹。
+fn stage_word(input: &str) -> Option<Word> {
+    let stage = pipe::last_stage_start(input)?;
+    let start = stage + leading_space(&input[stage..]);
+    let text = &input[start..];
+    let Some((verb, _)) = text.split_once(char::is_whitespace) else {
+        return Some(Word {
+            start,
+            place: Place::Stages,
+            name: text.to_owned(),
+            escaped: false,
+            space_after: true,
+        });
+    };
+    if !pipe::takes_a_folder(verb) {
+        return None;
+    }
+    let value = start + verb.len();
+    Some(path_word(
+        input,
+        value + leading_space(&input[value..]),
+        false,
+    ))
+}
+
+fn leading_space(text: &str) -> usize {
+    text.len() - text.trim_start().len()
 }
 
 fn path_word(input: &str, start: usize, escaped: bool) -> Word {
@@ -70,13 +115,14 @@ fn path_word(input: &str, start: usize, escaped: bool) -> Word {
     let split = raw.rfind('/').map_or(0, |slash| slash + 1);
     Word {
         start,
-        folder_text: Some(raw[..split].to_owned()),
+        place: Place::Folder(raw[..split].to_owned()),
         name: if escaped {
             unescape(&raw[split..])
         } else {
             raw[split..].to_owned()
         },
         escaped,
+        space_after: escaped,
     }
 }
 
@@ -121,10 +167,18 @@ fn escape(name: &str) -> String {
 }
 
 impl Word {
-    /// 到哪里列候选；相对路径接在当前文件夹后面，`~` 是主目录。没有当前文件夹时列不了。
+    /// 候选是框自己有的（动作名、步骤的写法），不用到后台列。
+    pub(crate) fn lists_stages(&self) -> bool {
+        self.place == Place::Stages
+    }
+
+    /// 到哪里列候选；相对路径接在当前文件夹后面，`~` 是主目录。没有当前文件夹、或者候选是框自己
+    /// 有的时为 None。
     pub(crate) fn source(&self, current_dir: Option<&Path>, home: &Path) -> Option<ListSource> {
-        let Some(folder_text) = &self.folder_text else {
-            return Some(ListSource::Programs);
+        let folder_text = match &self.place {
+            Place::Programs => return Some(ListSource::Programs),
+            Place::Stages => return None,
+            Place::Folder(folder_text) => folder_text,
         };
         let folder = if self.escaped {
             unescape(folder_text)
@@ -144,12 +198,15 @@ impl Word {
         } else {
             name.to_owned()
         };
-        let folder = self.folder_text.as_deref().unwrap_or("");
+        let folder = match &self.place {
+            Place::Folder(folder) => folder.as_str(),
+            Place::Programs | Place::Stages => "",
+        };
         format!("{}{folder}{name}", &input[..self.start])
     }
 
-    /// 换成这个候选后的整个框：文件夹后面带 `/`；`finished`（只有它一个）时命令模式里文件和命令
-    /// 后面再带个空格，接着打下一个词。
+    /// 换成这个候选后的整个框：文件夹后面带 `/`；`finished`（只有它一个）时命令模式的词、管道里
+    /// 一段的开头后面再带个空格，接着打下一个词。
     pub(crate) fn with_candidate(
         &self,
         input: &str,
@@ -159,7 +216,7 @@ impl Word {
         let mut text = self.with_name(input, &candidate.name);
         if candidate.is_dir {
             text.push('/');
-        } else if finished && self.escaped {
+        } else if finished && self.space_after {
             text.push(' ');
         }
         text

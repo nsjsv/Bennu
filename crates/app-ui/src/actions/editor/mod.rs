@@ -22,7 +22,7 @@ pub(crate) use saving::{save, SaveOutcome, SaveTarget};
 pub(crate) use templates::ActionTemplate;
 
 use super::action_file::parse_action_file;
-use super::definition::{ActionDefinition, ActionId};
+use super::definition::{ActionDefinition, ActionId, ActionStep};
 use super::library::read_trusted_text;
 use super::template::RunValues;
 use crate::model::SettingsCategory;
@@ -89,6 +89,19 @@ impl ActionEditor {
         run_values: RunValues,
     ) -> Self {
         let draft = template.draft(types);
+        let mut document = DocumentMut::new();
+        document::write_changes(&mut document, &ActionDraft::empty(types), &draft, types);
+        Self::with(EditTarget::New, draft, document, run_values)
+    }
+
+    /// 新动作，步骤已经写好（超级输入框的管道）。同模板：先写进一份空文档。
+    pub(crate) fn from_steps(
+        name: String,
+        steps: &[ActionStep],
+        types: &MimeDatabase,
+        run_values: RunValues,
+    ) -> Self {
+        let draft = ActionDraft::with_steps(name, steps, types);
         let mut document = DocumentMut::new();
         document::write_changes(&mut document, &ActionDraft::empty(types), &draft, types);
         Self::with(EditTarget::New, draft, document, run_values)

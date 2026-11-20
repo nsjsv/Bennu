@@ -1,21 +1,18 @@
 use std::path::Path;
 
 use super::*;
-use crate::actions::type_filter::TypeFilter;
-use crate::actions::{ActionId, ActionNotice, PathTemplate};
+use crate::actions::{ActionNotice, PathTemplate};
 use crate::app::task_driving_tests::drive;
 use crate::config;
 use crate::model::BrowserLocation;
 
-fn action(steps: Vec<ActionStep>) -> Arc<ActionDefinition> {
-    Arc::new(ActionDefinition {
-        id: ActionId::from_file_stem("test"),
+fn action(steps: Vec<ActionStep>) -> RunPlan {
+    RunPlan {
         name: "测试动作".to_owned(),
-        file: PathBuf::from("/actions/test.toml"),
-        types: TypeFilter::Anything,
         steps,
         notice: ActionNotice::Silent,
-    })
+        then: None,
+    }
 }
 
 fn move_to(template: &str) -> ActionStep {

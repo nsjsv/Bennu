@@ -15,7 +15,7 @@ use iced::Task;
 
 pub(crate) use editor::EditorMessage;
 pub(crate) use library_loading::action_library_subscription;
-pub(crate) use run::ActionRuns;
+pub(crate) use run::{ActionRuns, RunPlan};
 pub(crate) use steps::PreparedStep;
 
 use super::FileBrowser;
@@ -204,7 +204,7 @@ impl FileBrowser {
                     .own
                     .into_iter()
                     .find(|definition| definition.id == *action)?;
-                Some(self.start_action_run(definition, paths))
+                Some(self.start_action_run(RunPlan::from(&*definition), paths))
             }
             ActionId::ServiceMenu(key) => {
                 let definition = applicable

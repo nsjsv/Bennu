@@ -72,18 +72,9 @@ impl FileBrowser {
         generation: u64,
         outcome: IndexedSearchOutcome,
     ) -> Task<Message> {
-        let found = match outcome {
-            IndexedSearchOutcome::Batch(batch) => Ok(batch.hits),
-            // 换了新的查询、框关了：结果没人要。
-            IndexedSearchOutcome::Cancelled => return Task::none(),
-            IndexedSearchOutcome::TransportUnavailable(_)
-            | IndexedSearchOutcome::ProviderUnavailable(_) => Err(tr!(
-                "The search service is not running; start it on the Search settings page"
-            )),
-            IndexedSearchOutcome::SnapshotExpired => Err(tr!("The index changed; type again")),
-            IndexedSearchOutcome::InvalidQuery(reason) | IndexedSearchOutcome::Fatal(reason) => {
-                Err(reason)
-            }
+        // 换了新的查询、框关了：结果没人要。
+        let Some(found) = found_or_why(outcome) else {
+            return Task::none();
         };
         let Some(mut super_box) = self.super_box.take() else {
             return Task::none();
@@ -146,4 +137,22 @@ impl FileBrowser {
             self.open_search_with(query.terms, query.filters),
         ])
     }
+}
+
+/// 索引查到的，或者给用户看的查不了的原因；取消了的（没人要）是 None。
+pub(super) fn found_or_why(
+    outcome: IndexedSearchOutcome,
+) -> Option<Result<Vec<SearchHit>, String>> {
+    Some(match outcome {
+        IndexedSearchOutcome::Batch(batch) => Ok(batch.hits),
+        IndexedSearchOutcome::Cancelled => return None,
+        IndexedSearchOutcome::TransportUnavailable(_)
+        | IndexedSearchOutcome::ProviderUnavailable(_) => Err(tr!(
+            "The search service is not running; start it on the Search settings page"
+        )),
+        IndexedSearchOutcome::SnapshotExpired => Err(tr!("The index changed; type again")),
+        IndexedSearchOutcome::InvalidQuery(reason) | IndexedSearchOutcome::Fatal(reason) => {
+            Err(reason)
+        }
+    })
 }

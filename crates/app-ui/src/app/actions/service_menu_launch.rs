@@ -13,7 +13,7 @@ use crate::actions::ServiceMenuAction;
 use crate::model::Message;
 
 impl FileBrowser {
-    pub(super) fn launch_service_menu(
+    pub(crate) fn launch_service_menu(
         &mut self,
         definition: &ServiceMenuAction,
         items: Vec<PathBuf>,

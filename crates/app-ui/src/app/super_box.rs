@@ -11,7 +11,7 @@ use crate::model::{IndexedSearchOutcome, Message, NavigationMode, SettingsCatego
 use crate::shortcuts::{ShortcutAction, ShortcutScope, ShortcutTarget};
 use crate::super_box::{
     BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, Listing, NewEntry,
-    RunEnd, SuperBox,
+    PipeSource, RunEnd, SuperBox,
 };
 use crate::terminal_panel::session::SessionId;
 use file_operations::QueuedFileOperation;
@@ -24,6 +24,11 @@ pub(crate) enum SuperBoxMessage {
     ListingLoaded {
         generation: u64,
         listing: Listing,
+    },
+    /// 管道挑出来的项；按挑法认。
+    Picked {
+        source: Box<PipeSource>,
+        items: Result<Vec<PathBuf>, String>,
     },
     /// 跳转前在后台看了一眼路径：是文件夹为 `Ok(true)`，是文件为 `Ok(false)`。
     JumpChecked {
@@ -119,6 +124,16 @@ impl FileBrowser {
                 self.super_box = Some(super_box);
                 Task::none()
             }
+            SuperBoxMessage::Picked { source, items } => {
+                let Some(mut super_box) = self.super_box.take() else {
+                    return Task::none();
+                };
+                self.with_super_box_context(|context| {
+                    super_box.accept_picked(&source, items, context)
+                });
+                self.super_box = Some(super_box);
+                Task::none()
+            }
             SuperBoxMessage::JumpChecked {
                 generation,
                 path,
@@ -160,10 +175,12 @@ impl FileBrowser {
         let commit_rename = self.commit_rename_if_active();
         let _ = self.cancel_address_editing();
         let entries = self.super_box_entries();
+        let pipe_actions = self.super_box_pipe_actions();
         let history = self.user_config.super_box_history.entries().to_vec();
         let mode = self.user_config.super_box_mode;
-        let opened =
-            self.with_super_box_context(|context| SuperBox::open(mode, entries, history, context));
+        let opened = self.with_super_box_context(|context| {
+            SuperBox::open(mode, entries, pipe_actions, history, context)
+        });
         self.super_box = Some(opened);
         Task::batch([
             commit_rename,
@@ -204,6 +221,9 @@ impl FileBrowser {
                 return Some(self.edit_super_box_input(|super_box, context| {
                     super_box.accept_suggestion(context)
                 }));
+            }
+            iced::keyboard::Key::Character("s") if modifiers.control() => {
+                return Some(self.save_super_box_pipe());
             }
             iced::keyboard::Key::Character("f") if modifiers.control() => {
                 return Some(self.edit_super_box_input(|super_box, context| {
@@ -323,31 +343,31 @@ impl FileBrowser {
         })
     }
 
-    /// 改框，路径模式要补全时在后台列子文件夹。
+    /// 改框，再去做框要的后台活：补全的候选、索引查询、管道挑项。
     fn update_super_box(
         &mut self,
-        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Option<BoxLookup>,
+        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Vec<BoxLookup>,
     ) -> Task<Message> {
         let Some(mut super_box) = self.super_box.take() else {
             return Task::none();
         };
-        let lookup = self.with_super_box_context(|context| change(&mut super_box, context));
+        let lookups = self.with_super_box_context(|context| change(&mut super_box, context));
         self.super_box = Some(super_box);
-        match lookup {
-            None => Task::none(),
-            Some(find @ BoxLookup::Find { .. }) => self.schedule_super_box_find(find),
-            Some(BoxLookup::List {
+        Task::batch(lookups.into_iter().map(|lookup| match lookup {
+            find @ BoxLookup::Find { .. } => self.schedule_super_box_find(find),
+            BoxLookup::List {
                 generation,
                 source,
                 name,
-            }) => super::super_box_complete::list_super_box_candidates(generation, source, name),
-        }
+            } => super::super_box_complete::list_super_box_candidates(generation, source, name),
+            BoxLookup::Pick(source) => self.pick_super_box_items(source),
+        }))
     }
 
     /// 框替用户改了字（补全、接受建议）：输入框的光标还停在原处，挪到最后。
     fn edit_super_box_input(
         &mut self,
-        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Option<BoxLookup>,
+        change: impl FnOnce(&mut SuperBox, &BoxContext<'_>) -> Vec<BoxLookup>,
     ) -> Task<Message> {
         let before = self
             .super_box
@@ -426,6 +446,7 @@ impl FileBrowser {
                 Task::batch([remember, self.open_super_box_found(hit)])
             }
             BoxRow::Run(command) => self.run_super_box_command(command),
+            BoxRow::Pipe => self.run_super_box_pipe(),
             BoxRow::Problem(_) => Task::none(),
         }
     }

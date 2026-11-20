@@ -195,77 +195,78 @@ fn parse_steps(
 
 fn parse_step(source: &Source<'_>, step: &Spanned<RawStep>) -> Result<ActionStep, FileMistake> {
     let raw = step.get_ref();
-    let present = [
-        raw.convert.is_some(),
-        raw.compress.is_some(),
-        raw.extract.is_some(),
-        raw.copy_to.is_some(),
-        raw.move_to.is_some(),
-        raw.trash.is_some(),
-        raw.run.is_some(),
-        raw.copy_paths.is_some(),
+    let valued = [
+        (StepKey::Convert, &raw.convert),
+        (StepKey::Compress, &raw.compress),
+        (StepKey::Extract, &raw.extract),
+        (StepKey::CopyTo, &raw.copy_to),
+        (StepKey::MoveTo, &raw.move_to),
+        (StepKey::Trash, &raw.trash),
+        (StepKey::Run, &raw.run),
     ];
-    if present.iter().filter(|present| **present).count() != 1 {
+    let present = valued.iter().filter(|(_, value)| value.is_some()).count()
+        + usize::from(raw.copy_paths.is_some());
+    if present != 1 {
         return Err(source.mistake(step, tr!("Each step needs exactly one of: %1", STEP_KEYS)));
     }
-    let invalid = |at: &Spanned<String>, reason: String| source.mistake(at, reason);
-    if let Some(format) = &raw.convert {
-        return ConvertFormat::named(format.get_ref())
-            .map(ActionStep::Convert)
-            .ok_or_else(|| {
-                invalid(
-                    format,
-                    tr!(
-                        "Unknown format “%1”. You can use: %2",
-                        format.get_ref(),
-                        ConvertFormat::names()
-                    ),
-                )
-            });
-    }
-    if let Some(format) = &raw.compress {
-        return COMPRESS_FORMATS
-            .into_iter()
-            .find(|known| known.extension() == format.get_ref())
-            .map(ActionStep::Compress)
-            .ok_or_else(|| {
-                invalid(
-                    format,
-                    tr!(
-                        "Unknown archive format “%1”. You can use: zip 7z tar.gz",
-                        format.get_ref()
-                    ),
-                )
-            });
-    }
-    if let Some(placement) = &raw.extract {
-        return spelled(&EXTRACT_PLACEMENTS, placement.get_ref())
-            .map(ActionStep::Extract)
-            .ok_or_else(|| invalid(placement, tr!("extract is “here” or “folder”")));
-    }
-    if let Some(folder) = &raw.copy_to {
-        return PathTemplate::parse(folder.get_ref())
-            .map(ActionStep::CopyTo)
-            .map_err(|error| invalid(folder, error.0));
-    }
-    if let Some(folder) = &raw.move_to {
-        return PathTemplate::parse(folder.get_ref())
-            .map(ActionStep::MoveTo)
-            .map_err(|error| invalid(folder, error.0));
-    }
-    if let Some(scope) = &raw.trash {
-        return spelled(&TRASH_SCOPES, scope.get_ref())
-            .map(ActionStep::Trash)
-            .ok_or_else(|| invalid(scope, tr!("trash is “current” or “selected”")));
-    }
-    if let Some(command) = &raw.run {
-        return CommandTemplate::parse(command.get_ref())
-            .map(ActionStep::Run)
-            .map_err(|error| invalid(command, error.0));
+    if let Some((key, Some(value))) = valued.iter().find(|(_, value)| value.is_some()) {
+        return read_step(*key, value.get_ref()).map_err(|reason| source.mistake(value, reason));
     }
     match &raw.copy_paths {
         Some(copy_paths) if *copy_paths.get_ref() => Ok(ActionStep::CopyPaths),
         _ => Err(source.mistake(step, tr!("copy_paths only takes true"))),
+    }
+}
+
+/// 一步的键（`copy_paths` 没有值，不在这里）。动作文件和超级输入框的管道都按它读。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StepKey {
+    Convert,
+    Compress,
+    Extract,
+    CopyTo,
+    MoveTo,
+    Trash,
+    Run,
+}
+
+/// 写在键后面的值读成一步；读不懂时是给用户看的原因。
+pub(crate) fn read_step(key: StepKey, value: &str) -> Result<ActionStep, String> {
+    match key {
+        StepKey::Convert => ConvertFormat::named(value)
+            .map(ActionStep::Convert)
+            .ok_or_else(|| {
+                tr!(
+                    "Unknown format “%1”. You can use: %2",
+                    value,
+                    ConvertFormat::names()
+                )
+            }),
+        StepKey::Compress => COMPRESS_FORMATS
+            .into_iter()
+            .find(|known| known.extension() == value)
+            .map(ActionStep::Compress)
+            .ok_or_else(|| {
+                tr!(
+                    "Unknown archive format “%1”. You can use: zip 7z tar.gz",
+                    value
+                )
+            }),
+        StepKey::Extract => spelled(&EXTRACT_PLACEMENTS, value)
+            .map(ActionStep::Extract)
+            .ok_or_else(|| tr!("extract is “here” or “folder”")),
+        StepKey::CopyTo => PathTemplate::parse(value)
+            .map(ActionStep::CopyTo)
+            .map_err(|error| error.0),
+        StepKey::MoveTo => PathTemplate::parse(value)
+            .map(ActionStep::MoveTo)
+            .map_err(|error| error.0),
+        StepKey::Trash => spelled(&TRASH_SCOPES, value)
+            .map(ActionStep::Trash)
+            .ok_or_else(|| tr!("trash is “current” or “selected”")),
+        StepKey::Run => CommandTemplate::parse(value)
+            .map(ActionStep::Run)
+            .map_err(|error| error.0),
     }
 }
 

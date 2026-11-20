@@ -17,7 +17,7 @@ pub(crate) mod service_menu;
 pub(crate) mod template;
 pub(crate) mod type_filter;
 
-pub(crate) use action_file::COMPRESS_FORMATS;
+pub(crate) use action_file::{read_step, StepKey, COMPRESS_FORMATS};
 pub(crate) use convert_format::{ConvertFormat, CONVERT_FORMATS};
 pub(crate) use definition::{ActionDefinition, ActionId, ActionStep, TrashScope};
 pub(crate) use library::{

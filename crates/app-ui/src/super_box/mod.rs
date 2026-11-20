@@ -10,6 +10,7 @@ mod find;
 mod found;
 mod matching;
 mod mode;
+mod pipe;
 mod rows;
 mod shell;
 mod targets;
@@ -22,7 +23,12 @@ pub(crate) use complete::{Candidate, Choices, ListSource, Listing};
 pub(crate) use find::{read_find_query, FindQuery};
 pub(crate) use found::FoundInColumns;
 pub(crate) use matching::{BoxEntry, BoxTarget, EntryKind, MOST_ROWS};
+use mode::fold;
 pub(crate) use mode::{read_history, BoxMode};
+pub(crate) use pipe::{Pipe, PipeAction, PipeSource, Stage};
+
+/// 管道一次最多对这么多项：再多就是写宽了，让用户加筛选缩小范围（用户定）。
+pub(crate) const MOST_PICKED: usize = 1000;
 pub(crate) use shell::shell_invocation;
 pub(crate) use targets::NewEntry;
 
@@ -55,6 +61,8 @@ pub(crate) enum BoxRow {
     Create(NewEntry),
     /// 命令模式：要执行的命令。
     Run(String),
+    /// 管道：挑出来的项接着各步，内容在 [`SuperBox::pipe`]、[`SuperBox::picked`]。
+    Pipe,
     /// 不能执行的说明，选不中。
     Problem(String),
 }
@@ -68,12 +76,14 @@ impl BoxRow {
 /// 应用层要在后台做的事，做完按 `generation` 交回来。
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BoxLookup {
-    /// 列补全的候选（路径模式、命令模式最后那个词）：名字开头是 `name`（不分大小写）的。
+    /// 列补全的候选（路径模式、命令模式、管道里的文件夹）：名字开头是 `name`（不分大小写）的。
     List {
         generation: u64,
         source: ListSource,
         name: String,
     },
+    /// 按管道前面写的挑出项来；结果按挑法认，只改后面的步骤时不重挑。最多要 `MOST_PICKED + 1` 个。
+    Pick(PipeSource),
     /// 查索引（停顿一下再查）。
     Find {
         generation: u64,
@@ -81,6 +91,21 @@ pub(crate) enum BoxLookup {
         text_scope: SearchTextScope,
         limit: usize,
     },
+}
+
+/// 管道挑出来的项，和它是按什么挑的。
+#[derive(Debug, Clone, PartialEq)]
+struct Picked {
+    source: PipeSource,
+    items: PickedItems,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PickedItems {
+    Waiting,
+    Found(Vec<PathBuf>),
+    /// 搜索服务没在跑这些：给用户看的原因。
+    Unavailable(String),
 }
 
 /// Tab 列出来、再按 Tab 一个个换的东西；打字就收起。
@@ -174,6 +199,11 @@ pub(crate) struct SuperBox {
     mode: BoxMode,
     input: String,
     entries: Vec<BoxEntry>,
+    /// 管道里能写名字的动作（不管适不适用于现在选中的项）。
+    pipe_actions: Vec<PipeAction>,
+    /// 这次输入是不是管道、读成了什么；改输入时读一次。
+    pipe: Option<Result<Pipe, String>>,
+    picked: Option<Picked>,
     /// 打开时的历史快照，带前缀，最新的在前。
     history: Vec<String>,
     /// 这次输入的补全候选；路径模式的子文件夹行也从这里来。
@@ -197,6 +227,7 @@ impl SuperBox {
     pub(crate) fn open(
         mode: BoxMode,
         entries: Vec<BoxEntry>,
+        pipe_actions: Vec<PipeAction>,
         history: Vec<String>,
         context: &BoxContext<'_>,
     ) -> Self {
@@ -205,6 +236,9 @@ impl SuperBox {
             mode,
             input: String::new(),
             entries,
+            pipe_actions,
+            pipe: None,
+            picked: None,
             history,
             listing: Listing::default(),
             tab_list: None,
@@ -258,6 +292,19 @@ impl SuperBox {
         self.rows.get(self.selected?)
     }
 
+    /// 写对了的管道。
+    pub(crate) fn pipe(&self) -> Option<&Pipe> {
+        self.pipe.as_ref()?.as_ref().ok()
+    }
+
+    /// 管道挑出来的项（挑好了才有）。
+    pub(crate) fn picked(&self) -> Option<&[PathBuf]> {
+        match &self.picked.as_ref()?.items {
+            PickedItems::Found(items) => Some(items),
+            PickedItems::Waiting | PickedItems::Unavailable(_) => None,
+        }
+    }
+
     pub(crate) fn tab_list(&self) -> Option<&TabList> {
         self.tab_list.as_ref()
     }
@@ -281,11 +328,7 @@ impl SuperBox {
 
     /// 打了字。开头是前缀就切模式（框里显示成前面的胶囊）、去掉前缀；搜索模式里以 `/` `~` 开头也切到
     /// 路径。
-    pub(crate) fn set_input(
-        &mut self,
-        text: String,
-        context: &BoxContext<'_>,
-    ) -> Option<BoxLookup> {
+    pub(crate) fn set_input(&mut self, text: String, context: &BoxContext<'_>) -> Vec<BoxLookup> {
         let (mode, text) = match mode::split_prefix(&text) {
             Some((mode, rest)) => (mode, rest.to_owned()),
             // 已经空了又按退格：删掉前面的胶囊，回到默认模式。输入框空着按退格也照样报一次“变成
@@ -303,7 +346,7 @@ impl SuperBox {
     }
 
     /// Shift+Tab：换下一种模式，到头绕回。
-    pub(crate) fn next_mode(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
+    pub(crate) fn next_mode(&mut self, context: &BoxContext<'_>) -> Vec<BoxLookup> {
         self.mode = self.mode.next();
         self.tab_list = None;
         self.changed(context)
@@ -311,7 +354,7 @@ impl SuperBox {
 
     /// Tab：框空着就列出能打的标签；有字就补最后那个词（候选已经列出来了才补，打字时就在列）。
     /// 列出来以后再按 Tab 一个个换。
-    pub(crate) fn complete(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
+    pub(crate) fn complete(&mut self, context: &BoxContext<'_>) -> Vec<BoxLookup> {
         match self.tab_list.as_mut() {
             Some(TabList::Names(choices)) => {
                 self.input = choices.next();
@@ -332,9 +375,11 @@ impl SuperBox {
                 .collect();
             let chosen = tags.iter().position(|mode| *mode == self.mode);
             self.tab_list = Some(TabList::Tags { tags, chosen });
-            return None;
+            return Vec::new();
         }
-        let word = complete::word(self.mode, &self.input)?;
+        let Some(word) = complete::word(self.mode, &self.input) else {
+            return Vec::new();
+        };
         match complete::complete(&word, &self.input, &self.listing) {
             complete::Completed::Text(text) => {
                 self.input = text;
@@ -346,49 +391,102 @@ impl SuperBox {
                     self.input.clone(),
                     candidates,
                 )));
-                None
+                Vec::new()
             }
-            complete::Completed::Nothing => None,
+            complete::Completed::Nothing => Vec::new(),
         }
     }
 
     /// →：接受淡色的建议。
-    pub(crate) fn accept_suggestion(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
-        let suggestion = self.suggestion.take()?;
+    pub(crate) fn accept_suggestion(&mut self, context: &BoxContext<'_>) -> Vec<BoxLookup> {
+        let Some(suggestion) = self.suggestion.take() else {
+            return Vec::new();
+        };
         self.input.push_str(&suggestion);
         self.tab_list = None;
         self.changed(context)
     }
 
-    fn changed(&mut self, context: &BoxContext<'_>) -> Option<BoxLookup> {
+    fn changed(&mut self, context: &BoxContext<'_>) -> Vec<BoxLookup> {
         self.generation += 1;
         self.notice = None;
         self.listing = Listing::default();
         self.found.clear();
-        let lookup = self.lookup(context);
-        self.find_status = match lookup {
-            Some(BoxLookup::Find { .. }) => FindStatus::Searching,
-            _ => FindStatus::Idle,
+        self.pipe = pipe::read_pipe(self.mode, &self.input, &self.pipe_actions);
+        let mut lookups = Vec::new();
+        match pipe::read_pipe_source(self.mode, &self.input).and_then(Result::ok) {
+            // 挑法没变（只改了后面的步骤）：挑好的留着。
+            Some(source) if self.picked.as_ref().map(|picked| &picked.source) == Some(&source) => {}
+            Some(source) => {
+                self.picked = Some(Picked {
+                    source: source.clone(),
+                    items: PickedItems::Waiting,
+                });
+                lookups.push(BoxLookup::Pick(source));
+            }
+            None => self.picked = None,
+        }
+        let word = complete::word(self.mode, &self.input);
+        if let Some(word) = word.as_ref().filter(|word| word.lists_stages()) {
+            self.listing = self.stage_listing(&word.name);
+        }
+        lookups.extend(self.lookup(word, context));
+        let waiting = self
+            .picked
+            .as_ref()
+            .is_some_and(|picked| picked.items == PickedItems::Waiting);
+        let finding = lookups
+            .iter()
+            .any(|lookup| matches!(lookup, BoxLookup::Find { .. }));
+        self.find_status = if waiting || finding {
+            FindStatus::Searching
+        } else {
+            FindStatus::Idle
         };
         self.refresh(context);
-        lookup
+        lookups
     }
 
-    fn lookup(&self, context: &BoxContext<'_>) -> Option<BoxLookup> {
+    /// 管道一段开头的候选：动作名和步骤的写法，框自己就有。
+    fn stage_listing(&self, name: &str) -> Listing {
+        let mut candidates: Vec<_> = pipe::step_words()
+            .map(str::to_owned)
+            .chain(self.pipe_actions.iter().map(|action| action.name.clone()))
+            .filter(|candidate| fold(candidate).starts_with(&fold(name)))
+            .map(|name| Candidate {
+                name,
+                is_dir: false,
+            })
+            .collect();
+        candidates.sort_unstable_by(|left, right| left.name.cmp(&right.name));
+        Listing {
+            folder: None,
+            candidates,
+            truncated: false,
+        }
+    }
+
+    /// 补全要列的文件夹、命令；不是管道时搜索和文件模式查索引。
+    fn lookup(&self, word: Option<complete::Word>, context: &BoxContext<'_>) -> Option<BoxLookup> {
         let generation = self.generation;
         let text = self.input.trim();
         if text.is_empty() {
             return None;
         }
+        if let Some(source) = word
+            .as_ref()
+            .and_then(|word| word.source(context.current_dir, context.home))
+        {
+            return Some(BoxLookup::List {
+                generation,
+                source,
+                name: word?.name,
+            });
+        }
+        if self.pipe.is_some() {
+            return None;
+        }
         match self.mode {
-            BoxMode::Path | BoxMode::Shell => {
-                let word = complete::word(self.mode, &self.input)?;
-                Some(BoxLookup::List {
-                    generation,
-                    source: word.source(context.current_dir, context.home)?,
-                    name: word.name,
-                })
-            }
             // 搜索模式只按名字找几个，排在别的结果后面。
             BoxMode::Search => Some(BoxLookup::Find {
                 generation,
@@ -405,8 +503,30 @@ impl SuperBox {
                     text_scope: SearchTextScope::NameAndContent,
                     limit: MOST_ROWS,
                 }),
-            BoxMode::New => None,
+            BoxMode::Path | BoxMode::Shell | BoxMode::New => None,
         }
+    }
+
+    /// 管道挑出来的项；挑法已经变了的不要。
+    pub(crate) fn accept_picked(
+        &mut self,
+        source: &PipeSource,
+        items: Result<Vec<PathBuf>, String>,
+        context: &BoxContext<'_>,
+    ) {
+        let Some(picked) = self
+            .picked
+            .as_mut()
+            .filter(|picked| picked.source == *source)
+        else {
+            return;
+        };
+        picked.items = match items {
+            Ok(items) => PickedItems::Found(items),
+            Err(reason) => PickedItems::Unavailable(reason),
+        };
+        self.find_status = FindStatus::Idle;
+        self.refresh(context);
     }
 
     /// 这次查询开始了；之前没查完的那次取消。
@@ -505,9 +625,11 @@ impl SuperBox {
         self.suggestion = self.compute_suggestion();
     }
 
-    /// 这个模式最近的历史里接得上的那条优先（同 fish），没有再看候选。
+    /// 有能补的词时（路径、命令、管道的一段）：这个模式最近的历史里接得上的那条优先（同 fish），
+    /// 没有再看候选。
     fn compute_suggestion(&self) -> Option<String> {
-        if self.input.is_empty() || !matches!(self.mode, BoxMode::Path | BoxMode::Shell) {
+        let word = complete::word(self.mode, &self.input)?;
+        if self.input.is_empty() {
             return None;
         }
         let from_history = self
@@ -518,10 +640,7 @@ impl SuperBox {
                 *mode == self.mode && text.len() > self.input.len() && text.starts_with(&self.input)
             })
             .map(|(_, text)| text[self.input.len()..].to_owned());
-        from_history.or_else(|| {
-            let word = complete::word(self.mode, &self.input)?;
-            complete::suggestion(&word, &self.input, &self.listing)
-        })
+        from_history.or_else(|| complete::suggestion(&word, &self.input, &self.listing))
     }
 }
 

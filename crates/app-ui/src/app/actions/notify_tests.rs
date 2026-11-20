@@ -1,21 +1,16 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use super::*;
 use crate::actions::notice::NoticeTemplate;
-use crate::actions::type_filter::TypeFilter;
-use crate::actions::{ActionDefinition, ActionId};
 
 fn finished(notice: ActionNotice, stop: Option<RunStop>, failures: &[&str]) -> FinishedRun {
     FinishedRun {
-        definition: Arc::new(ActionDefinition {
-            id: ActionId::from_file_stem("extract-audio"),
+        plan: super::super::run::RunPlan {
             name: "提取音频".to_owned(),
-            file: PathBuf::from("/actions/extract-audio.toml"),
-            types: TypeFilter::Anything,
             steps: Vec::new(),
             notice,
-        }),
+            then: None,
+        },
         results: vec![
             PathBuf::from("/music/音频/a.m4a"),
             PathBuf::from("/music/音频/b.m4a"),

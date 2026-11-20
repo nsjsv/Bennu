@@ -9,7 +9,7 @@ use super::ActionMessage;
 use crate::actions::editor::{
     save, ActionEditor, ActionTemplate, DraftEdit, SaveOutcome, SaveTarget,
 };
-use crate::actions::{ensure_action_folder, ActionId, RunValues};
+use crate::actions::{ensure_action_folder, ActionId, ActionStep, RunValues};
 use crate::app::FileBrowser;
 use crate::model::{Message, SettingsCategory, SettingsSubpage};
 use file_operations::QueuedFileOperation;
@@ -166,6 +166,34 @@ impl FileBrowser {
             }
             _ => false,
         }
+    }
+
+    /// 超级输入框的管道存成动作：打开设置到动作页，用这几步起草一个新动作，用户起名字、点保存。
+    /// 设置里正编辑着、还没保存的动作不顶掉：交回原因。
+    pub(crate) fn draft_action_from_steps(
+        &mut self,
+        name: String,
+        steps: &[ActionStep],
+    ) -> Result<Task<Message>, String> {
+        if self
+            .action_editor()
+            .is_some_and(ActionEditor::has_unsaved_changes)
+        {
+            return Err(tr!(
+                "An action in Settings has unsaved changes; save or discard it first"
+            ));
+        }
+        let editor = ActionEditor::from_steps(
+            name,
+            steps,
+            self.action_library.types(),
+            RunValues::starting_now(),
+        );
+        Ok(Task::batch([
+            self.open_settings(),
+            self.select_settings_category(SettingsCategory::Actions),
+            self.select_settings_subpage(SettingsSubpage::ActionEditor(Box::new(editor))),
+        ]))
     }
 
     /// 只从动作列表打开：读文件的这几毫秒里用户已经去了别处，就不再打开。

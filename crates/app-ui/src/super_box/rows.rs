@@ -2,6 +2,7 @@
 
 use super::{complete, find, matching, mode, targets};
 use super::{BoxContext, BoxMode, BoxRow, FindStatus, SuperBox, FOUND_IN_SEARCH, MOST_ROWS};
+use super::{PickedItems, Pipe, PipeSource, MOST_PICKED};
 
 /// 框是空的、没有胶囊（默认模式）时列几条历史（各种模式混在一起）。
 const HISTORY_MIXED: usize = 5;
@@ -25,6 +26,9 @@ impl SuperBox {
                 .into_iter()
                 .map(|entry| BoxRow::History(entry.clone()))
                 .collect();
+        }
+        if let Some(pipe) = &self.pipe {
+            return self.pipe_rows(pipe);
         }
         match self.mode {
             BoxMode::Search => matching::ranked(&self.entries, text)
@@ -91,6 +95,32 @@ impl SuperBox {
                 ))],
             },
         }
+    }
+
+    /// 管道：写对了、挑好了、数量合适才有一行可执行的预览；否则说明为什么。
+    fn pipe_rows(&self, pipe: &Result<Pipe, String>) -> Vec<BoxRow> {
+        let picked = self
+            .picked
+            .as_ref()
+            .map(|picked| (&picked.source, &picked.items));
+        let reason = match (pipe, picked) {
+            (Err(reason), _) => reason.clone(),
+            (Ok(_), Some((PipeSource::Selection, PickedItems::Found(items))))
+                if items.is_empty() =>
+            {
+                tr!("Select the items first, or write which ones before |")
+            }
+            (Ok(_), Some((_, PickedItems::Found(items)))) if items.is_empty() => {
+                tr!("No item matches")
+            }
+            (Ok(_), Some((_, PickedItems::Found(items)))) if items.len() > MOST_PICKED => {
+                tr!("More than %1 items; narrow it down", MOST_PICKED)
+            }
+            (Ok(_), Some((_, PickedItems::Found(_)))) => return vec![BoxRow::Pipe],
+            (Ok(_), Some((_, PickedItems::Unavailable(reason)))) => reason.clone(),
+            (Ok(_), Some((_, PickedItems::Waiting)) | None) => return Vec::new(),
+        };
+        vec![BoxRow::Problem(reason)]
     }
 
     fn found_rows(&self, most: usize) -> impl Iterator<Item = BoxRow> + '_ {

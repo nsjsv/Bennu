@@ -85,6 +85,7 @@ mod startup_settings;
 mod super_box;
 mod super_box_complete;
 mod super_box_find;
+mod super_box_pipe;
 mod super_box_shell;
 mod tabs;
 #[cfg(test)]

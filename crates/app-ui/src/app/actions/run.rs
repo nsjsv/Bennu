@@ -12,7 +12,7 @@ use iced::Task;
 
 use super::steps::{prepare_step, FollowUp, PreparedStep, StepContext, StepPlan};
 use super::ActionMessage;
-use crate::actions::{ActionDefinition, ActionStep, RunValues};
+use crate::actions::{ActionDefinition, ActionNotice, ActionStep, RunValues, ServiceMenuAction};
 use crate::app::FileBrowser;
 use crate::model::Message;
 use crate::operation_history::TaskEnd;
@@ -25,9 +25,30 @@ pub(crate) struct ActionRuns {
     labels: HashMap<u64, String>,
 }
 
+/// 一次运行要做的：动作文件、超级输入框的管道都编成它。运行用不着动作文件的身份和路径。
+#[derive(Debug, Clone)]
+pub(crate) struct RunPlan {
+    pub(crate) name: String,
+    pub(crate) steps: Vec<ActionStep>,
+    pub(crate) notice: ActionNotice,
+    /// 各步都做完后把结果交给它启动（管道的最后一段是服务菜单时）。
+    pub(crate) then: Option<Arc<ServiceMenuAction>>,
+}
+
+impl From<&ActionDefinition> for RunPlan {
+    fn from(definition: &ActionDefinition) -> Self {
+        Self {
+            name: definition.name.clone(),
+            steps: definition.steps.clone(),
+            notice: definition.notice.clone(),
+            then: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ActionRun {
-    definition: Arc<ActionDefinition>,
+    plan: RunPlan,
     context: StepContext,
     step: usize,
     /// 这一步拿到的项。
@@ -51,7 +72,7 @@ pub(super) enum RunStop {
 
 /// 运行结束时交给通知的东西。
 pub(super) struct FinishedRun {
-    pub(super) definition: Arc<ActionDefinition>,
+    pub(super) plan: RunPlan,
     pub(super) results: Vec<PathBuf>,
     pub(super) failures: Vec<String>,
     pub(super) stop: Option<RunStop>,
@@ -81,7 +102,7 @@ impl ActionRuns {
 
 impl ActionRun {
     fn current_step(&self) -> Option<&ActionStep> {
-        self.definition.steps.get(self.step)
+        self.plan.steps.get(self.step)
     }
 
     fn label(&self) -> String {
@@ -91,20 +112,16 @@ impl ActionRun {
             .unwrap_or_default();
         tr!(
             "%1 · %2 (%3/%4)",
-            self.definition.name,
+            self.plan.name,
             step,
             self.step + 1,
-            self.definition.steps.len()
+            self.plan.steps.len()
         )
     }
 }
 
 impl FileBrowser {
-    pub(super) fn start_action_run(
-        &mut self,
-        definition: Arc<ActionDefinition>,
-        items: Vec<PathBuf>,
-    ) -> Task<Message> {
+    pub(crate) fn start_action_run(&mut self, plan: RunPlan, items: Vec<PathBuf>) -> Task<Message> {
         let working_directory = self
             .tab()
             .current_directory()
@@ -130,7 +147,7 @@ impl FileBrowser {
         self.action_runs.runs.insert(
             run_id,
             ActionRun {
-                definition,
+                plan,
                 context,
                 step: 0,
                 input: items,
@@ -323,7 +340,7 @@ impl FileBrowser {
         };
         self.operation_history.record_action(&run.outcomes);
         let finished = FinishedRun {
-            definition: run.definition,
+            plan: run.plan,
             // 停下时交出来的是停下那一步之前做成的。
             results: if run.stop.is_some() {
                 run.produced
@@ -333,10 +350,14 @@ impl FileBrowser {
             failures: run.failures,
             stop: run.stop,
         };
+        let mut tasks = vec![self.action_notification_command(&finished)];
         if finished.stop.is_none() {
             self.select_results_here(&finished.results);
+            if let Some(menu) = &finished.plan.then {
+                tasks.push(self.launch_service_menu(menu, finished.results.clone()));
+            }
         }
-        self.action_notification_command(&finished)
+        Task::batch(tasks)
     }
 
     /// 结果在当前文件夹里就选中它们（和创建副本一样）。

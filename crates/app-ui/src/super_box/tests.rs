@@ -197,17 +197,23 @@ fn new_names_are_checked_against_the_rules_and_the_folder() {
 fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
     let taken = nothing_taken;
     let context = context(&taken);
-    let mut super_box = SuperBox::open(BoxMode::Search, Vec::new(), Vec::new(), &context);
+    let mut super_box = SuperBox::open(
+        BoxMode::Search,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &context,
+    );
     let lookup = super_box.set_input("g:~/下载".to_owned(), &context);
     assert_eq!(super_box.mode(), BoxMode::Path);
     assert_eq!(super_box.input(), "~/下载");
     assert_eq!(
         lookup,
-        Some(BoxLookup::List {
+        [BoxLookup::List {
             generation: super_box.generation(),
             source: ListSource::Folder(PathBuf::from("/home/me/")),
             name: "下载".to_owned()
-        })
+        }]
     );
     assert_eq!(
         super_box.selected_row(),
@@ -222,7 +228,13 @@ fn typing_a_prefix_switches_the_mode_and_drops_the_prefix() {
     );
     assert_eq!(super_box.history_text(), "n:素材/");
 
-    let mut search = SuperBox::open(BoxMode::Search, Vec::new(), Vec::new(), &context);
+    let mut search = SuperBox::open(
+        BoxMode::Search,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &context,
+    );
     search.set_input("/tmp".to_owned(), &context);
     assert_eq!(search.mode(), BoxMode::Path);
     assert_eq!(search.input(), "/tmp");
@@ -233,7 +245,7 @@ fn switching_modes_keeps_the_text_and_recomputes_the_rows() {
     let taken = nothing_taken;
     let context = context(&taken);
     let entries = vec![feature("新建文件夹", "new_folder")];
-    let mut super_box = SuperBox::open(BoxMode::Search, entries, Vec::new(), &context);
+    let mut super_box = SuperBox::open(BoxMode::Search, entries, Vec::new(), Vec::new(), &context);
     super_box.set_input("新建".to_owned(), &context);
     assert_eq!(super_box.rows(), [BoxRow::Entry(0)]);
     super_box.next_mode(&context);
@@ -261,7 +273,7 @@ fn an_empty_box_lists_five_of_all_history_and_three_of_a_mode() {
         .map(str::to_owned)
         .to_vec();
     let rows = |mode| {
-        SuperBox::open(mode, Vec::new(), history.clone(), &context)
+        SuperBox::open(mode, Vec::new(), Vec::new(), history.clone(), &context)
             .rows()
             .to_vec()
     };
@@ -271,7 +283,13 @@ fn an_empty_box_lists_five_of_all_history_and_three_of_a_mode() {
     );
     // 默认模式就是路径时，打开也没有胶囊：一样是混在一起的 5 条。
     assert_eq!(rows(BoxMode::Path), rows(BoxMode::Search));
-    let mut tagged = SuperBox::open(BoxMode::Search, Vec::new(), history.clone(), &context);
+    let mut tagged = SuperBox::open(
+        BoxMode::Search,
+        Vec::new(),
+        Vec::new(),
+        history.clone(),
+        &context,
+    );
     tagged.set_input("g:".to_owned(), &context);
     assert_eq!(
         tagged.rows(),
@@ -284,7 +302,8 @@ fn only_a_typed_tag_shows_a_pill_and_tab_in_an_empty_box_lists_the_tags() {
     let taken = nothing_taken;
     let context = context(&taken);
     // 默认模式是命令：直接打字就是命令，没有胶囊。
-    let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
+    let mut super_box =
+        SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), Vec::new(), &context);
     assert!(!super_box.shows_tag(super_box.mode()));
     super_box.set_input("g:".to_owned(), &context);
     assert!(super_box.shows_tag(super_box.mode()));
@@ -315,7 +334,13 @@ fn only_a_typed_tag_shows_a_pill_and_tab_in_an_empty_box_lists_the_tags() {
 fn backspace_in_an_empty_box_removes_the_mode() {
     let taken = nothing_taken;
     let context = context(&taken);
-    let mut super_box = SuperBox::open(BoxMode::Search, Vec::new(), Vec::new(), &context);
+    let mut super_box = SuperBox::open(
+        BoxMode::Search,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        &context,
+    );
     super_box.set_input("s:".to_owned(), &context);
     assert_eq!(super_box.mode(), BoxMode::Shell);
     super_box.set_input("l".to_owned(), &context);
@@ -351,9 +376,10 @@ fn list(super_box: &mut SuperBox, candidates: Vec<Candidate>, context: &BoxConte
 fn tab_completes_and_then_goes_through_the_choices() {
     let taken = nothing_taken;
     let context = context(&taken);
-    let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
+    let mut super_box =
+        SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), Vec::new(), &context);
     super_box.set_input("cd Do".to_owned(), &context);
-    assert_eq!(super_box.complete(&context), None, "nothing listed yet");
+    assert_eq!(super_box.complete(&context), [], "nothing listed yet");
     list(
         &mut super_box,
         vec![candidate("Documents", true), candidate("Downloads", true)],
@@ -388,7 +414,7 @@ fn the_faded_suggestion_comes_from_history_first_then_from_the_folder() {
     let taken = nothing_taken;
     let context = context(&taken);
     let history = vec!["g:~/下载/新的".to_owned(), "s:make install".to_owned()];
-    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), history, &context);
+    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), history, &context);
     super_box.set_input("~/下".to_owned(), &context);
     list(&mut super_box, vec![candidate("下面", true)], &context);
     assert_eq!(super_box.suggestion(), Some("载/新的"));
@@ -413,10 +439,10 @@ fn the_faded_suggestion_comes_from_history_first_then_from_the_folder() {
 fn stale_suggestions_are_dropped_and_problems_cannot_be_selected() {
     let taken = |name: &str| name == "已有";
     let context = context(&taken);
-    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), &context);
-    let Some(BoxLookup::List {
+    let mut super_box = SuperBox::open(BoxMode::Path, Vec::new(), Vec::new(), Vec::new(), &context);
+    let [BoxLookup::List {
         generation: first, ..
-    }) = super_box.set_input("~/d".to_owned(), &context)
+    }] = super_box.set_input("~/d".to_owned(), &context)[..]
     else {
         panic!("a path lookup");
     };
@@ -462,7 +488,7 @@ fn nothing_is_created_where_creating_is_not_possible() {
         cannot_create: Some("回收站里不能新建".to_owned()),
         ..context(&taken)
     };
-    let mut super_box = SuperBox::open(BoxMode::New, Vec::new(), Vec::new(), &context);
+    let mut super_box = SuperBox::open(BoxMode::New, Vec::new(), Vec::new(), Vec::new(), &context);
     super_box.set_input("a.txt".to_owned(), &context);
     assert_eq!(
         super_box.rows(),
@@ -576,13 +602,13 @@ fn index_results_follow_the_other_entries_and_stale_ones_are_dropped() {
     let taken = nothing_taken;
     let context = context(&taken);
     let entries = vec![feature("Search", "search")];
-    let mut super_box = SuperBox::open(BoxMode::Search, entries, Vec::new(), &context);
-    let Some(BoxLookup::Find {
+    let mut super_box = SuperBox::open(BoxMode::Search, entries, Vec::new(), Vec::new(), &context);
+    let [BoxLookup::Find {
         generation: first,
         text_scope,
         limit,
         ..
-    }) = super_box.set_input("sea".to_owned(), &context)
+    }] = super_box.set_input("sea".to_owned(), &context)[..]
     else {
         panic!("searching also asks the index");
     };
@@ -619,7 +645,8 @@ fn index_results_follow_the_other_entries_and_stale_ones_are_dropped() {
 fn a_command_run_belongs_to_its_session() {
     let taken = nothing_taken;
     let context = context(&taken);
-    let mut super_box = SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), &context);
+    let mut super_box =
+        SuperBox::open(BoxMode::Shell, Vec::new(), Vec::new(), Vec::new(), &context);
     super_box.set_input("make".to_owned(), &context);
     assert_eq!(super_box.history_text(), "s:make");
     super_box.start_run(7, "make".to_owned());

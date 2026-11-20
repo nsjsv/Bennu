@@ -1,5 +1,6 @@
 pub mod command_line;
 mod desktop_entries;
+pub mod desktop_file;
 mod desktop_notifications;
 pub use display_renderer;
 pub mod file_clipboard;

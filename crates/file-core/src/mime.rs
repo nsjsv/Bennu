@@ -402,17 +402,8 @@ fn looks_like_text(head: &[u8]) -> bool {
 
 /// 按 XDG 顺序：`$XDG_DATA_HOME/mime`，再 `$XDG_DATA_DIRS` 里各目录的 `mime`。
 fn system_cache_paths() -> Vec<PathBuf> {
-    let data_dirs = std::env::var_os("XDG_DATA_DIRS")
-        .filter(|value| !value.is_empty())
-        .map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-        .unwrap_or_else(|| {
-            vec![
-                PathBuf::from("/usr/local/share"),
-                PathBuf::from("/usr/share"),
-            ]
-        });
-    std::iter::once(crate::app_dirs::user_data_dir())
-        .chain(data_dirs)
+    crate::app_dirs::data_dirs()
+        .into_iter()
         .map(|directory| directory.join("mime").join("mime.cache"))
         .collect()
 }

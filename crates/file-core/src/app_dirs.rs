@@ -32,6 +32,17 @@ pub fn user_cache_dir() -> PathBuf {
     xdg_base_dir(std::env::var_os("XDG_CACHE_HOME"), ".cache")
 }
 
+/// 按优先顺序的所有数据目录：`$XDG_DATA_HOME`，再 `$XDG_DATA_DIRS` 里的各目录（没设时是
+/// `/usr/local/share:/usr/share`）。类型库、服务菜单都按这个顺序找，前面的盖掉后面的。
+pub fn data_dirs() -> Vec<PathBuf> {
+    let system = std::env::var_os("XDG_DATA_DIRS")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| OsString::from("/usr/local/share:/usr/share"));
+    std::iter::once(user_data_dir())
+        .chain(std::env::split_paths(&system).filter(|path| path.is_absolute()))
+        .collect()
+}
+
 pub fn app_data_dir() -> PathBuf {
     user_data_dir().join(DATA_DIR_NAME)
 }

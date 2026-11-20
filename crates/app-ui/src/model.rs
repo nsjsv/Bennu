@@ -492,7 +492,10 @@ pub(crate) enum Message {
     PaneCursorExited(BrowserPaneId),
     KeyboardModifiersChanged(keyboard::Modifiers),
     KeyboardKeyPressed {
+        /// 按的是哪个键，不算 Shift 这些修饰：快捷键按它认。
         key: keyboard::Key,
+        /// 这个键按出来的是什么：Shift、AltGr、键盘布局都算进去，只有 Ctrl 不算。终端按它打字。
+        modified_key: keyboard::Key,
         modifiers: keyboard::Modifiers,
         status: event::Status,
     },

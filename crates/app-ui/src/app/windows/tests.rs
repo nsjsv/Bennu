@@ -1151,6 +1151,7 @@ async fn only_tab_key_rechecks_search_input_focus() {
 
     let enter = browser.update(Message::KeyboardKeyPressed {
         key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
+        modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter),
         modifiers: iced::keyboard::Modifiers::default(),
         status: iced::event::Status::Captured,
     });
@@ -1164,6 +1165,7 @@ async fn only_tab_key_rechecks_search_input_focus() {
     ] {
         let tab = browser.update(Message::KeyboardKeyPressed {
             key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
+            modified_key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Tab),
             modifiers,
             status: iced::event::Status::Captured,
         });

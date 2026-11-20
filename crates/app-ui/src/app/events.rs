@@ -35,9 +35,16 @@ pub(super) fn global_event_message(
         return Some(Message::KeyboardModifiersChanged(*modifiers));
     }
 
-    if let Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) = &event {
+    if let Event::Keyboard(keyboard::Event::KeyPressed {
+        key,
+        modified_key,
+        modifiers,
+        ..
+    }) = &event
+    {
         return Some(Message::KeyboardKeyPressed {
             key: key.clone(),
+            modified_key: modified_key.clone(),
             modifiers: *modifiers,
             status,
         });
@@ -154,7 +161,30 @@ mod tests {
                 key: Key::Character(value),
                 modifiers,
                 status: event::Status::Captured,
+                ..
             }) if value == "l" && modifiers.control()
+        ));
+    }
+
+    #[test]
+    fn a_key_press_reports_both_the_key_and_what_it_types() {
+        let event = Event::Keyboard(keyboard::Event::KeyPressed {
+            key: Key::Character(";".into()),
+            modified_key: Key::Character(":".into()),
+            physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::SHIFT,
+            text: Some(":".into()),
+            repeat: false,
+        });
+
+        assert!(matches!(
+            route_event(event, event::Status::Ignored),
+            Some(Message::KeyboardKeyPressed {
+                key: Key::Character(pressed),
+                modified_key: Key::Character(typed),
+                ..
+            }) if pressed == ";" && typed == ":"
         ));
     }
 

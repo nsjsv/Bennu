@@ -42,7 +42,12 @@ mod tests {
     use crate::config;
 
     fn press(browser: &mut FileBrowser, key: Key, modifiers: Modifiers) {
-        drop(browser.handle_keyboard_key_pressed(key, modifiers, event::Status::Ignored));
+        drop(browser.handle_keyboard_key_pressed(
+            key.clone(),
+            key,
+            modifiers,
+            event::Status::Ignored,
+        ));
     }
 
     #[test]

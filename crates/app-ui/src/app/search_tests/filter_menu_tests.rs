@@ -11,6 +11,7 @@ use crate::model::{
 fn press_escape(browser: &mut super::FileBrowser) {
     drop(browser.handle_keyboard_key_pressed(
         keyboard::Key::Named(key::Named::Escape),
+        keyboard::Key::Named(key::Named::Escape),
         keyboard::Modifiers::default(),
         event::Status::Ignored,
     ));

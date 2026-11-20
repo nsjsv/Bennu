@@ -551,6 +551,7 @@ impl FileBrowser {
             }
             Message::KeyboardKeyPressed {
                 key,
+                modified_key,
                 modifiers,
                 status,
             } => {
@@ -560,7 +561,8 @@ impl FileBrowser {
                 ) && !modifiers.alt()
                     && !modifiers.control()
                     && !modifiers.command();
-                let keyboard_command = self.handle_keyboard_key_pressed(key, modifiers, status);
+                let keyboard_command =
+                    self.handle_keyboard_key_pressed(key, modified_key, modifiers, status);
                 if traverses_focus {
                     Task::batch([
                         keyboard_command,

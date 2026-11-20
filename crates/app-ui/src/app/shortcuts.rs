@@ -27,6 +27,7 @@ impl FileBrowser {
     pub(super) fn handle_keyboard_key_pressed(
         &mut self,
         key: keyboard::Key,
+        modified_key: keyboard::Key,
         modifiers: keyboard::Modifiers,
         status: event::Status,
     ) -> Task<Message> {
@@ -39,7 +40,7 @@ impl FileBrowser {
         }
 
         // 终端面板聚焦时键盘归 PTY;除宿主保留键外不进入文件管理器快捷键路由。
-        if let Some(task) = self.terminal_panel_keyboard_input(&key, modifiers) {
+        if let Some(task) = self.terminal_panel_keyboard_input(&key, &modified_key, modifiers) {
             return task;
         }
 
@@ -554,6 +555,7 @@ mod tests {
 
         drop(ignored_browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
+            keyboard::Key::Named(key::Named::Delete),
             keyboard::Modifiers::default(),
             event::Status::Ignored,
         ));
@@ -573,6 +575,7 @@ mod tests {
 
         drop(captured_browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
+            keyboard::Key::Named(key::Named::Delete),
             keyboard::Modifiers::default(),
             event::Status::Captured,
         ));
@@ -582,6 +585,7 @@ mod tests {
 
     fn escape(browser: &mut FileBrowser, status: event::Status) {
         drop(browser.handle_keyboard_key_pressed(
+            keyboard::Key::Named(key::Named::Escape),
             keyboard::Key::Named(key::Named::Escape),
             keyboard::Modifiers::default(),
             status,
@@ -628,6 +632,7 @@ mod tests {
 
         drop(browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
+            keyboard::Key::Named(key::Named::Delete),
             keyboard::Modifiers::default(),
             event::Status::Ignored,
         ));
@@ -651,6 +656,7 @@ mod tests {
 
         drop(browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
+            keyboard::Key::Named(key::Named::Delete),
             keyboard::Modifiers::default(),
             event::Status::Ignored,
         ));
@@ -672,6 +678,7 @@ mod tests {
 
         drop(browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
+            keyboard::Key::Named(key::Named::Delete),
             keyboard::Modifiers::default(),
             event::Status::Ignored,
         ));
@@ -687,6 +694,7 @@ mod tests {
         browser.tab_mut().location = BrowserLocation::Directory(directory.clone());
 
         drop(browser.handle_keyboard_key_pressed(
+            keyboard::Key::Named(key::Named::Backspace),
             keyboard::Key::Named(key::Named::Backspace),
             keyboard::Modifiers::default(),
             event::Status::Captured,

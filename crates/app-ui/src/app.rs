@@ -91,6 +91,8 @@ mod task_driving_tests;
 mod task_end;
 #[cfg(test)]
 mod terminal_follow_tests;
+#[cfg(test)]
+mod terminal_keys_tests;
 mod text_input_shortcuts;
 mod thumbnailing;
 pub(crate) mod transfer;

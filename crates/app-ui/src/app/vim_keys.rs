@@ -159,6 +159,7 @@ mod tests {
 
         drop(browser.handle_keyboard_key_pressed(
             Key::Named(key::Named::Enter),
+            Key::Named(key::Named::Enter),
             Modifiers::default(),
             iced::event::Status::Ignored,
         ));

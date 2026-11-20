@@ -99,6 +99,7 @@ mod tests {
 
         drop(browser.handle_keyboard_key_pressed(
             Key::Named(key::Named::F9),
+            Key::Named(key::Named::F9),
             Modifiers::default(),
             event::Status::Ignored,
         ));

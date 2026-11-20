@@ -447,10 +447,8 @@ async fn a_full_screen_program_moves_to_the_terminal_panel_and_keeps_running() {
         crate::model::NavigationMode::RecordHistory,
     );
     drive(&mut browser, navigated).await;
-    let keys = browser.terminal_panel_keyboard_input(
-        &iced::keyboard::Key::Character("y".into()),
-        iced::keyboard::Modifiers::empty(),
-    );
+    let y = iced::keyboard::Key::Character("y".into());
+    let keys = browser.terminal_panel_keyboard_input(&y, &y, iced::keyboard::Modifiers::empty());
     drive(&mut browser, keys.expect("the terminal takes the keys")).await;
     browser
         .terminal_panel

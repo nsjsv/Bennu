@@ -495,9 +495,11 @@ impl FileBrowser {
     }
 
     /// 终端聚焦时的键盘独占路由;返回 `None` 表示不归终端管,继续原有快捷键路由。
+    /// 宿主保留键按 `key` 认,打进终端的是 `modified_key`(按出来的字:Shift+; 是 `:`)。
     pub(crate) fn terminal_panel_keyboard_input(
         &mut self,
         key: &iced::keyboard::Key,
+        modified_key: &iced::keyboard::Key,
         modifiers: iced::keyboard::Modifiers,
     ) -> Option<Task<Message>> {
         if !self.terminal_panel.is_focused() {
@@ -533,7 +535,7 @@ impl FileBrowser {
         let Some(active_tab) = self.terminal_panel.active_tab_mut() else {
             return None;
         };
-        let input = input::input_for_key(key, modifiers);
+        let input = input::input_for_key(modified_key, modifiers);
         match input {
             input::TerminalInput::None => {
                 // 无修饰翻页键属于本地回看。

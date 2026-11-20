@@ -599,6 +599,7 @@ fn letters_captured_by_a_text_field_never_jump() {
     let mut browser = browser_with_names(BrowserViewMode::List, &["apple.txt", "notes.txt"]);
     drop(browser.handle_keyboard_key_pressed(
         iced::keyboard::Key::Character("n".into()),
+        iced::keyboard::Key::Character("n".into()),
         iced::keyboard::Modifiers::default(),
         iced::event::Status::Captured,
     ));

@@ -27,7 +27,12 @@ fn browser_with_selected_file() -> (FileBrowser, PathBuf) {
 }
 
 fn press(browser: &mut FileBrowser, key: Key) {
-    drop(browser.handle_keyboard_key_pressed(key, Modifiers::default(), event::Status::Ignored));
+    drop(browser.handle_keyboard_key_pressed(
+        key.clone(),
+        key,
+        Modifiers::default(),
+        event::Status::Ignored,
+    ));
 }
 
 fn named(named: key::Named) -> Key {

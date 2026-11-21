@@ -7,7 +7,8 @@ use iced::widget::{
 };
 use iced::{Alignment, Background, Border, Element, Length, Shadow, Theme, Vector};
 
-use super::feedback::{tooltip, tooltip_bubble};
+use super::feedback::tooltip_bubble;
+use super::hint::tooltip;
 use super::{foreground_tint, knob_color, raised_surface};
 use crate::metrics::{CHECKBOX_RADIUS, CONTROL_HEIGHT, CONTROL_RADIUS};
 use crate::styles::{elevation_shadow_color, muted_text_color};
@@ -94,8 +95,7 @@ fn segment<'a, Message: Clone + 'a>(choice: SegmentedChoice<Message>) -> Element
             segment,
             tooltip_bubble(hint),
             iced_tooltip::Position::Bottom,
-        )
-        .into(),
+        ),
         None => segment.into(),
     }
 }

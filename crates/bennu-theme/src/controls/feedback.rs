@@ -3,16 +3,14 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::ops::RangeInclusive;
-use std::time::Duration;
 
-use iced::advanced::text::Renderer as TextRenderer;
 use iced::widget::progress_bar as iced_progress_bar;
 use iced::widget::{
     container,
     slider::{self, Slider},
-    text, tooltip as iced_tooltip, Container, ProgressBar, Tooltip,
+    text, Container, ProgressBar,
 };
-use iced::{Background, Border, Element, Length, Theme};
+use iced::{Background, Border, Length, Theme};
 
 use super::{foreground_tint, knob_color};
 use crate::styles::subtle_border_color;
@@ -25,9 +23,6 @@ const PROGRESS_GIRTH: f32 = 6.0;
 const TOOLTIP_RADIUS: f32 = 6.0;
 /// 完整名字的提示框最宽多少，再长就换行。
 const FULL_NAME_BUBBLE_MAX_WIDTH: f32 = 360.0;
-
-/// 鼠标停这么久提示才出来：只是划过去不冒东西挡视线。0.5 秒是桌面上通行的等待时长。
-pub const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 
 pub fn slider<'a, T, Message>(
     range: RangeInclusive<T>,
@@ -47,18 +42,6 @@ pub fn progress_bar<'a>(range: RangeInclusive<f32>, value: f32) -> ProgressBar<'
     iced_progress_bar(range, value)
         .girth(Length::Fixed(PROGRESS_GIRTH))
         .style(progress_bar_style)
-}
-
-/// 全应用的悬浮提示只从这里来，都要停 `TOOLTIP_DELAY` 才出现。
-pub fn tooltip<'a, Message, Renderer>(
-    content: impl Into<Element<'a, Message, Theme, Renderer>>,
-    bubble: impl Into<Element<'a, Message, Theme, Renderer>>,
-    position: iced_tooltip::Position,
-) -> Tooltip<'a, Message, Theme, Renderer>
-where
-    Renderer: TextRenderer,
-{
-    Tooltip::new(content, bubble, position).delay(TOOLTIP_DELAY)
 }
 
 pub fn tooltip_bubble<'a, Message: 'a>(hint: String) -> Container<'a, Message> {
@@ -126,67 +109,5 @@ pub fn tooltip_bubble_style(theme: &Theme) -> container::Style {
             radius: TOOLTIP_RADIUS.into(),
         },
         ..container::Style::default()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use iced::advanced::layout::Limits;
-    use iced::advanced::widget::Tree;
-    use iced::advanced::{clipboard, mouse, Layout, Shell};
-    use iced::widget::{text, tooltip as iced_tooltip, Space};
-    use iced::{window, Element, Event, Point, Rectangle, Size, Theme, Vector};
-
-    use super::{tooltip, TOOLTIP_DELAY};
-
-    /// 鼠标放上去先不出提示，停够 `TOOLTIP_DELAY` 才出来。
-    #[test]
-    fn tooltips_wait_before_showing() {
-        let mut hint: Element<'_, (), Theme, ()> = tooltip(
-            Space::new().width(100.0).height(20.0),
-            text("hint"),
-            iced_tooltip::Position::Bottom,
-        )
-        .into();
-        let mut tree = Tree::new(&hint);
-        let node = hint.as_widget_mut().layout(
-            &mut tree,
-            &(),
-            &Limits::new(Size::ZERO, Size::new(100.0, 20.0)),
-        );
-        let viewport = Rectangle::with_size(Size::new(100.0, 20.0));
-        let position = Point::new(10.0, 10.0);
-        let deliver = |hint: &mut Element<'_, (), Theme, ()>, tree: &mut Tree, event: Event| {
-            let mut messages = Vec::new();
-            let mut shell = Shell::new(&mut messages);
-            hint.as_widget_mut().update(
-                tree,
-                &event,
-                Layout::new(&node),
-                mouse::Cursor::Available(position),
-                &(),
-                &mut clipboard::Null,
-                &mut shell,
-                &viewport,
-            );
-            hint.as_widget_mut()
-                .overlay(tree, Layout::new(&node), &(), &viewport, Vector::ZERO)
-                .is_some()
-        };
-
-        let shown_on_enter = deliver(
-            &mut hint,
-            &mut tree,
-            Event::Mouse(mouse::Event::CursorMoved { position }),
-        );
-        assert!(!shown_on_enter);
-
-        std::thread::sleep(TOOLTIP_DELAY);
-        let shown_after_waiting = deliver(
-            &mut hint,
-            &mut tree,
-            Event::Window(window::Event::RedrawRequested(std::time::Instant::now())),
-        );
-        assert!(shown_after_waiting);
     }
 }

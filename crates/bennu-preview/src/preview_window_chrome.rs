@@ -110,5 +110,4 @@ fn with_tooltip<Message: Clone + 'static>(
         tooltip_bubble(label),
         iced::widget::tooltip::Position::Bottom,
     )
-    .into()
 }

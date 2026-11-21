@@ -10,6 +10,7 @@ mod buttons;
 mod escape;
 mod feedback;
 mod fields;
+mod hint;
 mod toggles;
 
 pub use buttons::{
@@ -18,13 +19,15 @@ pub use buttons::{
 };
 pub use escape::on_escape;
 pub use feedback::{
-    full_name_bubble, progress_bar, progress_bar_style, slider, slider_style, tooltip,
-    tooltip_bubble, tooltip_bubble_style, TOOLTIP_DELAY,
+    full_name_bubble, progress_bar, progress_bar_style, slider, slider_style, tooltip_bubble,
+    tooltip_bubble_style,
 };
 pub use fields::{
     dropdown, dropdown_menu_style, dropdown_style, inline_text_field, text_area, text_field,
     text_field_style,
 };
+pub(crate) use hint::gated_tooltip;
+pub use hint::{tooltip, TOOLTIP_DELAY};
 pub use toggles::{
     check_box, segmented_choice_row, switch, SegmentedChoice, SWITCH_HEIGHT, SWITCH_WIDTH,
 };

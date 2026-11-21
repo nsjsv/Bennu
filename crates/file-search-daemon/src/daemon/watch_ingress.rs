@@ -11,20 +11,21 @@ use std::time::{Duration, Instant};
 use crate::error::{SearchError, SearchResult};
 use crate::SearchIndexConfig;
 
-use super::bounded_paths::{estimated_path_bytes, BoundedPathSet};
+use super::bounded_paths::estimated_path_bytes;
 use super::inotify_watch::WatchEvent;
 use super::memory::release_allocator_idle_pages;
+use super::pending_watch_paths::{PathChange, PendingWatchPaths};
 use super::watch_coverage::{RecommendedWatchCoverage, WatchCoverageRefresh};
 use super::work_queue::WATCH_BUDGET_PATROL_INTERVAL;
 use super::{DaemonLifecycleSnapshot, DaemonWorkQueue, DaemonWorkRequest};
 
-const WATCH_EVENT_COALESCE_WINDOW: Duration = Duration::from_millis(250);
-const WATCH_EVENT_COALESCE_DEADLINE: Duration = Duration::from_secs(1);
+/// 没有路径到期时也这么久醒一次，照看巡检、快照和溢出这些周期事务。
+const WATCH_INGRESS_TICK: Duration = Duration::from_millis(250);
 const WATCH_COVERAGE_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 const WATCH_EVENT_CHANNEL_CAPACITY: usize = 32;
 const MAX_EVENT_PATH_BYTES: usize = 65_536;
-pub(super) const MAX_COALESCED_PATHS: usize = 2_048;
-const MAX_COALESCED_PATH_BYTES: usize = 1_048_576;
+const MAX_PENDING_WATCH_PATHS: usize = 2_048;
+const MAX_PENDING_WATCH_PATH_BYTES: usize = 1_048_576;
 
 pub(super) struct WatchOverflowState {
     roots: Vec<PathBuf>,
@@ -113,11 +114,6 @@ pub(super) struct DaemonWatchIngress {
     dispatch_thread: thread::JoinHandle<()>,
 }
 
-#[derive(Debug)]
-pub(super) struct PendingWatchPathBatch {
-    changed_paths: BoundedPathSet,
-}
-
 struct WatchBudgetPatrolSchedule {
     next_submission: Instant,
     deferred_directories: Option<Vec<PathBuf>>,
@@ -158,28 +154,6 @@ impl WatchBudgetPatrolSchedule {
             self.next_submission = now + WATCH_BUDGET_PATROL_INTERVAL;
         }
         Ok(())
-    }
-}
-
-impl Default for PendingWatchPathBatch {
-    fn default() -> Self {
-        Self {
-            changed_paths: BoundedPathSet::new(MAX_COALESCED_PATHS, MAX_COALESCED_PATH_BYTES),
-        }
-    }
-}
-
-impl PendingWatchPathBatch {
-    pub(super) fn absorb_path(&mut self, changed_path: PathBuf) -> Result<(), Vec<PathBuf>> {
-        if self.changed_paths.insert(changed_path.clone()).is_err() {
-            self.changed_paths.clear();
-            return Err(vec![changed_path]);
-        }
-        Ok(())
-    }
-
-    pub(super) fn into_changed_paths(mut self) -> Vec<PathBuf> {
-        self.changed_paths.take_paths()
     }
 }
 
@@ -294,6 +268,8 @@ impl WatchIngressLoop {
         let mut budget_patrol_schedule = WatchBudgetPatrolSchedule::new(Instant::now());
         let mut observed_overflow_epoch = overflow_state.epoch();
         let mut observed_snapshot_epoch = directory_snapshot_epoch.load(Ordering::Acquire);
+        let mut pending_paths =
+            PendingWatchPaths::new(MAX_PENDING_WATCH_PATHS, MAX_PENDING_WATCH_PATH_BYTES);
 
         loop {
             if ingress_should_stop(&stop_receiver) {
@@ -335,6 +311,7 @@ impl WatchIngressLoop {
             if current_overflow_epoch != observed_overflow_epoch {
                 observed_overflow_epoch = current_overflow_epoch;
                 let dirty_roots = overflow_state.take_dirty_roots();
+                pending_paths.forget_under(&dirty_roots);
                 if !dirty_roots.is_empty()
                     && work_queue
                         .enqueue(DaemonWorkRequest::DirtyRootRecovery { roots: dirty_roots })
@@ -345,106 +322,83 @@ impl WatchIngressLoop {
                 continue;
             }
 
-            let mut pending_watch_batch = PendingWatchPathBatch::default();
-            match event_receiver.recv_timeout(WATCH_EVENT_COALESCE_WINDOW) {
-                Ok(WatchEvent::Changed(path)) => {
-                    if let Err(paths) = pending_watch_batch.absorb_path(path) {
-                        overflow_state.record_paths(&paths);
-                        continue;
-                    }
-                }
-                Ok(WatchEvent::QueueOverflow) => {
-                    overflow_state.record_paths(&[]);
-                    continue;
-                }
-                Ok(WatchEvent::Failed(message)) => {
-                    handle_watch_failure(
-                        &mut coverage,
-                        message,
-                        &overflow_state,
-                        &lifecycle_snapshot,
-                    );
-                    continue;
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    if Instant::now() >= next_coverage_retry {
-                        if publish_watch_coverage_refresh(
-                            &work_queue,
-                            &lifecycle_snapshot,
-                            Vec::new(),
-                            coverage.retry_gaps(),
-                        )
-                        .is_err()
-                        {
-                            break;
-                        }
-                        next_coverage_retry = Instant::now() + WATCH_COVERAGE_RETRY_INTERVAL;
-                    }
-                    continue;
-                }
-                Err(RecvTimeoutError::Disconnected) => {
-                    record_watch_channel_failure(&mut coverage, &lifecycle_snapshot);
-                    break;
-                }
-            }
-
-            let coalesce_deadline = Instant::now() + WATCH_EVENT_COALESCE_DEADLINE;
-            let mut coalesced_paths_overflowed = false;
+            let now = Instant::now();
+            let wait = pending_paths.next_due().map_or(WATCH_INGRESS_TICK, |due| {
+                due.saturating_duration_since(now).min(WATCH_INGRESS_TICK)
+            });
+            let mut next_event = event_receiver.recv_timeout(wait);
+            // 事件源源不断时也要按时交出到期路径、照看周期事务。
+            let drain_deadline = Instant::now() + WATCH_INGRESS_TICK;
             loop {
-                if ingress_should_stop(&stop_receiver) {
-                    return;
-                }
-                let remaining = coalesce_deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    break;
-                }
-                match event_receiver.recv_timeout(WATCH_EVENT_COALESCE_WINDOW.min(remaining)) {
-                    Ok(WatchEvent::Changed(path)) => {
-                        if let Err(paths) = pending_watch_batch.absorb_path(path) {
-                            overflow_state.record_paths(&paths);
-                            coalesced_paths_overflowed = true;
-                            break;
-                        }
+                let event = match next_event {
+                    Ok(event) => event,
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => {
+                        record_watch_channel_failure(&mut coverage, &lifecycle_snapshot);
+                        return;
                     }
-                    Ok(WatchEvent::QueueOverflow) => {
+                };
+                let (path, change) = match event {
+                    WatchEvent::Changed(path) => (path, PathChange::Written),
+                    WatchEvent::Removed(path) => (path, PathChange::Removed),
+                    WatchEvent::QueueOverflow => {
                         overflow_state.record_paths(&[]);
-                        coalesced_paths_overflowed = true;
                         break;
                     }
-                    Ok(WatchEvent::Failed(message)) => {
+                    WatchEvent::Failed(message) => {
                         handle_watch_failure(
                             &mut coverage,
                             message,
                             &overflow_state,
                             &lifecycle_snapshot,
                         );
+                        break;
                     }
-                    Err(RecvTimeoutError::Timeout) => break,
-                    Err(RecvTimeoutError::Disconnected) => {
-                        record_watch_channel_failure(&mut coverage, &lifecycle_snapshot);
+                };
+                if let Err(path) = pending_paths.record(path, change, Instant::now()) {
+                    let flushed = pending_paths.take_all(Instant::now());
+                    let refresh = coverage.refresh_changed_paths(&flushed);
+                    if publish_watch_coverage_refresh(
+                        &work_queue,
+                        &lifecycle_snapshot,
+                        flushed,
+                        refresh,
+                    )
+                    .is_err()
+                    {
                         return;
                     }
+                    pending_paths
+                        .record(path, change, Instant::now())
+                        .expect("an emptied pending path queue takes one event path");
                 }
+                if Instant::now() >= drain_deadline {
+                    break;
+                }
+                next_event = event_receiver.try_recv().map_err(|error| match error {
+                    TryRecvError::Empty => RecvTimeoutError::Timeout,
+                    TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+                });
             }
 
-            if coalesced_paths_overflowed || overflow_state.epoch() != observed_overflow_epoch {
+            // 溢出的根目录整个重查，下一轮开头处理；它们下面等着的路径不必再交。
+            if overflow_state.epoch() != observed_overflow_epoch {
                 continue;
             }
 
-            let changed_paths = pending_watch_batch.into_changed_paths();
-            if changed_paths.is_empty() {
-                continue;
-            }
-            let refresh = coverage.refresh_changed_paths(&changed_paths);
-            if publish_watch_coverage_refresh(
-                &work_queue,
-                &lifecycle_snapshot,
-                changed_paths,
-                refresh,
-            )
-            .is_err()
-            {
-                break;
+            let due_paths = pending_paths.take_due(Instant::now());
+            if !due_paths.is_empty() {
+                let refresh = coverage.refresh_changed_paths(&due_paths);
+                if publish_watch_coverage_refresh(
+                    &work_queue,
+                    &lifecycle_snapshot,
+                    due_paths,
+                    refresh,
+                )
+                .is_err()
+                {
+                    break;
+                }
             }
 
             if Instant::now() >= next_coverage_retry {
@@ -537,7 +491,7 @@ pub(super) fn deliver_watch_event(
     event: WatchEvent,
 ) {
     let path = match &event {
-        WatchEvent::Changed(path) => {
+        WatchEvent::Changed(path) | WatchEvent::Removed(path) => {
             if estimated_path_bytes(path) > MAX_EVENT_PATH_BYTES {
                 overflow_state.record_paths(std::slice::from_ref(path));
                 return;
@@ -571,19 +525,5 @@ mod tests {
         state.record_paths(&[first.join("changed.txt")]);
 
         assert_eq!(state.take_dirty_roots(), vec![first]);
-    }
-
-    #[test]
-    fn coalesced_capacity_failure_reports_paths_for_dirty_root_recovery() {
-        let mut batch = PendingWatchPathBatch {
-            changed_paths: BoundedPathSet::new(1, usize::MAX),
-        };
-        batch.absorb_path(PathBuf::from("/root/first")).unwrap();
-        let overflowed = batch
-            .absorb_path(PathBuf::from("/root/second"))
-            .unwrap_err();
-
-        assert_eq!(overflowed, vec![PathBuf::from("/root/second")]);
-        assert!(batch.into_changed_paths().is_empty());
     }
 }

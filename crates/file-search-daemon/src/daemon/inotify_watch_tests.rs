@@ -74,7 +74,7 @@ fn a_deleted_directory_is_reported_and_then_forgotten() {
 
     std::fs::remove_dir(&child).unwrap();
 
-    wait_for(&receiver, &WatchEvent::Changed(child.clone()));
+    wait_for(&receiver, &WatchEvent::Removed(child.clone()));
     let deadline = Instant::now() + Duration::from_secs(5);
     while backend.is_watched(&child) {
         assert!(
@@ -110,6 +110,26 @@ fn queue_overflow_and_dropped_watches_are_translated() {
     assert_eq!(
         resolve(&mut tree, named),
         Some(WatchEvent::Changed(PathBuf::from("/r/dir/a.txt")))
+    );
+
+    let deleted = RawEvent {
+        descriptor: 3,
+        flags: ReadFlags::DELETE,
+        name: Some(b"a.txt".to_vec()),
+    };
+    assert_eq!(
+        resolve(&mut tree, deleted),
+        Some(WatchEvent::Removed(PathBuf::from("/r/dir/a.txt")))
+    );
+
+    let moved_away = RawEvent {
+        descriptor: 3,
+        flags: ReadFlags::MOVED_FROM,
+        name: Some(b"b.txt".to_vec()),
+    };
+    assert_eq!(
+        resolve(&mut tree, moved_away),
+        Some(WatchEvent::Removed(PathBuf::from("/r/dir/b.txt")))
     );
 
     let ignored = RawEvent {

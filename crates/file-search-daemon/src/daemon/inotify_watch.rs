@@ -25,8 +25,10 @@ const EVENT_BUFFER_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum WatchEvent {
-    /// 被监听目录里的一项、或目录本身变了。
+    /// 被监听目录里的一项、或目录本身变了：新建、写入、写完、属性、移入。
     Changed(PathBuf),
+    /// 被监听目录里的一项被删或移走，或目录自己被删被移。
+    Removed(PathBuf),
     /// 内核事件队列溢出，变化的身份丢了。
     QueueOverflow,
     /// 读事件失败，监听不再可用。
@@ -224,10 +226,17 @@ fn resolve(tree: &mut WatchedTree, raw: RawEvent) -> Option<WatchEvent> {
         return None;
     }
     let directory = tree.path_of(watch)?;
-    Some(WatchEvent::Changed(match raw.name {
+    let path = match raw.name {
         Some(name) => directory.join(OsStr::from_bytes(&name)),
         None => directory,
-    }))
+    };
+    let removal =
+        ReadFlags::DELETE | ReadFlags::MOVED_FROM | ReadFlags::DELETE_SELF | ReadFlags::MOVE_SELF;
+    Some(if raw.flags.intersects(removal) {
+        WatchEvent::Removed(path)
+    } else {
+        WatchEvent::Changed(path)
+    })
 }
 
 #[cfg(test)]

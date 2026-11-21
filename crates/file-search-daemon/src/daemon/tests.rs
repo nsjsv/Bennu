@@ -847,17 +847,6 @@ fn hybrid_watch_budget_patrol_is_a_healthy_maintenance_mode() {
 }
 
 #[test]
-fn a_path_reported_twice_is_queued_once() {
-    let repeated = PathBuf::from("/tmp/repeated");
-    let mut batch = PendingWatchPathBatch::default();
-
-    batch.absorb_path(repeated.clone()).unwrap();
-    batch.absorb_path(repeated.clone()).unwrap();
-
-    assert_eq!(batch.into_changed_paths(), vec![repeated]);
-}
-
-#[test]
 fn ordinary_paths_arriving_during_startup_stay_local() {
     let root = PathBuf::from("/root");
     let changed = root.join("changed.txt");

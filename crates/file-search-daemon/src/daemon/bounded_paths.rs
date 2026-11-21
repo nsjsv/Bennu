@@ -37,11 +37,6 @@ impl BoundedPathSet {
         Ok(())
     }
 
-    pub(super) fn clear(&mut self) {
-        self.paths.clear();
-        self.estimated_bytes = 0;
-    }
-
     pub(super) fn remove(&mut self, path: &Path) -> bool {
         if !self.paths.remove(path) {
             return false;

@@ -19,6 +19,7 @@ mod lifecycle;
 mod maintenance;
 mod memory;
 mod path_configuration;
+mod pending_watch_paths;
 mod root_monitor;
 mod root_mount;
 mod watch_budget_patrol;
@@ -39,8 +40,6 @@ use self::path_configuration::{
 };
 use self::root_monitor::{RootAvailabilityMonitor, RootChange};
 use self::root_mount::observe_root_mounts;
-#[cfg(test)]
-use self::watch_ingress::PendingWatchPathBatch;
 #[cfg(test)]
 use self::work_queue::{
     dirty_root_retry_delay, PendingDaemonWork, WorkOutcome, DIRTY_ROOT_QUIET_WINDOW,
@@ -665,6 +664,9 @@ fn daemon_core_stopped() -> SearchError {
 #[cfg(test)]
 #[path = "daemon/content_refresh_tests.rs"]
 mod content_refresh_tests;
+#[cfg(test)]
+#[path = "daemon/settled_watch_tests.rs"]
+mod settled_watch_tests;
 #[cfg(test)]
 #[path = "daemon/tests.rs"]
 mod tests;

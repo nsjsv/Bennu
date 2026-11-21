@@ -549,6 +549,8 @@ pub(crate) enum Message {
     DestructiveActionCanceled,
     AuxiliaryWindowCloseRequested(window::Id),
     AuxiliaryWindowResized(window::Id, f32, f32),
+    /// 主窗口排出来的大小变了（按此刻的界面缩放）。
+    MainWindowLaidOut(iced::Size),
     X11Dnd(X11DndMessage),
     WindowMinimizeRequested(window::Id),
     WindowMaximizeToggled(window::Id),

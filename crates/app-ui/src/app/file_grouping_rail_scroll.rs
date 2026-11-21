@@ -62,7 +62,7 @@ impl FileBrowser {
                 let viewport_height = pane
                     .list_viewport
                     .map(|viewport| viewport.height.max(1.0))
-                    .unwrap_or(self.main_window_height());
+                    .unwrap_or(self.main_window_height);
                 let content_height = crate::list_view::LIST_HEADER_HEIGHT + layout.content_height();
                 // 表头占据内容流顶部,组头顶点换算滚动偏移要加回表头
                 // 留量,与 reveal/虚拟范围的口径一致。
@@ -94,7 +94,7 @@ impl FileBrowser {
                 let viewport_height = if viewport.height > f32::EPSILON {
                     viewport.height
                 } else {
-                    self.main_window_height()
+                    self.main_window_height
                 };
                 // 网格 flow 段的 top 已含内容内边距,组头顶点即内容空间
                 // 偏移,无需表头留量。

@@ -81,7 +81,7 @@ impl FileBrowser {
     pub(crate) fn split_axis_extent(&self, axis: SplitAxis) -> f32 {
         match axis {
             SplitAxis::Horizontal => self.main_content_width().max(0.0),
-            SplitAxis::Vertical => self.main_window_height().max(0.0),
+            SplitAxis::Vertical => self.main_window_height.max(0.0),
         }
     }
 }
@@ -105,8 +105,8 @@ mod tests {
         config: crate::config::UserConfig,
     ) -> FileBrowser {
         let (mut browser, _) = FileBrowser::new(config);
-        browser.main_window_logical_width = 1_000.0;
-        browser.main_window_logical_height = 800.0;
+        browser.main_window_width = 1_000.0;
+        browser.main_window_height = 800.0;
         browser.sidebar_width_when_shown = 200.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis,

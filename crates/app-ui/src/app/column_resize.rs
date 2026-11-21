@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn column_browser_content_width_excludes_sidebar_and_open_preview_panel() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.main_window_logical_width = 1_200.0;
+        browser.main_window_width = 1_200.0;
         browser.sidebar_width_when_shown = 180.0;
         let divider_width =
             COLUMN_RESIZE_DIVIDER_WIDTH * (browser.user_config.visible_column_count - 1) as f32;
@@ -300,14 +300,14 @@ mod tests {
     fn restored_reference_scales_persisted_widths_to_smaller_window() {
         // 回归:全屏时保存的栏宽,重启后窗口变小必须等比例缩放,而不是原样展示。
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-        browser.main_window_logical_width = 1_920.0;
+        browser.main_window_width = 1_920.0;
         let saved_reference = browser.column_browser_content_width(browser.active_pane_id());
 
         browser
             .apply_column_width_overrides(HashMap::from([(0usize, 600.0)]), Some(saved_reference));
         assert_close(browser.column_width(browser.active_pane_id(), 0), 600.0);
 
-        browser.main_window_logical_width = 1_000.0;
+        browser.main_window_width = 1_000.0;
         let expected = scale_column_width_to_content_width(
             600.0,
             saved_reference,
@@ -321,7 +321,7 @@ mod tests {
     fn missing_reference_falls_back_to_current_window_width() {
         // 旧数据没有参考宽度:保持历史行为,按当前窗口宽度兜底。
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-        browser.main_window_logical_width = 1_000.0;
+        browser.main_window_width = 1_000.0;
 
         browser.apply_column_width_overrides(HashMap::from([(0usize, 600.0)]), None);
 
@@ -332,7 +332,7 @@ mod tests {
     fn uniform_drag_sets_every_visible_column_to_same_width() {
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
         browser.user_config.column_width_adjust_mode = ColumnWidthAdjustMode::Uniform;
-        browser.main_window_logical_width = 1_200.0;
+        browser.main_window_width = 1_200.0;
 
         browser.start_column_resize_drag(0);
         browser.update_column_resize_drag(Point::new(340.0, 0.0));
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn selecting_uniform_mode_averages_existing_widths() {
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-        browser.main_window_logical_width = 1_200.0;
+        browser.main_window_width = 1_200.0;
         browser.apply_column_width_overrides(HashMap::from([(0usize, 400.0)]), None);
 
         browser.select_column_width_adjust_mode(ColumnWidthAdjustMode::Uniform);
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn each_side_of_a_split_holds_the_visible_columns() {
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-        browser.main_window_logical_width = 1_600.0;
+        browser.main_window_width = 1_600.0;
         browser.user_config.visible_column_count = 4;
         drop(browser.open_directory_in_split(
             std::path::PathBuf::from("/elsewhere"),
@@ -394,7 +394,7 @@ mod tests {
     #[test]
     fn choosing_the_column_count_divides_the_page_again() {
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-        browser.main_window_logical_width = 1_200.0;
+        browser.main_window_width = 1_200.0;
         let pane_id = browser.active_pane_id();
         let drag_column_wider = |browser: &mut FileBrowser| {
             drop(browser.start_column_resize_drag(0));
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn column_count_changed_in_another_window_divides_the_page_again() {
         let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-        browser.main_window_logical_width = 1_200.0;
+        browser.main_window_width = 1_200.0;
         browser.apply_column_width_overrides(HashMap::from([(0usize, 500.0)]), None);
         let mut stored = browser.user_config.user_preferences();
         stored.visible_column_count = 5;

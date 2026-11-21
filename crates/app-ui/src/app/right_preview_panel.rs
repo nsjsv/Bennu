@@ -238,7 +238,7 @@ impl FileBrowser {
             } else {
                 crate::terminal_panel::view::BOTTOM_BAR_HEIGHT
             };
-        (self.main_window_height()
+        (self.main_window_height
             - self.main_panes_area_top()
             - terminal_height
             - PANEL_CONTENT_PADDING * 2.0)
@@ -557,7 +557,7 @@ mod tests {
         // 存储比例 1.0 时,小窗高度下信息区保底 120px + 分隔条必须留出。
         let mut browser = panel_open_browser();
         browser.right_preview_preview_ratio = 1.0;
-        browser.main_window_logical_height = 400.0;
+        browser.main_window_height = 400.0;
         let ratio = browser.right_preview_panel_effective_preview_ratio();
         let content_height = browser.right_preview_panel_content_height();
         assert!(content_height * ratio <= content_height - 120.0);

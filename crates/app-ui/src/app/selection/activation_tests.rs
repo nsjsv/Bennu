@@ -165,7 +165,7 @@ fn outside_cursor_move_hands_drag_to_native() {
     drop(browser.handle_column_entry_clicked(source));
     drop(browser.update_file_drag(Point::new(10.0, 12.0)));
     // 拖动中(隐式 grab)越界后收不到 CursorLeft,交接只能按坐标判定。
-    drop(browser.update_file_drag(Point::new(browser.main_window_width() + 1.0, 12.0)));
+    drop(browser.update_file_drag(Point::new(browser.main_window_width + 1.0, 12.0)));
 
     let file_drag = browser
         .file_drag
@@ -186,7 +186,7 @@ fn fling_past_window_edge_hands_drag_to_native_in_one_move() {
 
     drop(browser.handle_column_entry_clicked(source));
     // 一步从按压点甩出窗口:激活与交接必须同时发生。
-    drop(browser.update_file_drag(Point::new(browser.main_window_width() + 1.0, 12.0)));
+    drop(browser.update_file_drag(Point::new(browser.main_window_width + 1.0, 12.0)));
 
     let file_drag = browser
         .file_drag
@@ -233,7 +233,7 @@ fn auxiliary_window_cursor_move_does_not_request_wayland_dnd() {
     drop(browser.handle_column_entry_clicked(source));
     drop(browser.update(Message::CursorMoved {
         window: window::Id::unique(),
-        position: Point::new(browser.main_window_width() + 1.0, 12.0),
+        position: Point::new(browser.main_window_width + 1.0, 12.0),
     }));
 
     assert_eq!(

@@ -105,24 +105,29 @@ fn native_drop_positions_follow_the_interface_scale() {
     assert!((position.y - 90.0 / scale).abs() < 0.001, "{position:?}");
 }
 
-/// 主窗口的布局大小跟着界面缩放走，不靠窗口再发大小：启动读到的字号、在这里改的、别的窗口
-/// 改的都一样（启动时按默认字号记下窗口大小，读到设置后不改，栏宽就一直按大了的宽度排，
-/// 一页摆不下设的栏数）。
+/// 主窗口的大小只认排版报出来的（按此刻的界面缩放）：启动时窗口先按默认字号开，读到设置
+/// 换成大字号后，晚到的 Resized 事件还是按默认字号折算的，用它会让栏宽一直偏大、一页摆不下。
 #[test]
-fn the_main_window_layout_size_follows_the_interface_scale() {
+fn the_main_window_size_comes_from_its_layout_not_from_resize_events() {
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    drop(browser.handle_auxiliary_window_resized(browser.main_window, 1282.0, 900.0));
-    assert_eq!(browser.main_window_width(), 1282.0);
+    let main_window = browser.main_window;
 
-    browser.user_config.interface_text_size = 15;
-    let scale = browser.interface_scale();
-    assert!(scale > 1.0);
-    assert!((browser.main_window_width() - 1282.0 / scale).abs() < 0.01);
-    assert!((browser.main_window_height() - 900.0 / scale).abs() < 0.01);
+    drop(
+        browser.update(crate::model::Message::MainWindowLaidOut(iced::Size::new(
+            943.4, 1028.9,
+        ))),
+    );
+    assert_eq!(browser.main_window_width, 943.4);
+    assert_eq!(browser.main_window_height, 1028.9);
 
-    // 这之后窗口发来的大小是按新缩放折算的布局大小，记下来仍然一致。
-    drop(browser.handle_auxiliary_window_resized(browser.main_window, 1000.0, 800.0));
-    assert!((browser.main_window_width() - 1000.0).abs() < 0.01);
+    drop(
+        browser.update(crate::model::Message::AuxiliaryWindowResized(
+            main_window,
+            1016.0,
+            1108.0,
+        )),
+    );
+    assert_eq!(browser.main_window_width, 943.4);
 }
 
 /// 预览窗口记的是布局大小：字号一换（这里选的或别的窗口改的）按新比例取回它的大小。

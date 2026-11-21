@@ -417,11 +417,8 @@ pub(crate) struct FileBrowser {
     pub(crate) cursor_position: bennu_theme::pointer_tracker::PointerPosition,
     /// 按住左键的那个窗口：按住期间该窗口的指针移动才作为消息进来（拖动、改大小、框选都要按住）。
     pointer_held_window: Option<window::Id>,
-    /// 主窗口大小，不随界面缩放（字号）变：布局用的宽高经 `main_window_width()` / `main_window_height()`
-    /// 按此刻的缩放折算。启动时读到的字号、改字号、别的窗口改了字号都不发窗口大小事件，记布局
-    /// 单位会一直按旧缩放算（栏宽、网格、分屏都偏）。
-    pub(crate) main_window_logical_width: f32,
-    pub(crate) main_window_logical_height: f32,
+    pub(crate) main_window_width: f32,
+    pub(crate) main_window_height: f32,
     /// 主窗口现在是不是在全屏放右侧面板的视频（宿主已切过去的状态，跟着引擎收敛）。
     main_window_video_fullscreen: bool,
     /// 光标当前压着的浏览内容区(窗格内容不含 tab 条)。悬停不激活窗格,
@@ -824,8 +821,8 @@ impl FileBrowser {
             cursor_position: bennu_theme::pointer_tracker::PointerPosition::default(),
             pointer_held_window: None,
             main_window_video_fullscreen: false,
-            main_window_logical_width: MAIN_WINDOW_INITIAL_WIDTH,
-            main_window_logical_height: MAIN_WINDOW_INITIAL_HEIGHT,
+            main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
+            main_window_height: MAIN_WINDOW_INITIAL_HEIGHT,
             cursor_over_browser_content_pane: None,
             hovered_pane_id: None,
             hovered_list_header_column: None,
@@ -1129,7 +1126,13 @@ impl FileBrowser {
     }
 
     fn view(&self, window: window::Id) -> Element<'_, Message> {
-        let content = self.window_content(window);
+        let mut content = self.window_content(window);
+        if window == self.main_window {
+            content = crate::window_layout_size::report_window_layout_size(
+                content,
+                Message::MainWindowLaidOut,
+            );
+        }
         let shares_position =
             window == self.main_window || self.preview_engine.preview_window == Some(window);
         bennu_theme::pointer_tracker::track_pointer(

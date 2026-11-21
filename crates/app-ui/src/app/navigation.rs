@@ -660,7 +660,7 @@ impl FileBrowser {
             })
             .unwrap_or_else(|| {
                 layout.initial_range(crate::list_view::list_initial_rows(
-                    self.main_window_height(),
+                    self.main_window_height,
                     self.user_config.list_view_density,
                 ))
             });

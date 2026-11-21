@@ -717,24 +717,24 @@ impl FileBrowser {
         }
     }
 
+    /// 主窗口按此刻的界面缩放排出来的大小（窗口根部 `report_window_layout_size` 记下的）：栏宽、
+    /// 网格、分屏、命中都按它算。窗口的 Resized 事件不用来记大小，见那个模块的说明。
+    pub(super) fn accept_main_window_layout_size(&mut self, size: iced::Size) -> Task<Message> {
+        self.main_window_width = size.width.max(1.0);
+        self.main_window_height = size.height.max(1.0);
+        Task::batch([
+            self.clamp_visible_pane_viewports(),
+            self.request_breadcrumb_drop_target_bounds_measurement(),
+            self.schedule_thumbnail_refresh(),
+        ])
+    }
+
     pub(super) fn handle_auxiliary_window_resized(
         &mut self,
         window: window::Id,
         width: f32,
         height: f32,
     ) -> Task<Message> {
-        if window == self.main_window {
-            // 事件给的是按此刻缩放折算过的布局大小，换回不随缩放变的大小记下。
-            let scale = self.interface_scale();
-            self.main_window_logical_width = (width * scale).max(1.0);
-            self.main_window_logical_height = (height * scale).max(1.0);
-            return Task::batch([
-                self.clamp_visible_pane_viewports(),
-                self.request_breadcrumb_drop_target_bounds_measurement(),
-                self.schedule_thumbnail_refresh(),
-            ]);
-        }
-
         if self.preview_engine.preview_window == Some(window) {
             let preview_engine = &mut self.preview_engine;
             let resized_size = preview_content_size_from_window(

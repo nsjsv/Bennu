@@ -233,7 +233,7 @@ fn directory_column<'a>(
                         merged_items.len(),
                         geometry.entry_scroll_height,
                         column_initial_rows(
-                            browser.main_window_height(),
+                            browser.main_window_height,
                             browser.user_config().columns_view_density,
                         ),
                     )

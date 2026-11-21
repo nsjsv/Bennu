@@ -220,7 +220,7 @@ impl FileBrowser {
         } else {
             let target = self.terminal_panel.clamp_height_for_window(
                 self.terminal_panel.expanded_height,
-                self.main_window_height(),
+                self.main_window_height,
             );
             self.terminal_panel.expanded_height = target;
             self.terminal_panel.focused = true;
@@ -285,9 +285,9 @@ impl FileBrowser {
             return;
         }
         let drawer_top = if self.terminal_panel.expanded {
-            self.main_window_height() - self.terminal_panel.height()
+            self.main_window_height - self.terminal_panel.height()
         } else {
-            self.main_window_height() - view::BOTTOM_BAR_HEIGHT
+            self.main_window_height - view::BOTTOM_BAR_HEIGHT
         };
         if self.cursor_or_origin().y < drawer_top {
             self.terminal_panel.focused = false;
@@ -368,7 +368,7 @@ impl FileBrowser {
         let dragged = drag.height_start + (drag.cursor_start_y - position.y);
         let clamped = self
             .terminal_panel
-            .clamp_height_for_window(dragged, self.main_window_height());
+            .clamp_height_for_window(dragged, self.main_window_height);
         self.terminal_panel.expanded_height = clamped;
         self.terminal_panel.height = clamped;
         self.terminal_panel.height_animation = None;
@@ -670,7 +670,7 @@ mod tests {
     fn terminal_grid_fits_the_content_column_inside_its_padding() {
         // 抽屉在侧栏右边的内容栏里：只减左右留白，不再另减一次侧栏（2026-11-10 多减过）。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.main_window_logical_width = 1_000.0;
+        browser.main_window_width = 1_000.0;
         browser.sidebar_width_when_shown = 200.0;
         let inner_width = 800.0 - PANEL_HORIZONTAL_PADDING * 2.0;
         assert_eq!(browser.terminal_panel_inner_width(), inner_width);

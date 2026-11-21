@@ -83,6 +83,7 @@ mod view;
 mod virtual_range;
 mod visible_entries;
 mod wayland_drag_icon;
+mod window_layout_size;
 
 fn main() -> std::process::ExitCode {
     // 限制 glibc 的线程 arena 数量，避免预览关闭后的分配页长期滞留。

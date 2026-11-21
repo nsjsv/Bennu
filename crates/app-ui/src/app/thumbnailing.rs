@@ -366,7 +366,7 @@ impl FileBrowser {
         // 初始预热行数必须由真实视口高度推导；固定行数在窗口较高时会让
         // 折叠线以下的可见条目永远等不到调度，只能靠 hover/滚动补救。
         let initial_rows = crate::list_view::list_initial_rows(
-            self.main_window_height(),
+            self.main_window_height,
             self.user_config.list_view_density,
         );
         let layout =
@@ -587,7 +587,7 @@ impl FileBrowser {
                     len,
                     geometry.entry_scroll_height,
                     crate::three_column_view::column_initial_rows(
-                        self.main_window_height(),
+                        self.main_window_height,
                         self.user_config.columns_view_density,
                     ),
                 )

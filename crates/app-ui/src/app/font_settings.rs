@@ -74,7 +74,7 @@ impl FileBrowser {
     }
 
     /// 界面一放大缩小，预览窗口的布局尺寸就变了，可窗口实际没变大小，系统不会发 Resized：按新
-    /// 比例取回它的大小，走窗口变大小的同一处理。主窗口记的是不随缩放变的大小，不用取。
+    /// 比例取回它的大小，走窗口变大小的同一处理。主窗口的大小由排版报出来，不用取。
     pub(super) fn reread_preview_window_size(&self) -> Task<Message> {
         let Some(window) = self.preview_engine.preview_window else {
             return Task::none();

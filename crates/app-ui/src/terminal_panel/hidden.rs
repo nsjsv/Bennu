@@ -55,7 +55,7 @@ impl FileBrowser {
         if !self.terminal_panel.expanded {
             let target = self.terminal_panel.clamp_height_for_window(
                 self.terminal_panel.expanded_height,
-                self.main_window_height(),
+                self.main_window_height,
             );
             self.terminal_panel.expanded_height = target;
             self.terminal_panel.expanded = true;

@@ -122,8 +122,8 @@ pub use scan::{
     DirectoryScanBatch, FileError, ScanOptions, ScanWarning,
 };
 pub use sort::{
-    apply_entry_options, compare_entries, discovered_sort_is_ready, filter_hidden,
-    sort_discovered_entry_indices, sort_entries, SortDirection, SortField,
+    compare_entries, discovered_sort_is_ready, sort_discovered_entry_indices, sort_entries,
+    SortDirection, SortField,
 };
 pub use transfer_conflict::{
     check_transfer_conflicts, is_transfer_target_available, TransferConflictCheck,

@@ -33,17 +33,6 @@ pub enum SortDirection {
     Descending,
 }
 
-pub fn apply_entry_options(entries: &mut Vec<DirectoryEntry>, options: &ScanOptions) {
-    filter_hidden(entries, options.include_hidden);
-    sort_entries(entries, options);
-}
-
-pub fn filter_hidden(entries: &mut Vec<DirectoryEntry>, include_hidden: bool) {
-    if !include_hidden {
-        entries.retain(|entry| !entry.is_hidden());
-    }
-}
-
 pub fn sort_entries(entries: &mut [DirectoryEntry], options: &ScanOptions) {
     entries.sort_unstable_by(|left, right| compare_entries(left, right, options));
 }

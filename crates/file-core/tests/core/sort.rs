@@ -1,19 +1,6 @@
 use super::*;
 
 #[test]
-fn hidden_filter_removes_dot_entries_when_disabled() {
-    let root = Path::new("/tmp");
-    let mut entries = vec![
-        entry(root.join(".hidden"), FileKind::File, 0, true),
-        entry(root.join("shown"), FileKind::File, 0, false),
-    ];
-
-    filter_hidden(&mut entries, false);
-
-    assert_eq!(names(&entries), vec!["shown"]);
-}
-
-#[test]
 fn sort_entries_keeps_directories_first_then_sorts_by_name() {
     let root = Path::new("/tmp");
     let mut entries = vec![

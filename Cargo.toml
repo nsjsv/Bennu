@@ -63,6 +63,11 @@ url = "2.5"
 zbus = { version = "5.15", features = ["tokio"] }
 wl-clipboard-rs = "0.9.3"
 
+# 自己代码的完整调试信息约占 debug 版 app-ui 的三分之二，每次链接都整份重写到盘上；
+# 只留行号后崩溃栈和 backtrace 仍有文件名和行号，要用调试器看局部变量时临时加 `--config 'profile.dev.debug=true'`。
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = 3
 lto = "fat"

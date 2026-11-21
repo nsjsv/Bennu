@@ -28,7 +28,6 @@ pub(crate) mod scan;
 pub(crate) mod scrollbar;
 mod selection;
 mod sidebar;
-pub(crate) mod suggestions;
 pub(crate) mod thumbnails;
 mod view_mode;
 

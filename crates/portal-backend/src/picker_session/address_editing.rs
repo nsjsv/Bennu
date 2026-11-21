@@ -2,14 +2,14 @@
 //! 移植。进入/改稿/防抖回信/提交/取消的语义逐条对齐；主软件里的
 //! pane 归属、trash 视图与多模态互斥特判在 portal 不存在，其余不变。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use bennu_theme::address_bar::{
-    AddressBarTransition, AddressEditingSession, AddressEditingSessionId, AddressSuggestionRequest,
+    completed_path_text, typed_path, AddressBarTransition, AddressEditingSession,
+    AddressEditingSessionId, AddressSuggestionRequest,
 };
 
-use super::suggestions::completed_path_text;
 use super::{PickerSession, SessionEffect};
 use crate::picker_session::PickerLocation;
 
@@ -103,7 +103,11 @@ impl PickerSession {
             .suggestion_selection
             .and_then(|index| editing.suggestions.get(index))
             .cloned();
-        let parsed_draft = path_from_address_draft(&editing.draft, directory);
+        let parsed_draft = typed_path(
+            &editing.draft,
+            Some(directory),
+            &file_core::app_dirs::home_dir(),
+        );
         let Some(target) = selected_suggestion.or(parsed_draft) else {
             return self.cancel_address_editing();
         };
@@ -275,20 +279,6 @@ impl PickerSession {
             Some(snapshot),
             Instant::now(),
         ));
-    }
-}
-
-fn path_from_address_draft(draft: &str, current_dir: &Path) -> Option<PathBuf> {
-    let trimmed = draft.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let path = PathBuf::from(trimmed);
-    if path.is_absolute() {
-        Some(path)
-    } else {
-        Some(current_dir.join(path))
     }
 }
 

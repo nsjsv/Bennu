@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use super::matching::ranked;
 use super::mode::{fold, split_prefix};
-use super::targets::{jump_path, read_new_entry};
+use super::targets::read_new_entry;
 use super::*;
 use crate::actions::ActionId;
 use crate::model::SettingsCategory;
@@ -165,24 +165,6 @@ fn matching_stays_well_under_a_millisecond_per_keystroke() {
         per_keystroke.as_micros() < 1000,
         "{per_keystroke:?} per keystroke"
     );
-}
-
-#[test]
-fn jump_paths_expand_the_home_folder_and_follow_the_current_folder() {
-    let home = Path::new("/home/me");
-    let here = Some(Path::new("/home/me/work"));
-    assert_eq!(jump_path("~", here, home), Some(PathBuf::from("/home/me")));
-    assert_eq!(
-        jump_path(" ~/下载 ", here, home),
-        Some(PathBuf::from("/home/me/下载"))
-    );
-    assert_eq!(jump_path("/tmp", None, home), Some(PathBuf::from("/tmp")));
-    assert_eq!(
-        jump_path("src", here, home),
-        Some(PathBuf::from("/home/me/work/src"))
-    );
-    assert_eq!(jump_path("src", None, home), None);
-    assert_eq!(jump_path("  ", here, home), None);
 }
 
 #[test]

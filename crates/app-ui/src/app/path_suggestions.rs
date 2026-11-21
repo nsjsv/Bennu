@@ -1,9 +1,7 @@
-use std::path::{Component, Path, PathBuf};
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
 use iced::Task;
 
-use super::paths::completed_path_text;
 use super::FileBrowser;
 use crate::commands::path_suggestions_command;
 use crate::model::{
@@ -13,8 +11,9 @@ use crate::model::{
 };
 use crate::view::address_input_id;
 use crate::{app::smooth_scroll::smooth_scroll_id, model::ScrollbarRegion};
-
-const PATH_SUGGESTION_INPUT_STABILIZATION_DELAY: Duration = Duration::from_millis(120);
+use bennu_theme::address_bar::{
+    completed_path_text, typed_path, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
+};
 
 impl FileBrowser {
     pub(super) fn begin_address_editing(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
@@ -133,7 +132,11 @@ impl FileBrowser {
             .suggestion_selection
             .and_then(|index| session.suggestions.get(index))
             .cloned();
-        let parsed_draft = path_from_address_draft(&session.draft, &address_bar_directory);
+        let parsed_draft = typed_path(
+            &session.draft,
+            Some(&address_bar_directory),
+            &file_core::app_dirs::home_dir(),
+        );
         let Some(target) = selected_suggestion.or(parsed_draft) else {
             return self.cancel_address_editing();
         };
@@ -168,11 +171,12 @@ impl FileBrowser {
         };
         self.start_address_bar_exit(pane_id, editing.session.draft);
         // 多栏里输入的在第一栏下面：第一栏不动，往右一路打开到它，和在栏里一级级点进去一样。
+        // 打的字里的 `..` 已经化简掉，这里比的是真正要去的地方。
         let tab = self.tab();
         if tab.view_mode() == BrowserViewMode::Columns
-            && tab
-                .current_directory()
-                .is_some_and(|first_column| lies_under(&target, first_column))
+            && tab.current_directory().is_some_and(|first_column| {
+                target != first_column && target.starts_with(first_column)
+            })
         {
             return self.reveal_in_columns(target.clone(), Some(target));
         }
@@ -353,30 +357,6 @@ fn focus_address_input(pane_id: BrowserPaneId) -> Task<Message> {
     ])
 }
 
-/// `path` 字面上在 `directory` 下面（不是它自己）。输入里带 `..` 的不算：栏链只能一级级往下开。
-fn lies_under(path: &Path, directory: &Path) -> bool {
-    path.strip_prefix(directory).is_ok_and(|rest| {
-        rest.components().next().is_some()
-            && rest
-                .components()
-                .all(|component| matches!(component, Component::Normal(_)))
-    })
-}
-
-fn path_from_address_draft(draft: &str, current_dir: &Path) -> Option<PathBuf> {
-    let trimmed = draft.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let path = PathBuf::from(trimmed);
-    if path.is_absolute() {
-        Some(path)
-    } else {
-        Some(current_dir.join(path))
-    }
-}
-
 fn normalize_address_suggestion_selection(session: &mut AddressEditingSession) {
     if session.suggestions.is_empty() {
         session.suggestion_selection = None;
@@ -497,6 +477,39 @@ mod tests {
         assert_eq!(
             browser.tab().deepest_open_column_directory,
             Some(deepest_open_directory.join("child"))
+        );
+    }
+
+    #[test]
+    fn typed_home_and_parent_folders_are_resolved_before_navigating() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        let first_column = PathBuf::from("/workspace");
+        browser.tab_mut().location = BrowserLocation::Directory(first_column.clone());
+        browser
+            .tab_mut()
+            .choose_view_mode(crate::model::BrowserViewMode::Columns);
+        browser.tab_mut().deepest_open_column_directory = Some(first_column.join("project/src"));
+        let type_address = |browser: &mut FileBrowser, text: &str| {
+            let _ = browser.begin_address_editing(BrowserPaneId::PRIMARY);
+            let _ = browser.update_address_draft(BrowserPaneId::PRIMARY, text.to_owned());
+            let _ = browser.submit_address_editing(BrowserPaneId::PRIMARY);
+        };
+
+        // `..` 从最深那栏退一级，还在第一栏下面：第一栏不动，最深一栏换成上一级。
+        type_address(&mut browser, "..");
+        assert_eq!(
+            browser.tab().current_directory(),
+            Some(first_column.as_path())
+        );
+        assert_eq!(
+            browser.tab().deepest_open_column_directory,
+            Some(first_column.join("project"))
+        );
+
+        type_address(&mut browser, "~/");
+        assert_eq!(
+            browser.tab().current_directory(),
+            Some(file_core::app_dirs::home_dir().as_path())
         );
     }
 

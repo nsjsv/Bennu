@@ -5,6 +5,7 @@
 
 pub mod elastic;
 pub mod model;
+mod typed_path;
 
 use iced::widget::container;
 use iced::{Element, Length};
@@ -20,6 +21,10 @@ pub use model::{
     allocate_breadcrumb_widths, breadcrumb_segments, AddressBarTransition, AddressEditingSession,
     AddressEditingSessionId, AddressSuggestionRequest, BreadcrumbSegment, BreadcrumbSegmentKind,
     BreadcrumbWidthAllocation, ADDRESS_BAR_TRANSITION_DURATION,
+};
+pub use typed_path::{
+    completed_path_text, load_path_suggestions, typed_path,
+    PATH_SUGGESTION_INPUT_STABILIZATION_DELAY, PATH_SUGGESTION_LIMIT,
 };
 
 /// 编辑输入框、退出快照这类盖在面包屑上的层：先垫一层不透明窗口底色，

@@ -36,7 +36,7 @@ pub(crate) enum SessionEffect {
     StabilizeAddressInput {
         request: AddressSuggestionRequest,
     },
-    /// 读取目录补全建议：main 层 `Task::perform(suggestions::load)` 后
+    /// 读取目录补全建议：main 层 `Task::perform(load_path_suggestions)` 后
     /// 回信 `AddressSuggestionsLoaded`。
     LoadPathSuggestions {
         request: AddressSuggestionRequest,

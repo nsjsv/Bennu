@@ -4,12 +4,11 @@
 
 use iced::{window, Task};
 
-use bennu_theme::address_bar::AddressSuggestionRequest;
+use bennu_theme::address_bar::{
+    load_path_suggestions, AddressSuggestionRequest, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
+};
 
 use super::Message;
-use crate::picker_session::suggestions::{
-    load_path_suggestions, PATH_SUGGESTION_INPUT_STABILIZATION_DELAY,
-};
 use crate::picker_session::{PickerSession, SessionMessage, SessionScrollRegion};
 
 /// 会话产出的 Task 按所属窗口路由成全局消息。
@@ -75,7 +74,11 @@ pub(crate) fn load_path_suggestions_task(
     request: AddressSuggestionRequest,
 ) -> Task<Message> {
     Task::perform(
-        load_path_suggestions(request.draft.clone(), request.current_dir.clone()),
+        load_path_suggestions(
+            request.draft.clone(),
+            request.current_dir.clone(),
+            file_core::app_dirs::home_dir(),
+        ),
         move |suggestions| {
             Message::Session(
                 window_id,

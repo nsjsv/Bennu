@@ -7,7 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{pipe, targets, BoxMode};
+use super::{pipe, BoxMode};
+use bennu_theme::address_bar::typed_path;
 
 /// 列出来的一个名字。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -188,7 +189,7 @@ impl Word {
         if folder.is_empty() {
             return current_dir.map(|current_dir| ListSource::Folder(current_dir.to_path_buf()));
         }
-        targets::jump_path(&folder, current_dir, home).map(ListSource::Folder)
+        typed_path(&folder, current_dir, home).map(ListSource::Folder)
     }
 
     /// 词的名字换成 `name` 后的整个框。

@@ -12,18 +12,6 @@ pub(super) enum PasteTargetMode {
     Move,
 }
 
-pub(super) fn path_text(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
-pub(super) fn completed_path_text(path: &Path) -> String {
-    let mut text = path_text(path);
-    if !text.ends_with(std::path::MAIN_SEPARATOR) {
-        text.push(std::path::MAIN_SEPARATOR);
-    }
-    text
-}
-
 /// 粘贴/拖放到 `directory` 的传输，目标沿用源名。同一批里目标重名的后来者目标
 /// 不变、策略设为 KeepBoth，由引擎提交时续编号——界面不替它起名。
 pub(super) fn transfers_into_directory(

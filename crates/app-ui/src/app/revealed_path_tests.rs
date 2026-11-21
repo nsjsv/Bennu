@@ -103,15 +103,20 @@ async fn typed_folder_outside_the_first_column_becomes_the_first_column() {
     assert_eq!(tab.revealed_path, None);
 }
 
+/// `..` 先按字面化简：`Documents/../.config` 就是第一栏下面的 `.config`，第一栏不动。
 #[test]
-fn typed_path_climbing_with_dot_dot_becomes_the_first_column() {
+fn typed_path_with_dot_dot_is_resolved_before_opening_columns() {
     let (_temp, home, mut browser) = home_in_columns();
-    let climbing = home.join("Documents/../.config");
 
-    type_address(&mut browser, &climbing);
+    type_address(&mut browser, &home.join("Documents/../.config"));
 
-    assert_eq!(browser.tab().current_directory(), Some(climbing.as_path()));
-    assert_eq!(browser.tab().deepest_open_column_directory, None);
+    let config_dir = home.join(".config");
+    assert_eq!(browser.tab().current_directory(), Some(home.as_path()));
+    assert_eq!(
+        browser.tab().deepest_open_column_directory.as_ref(),
+        Some(&config_dir)
+    );
+    assert_eq!(browser.tab().selected.as_ref(), Some(&config_dir));
 }
 
 #[tokio::test]

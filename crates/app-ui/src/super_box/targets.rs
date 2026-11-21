@@ -1,29 +1,7 @@
-//! 路径模式和新建模式里，框里的字指的是什么。只看字，不读盘：路径在不在由后台检查，
-//! 名字有没有被占用由调用方按已经列出的条目回答。
-
-use std::path::{Path, PathBuf};
+//! 新建模式里，框里的字指的是什么。只看字，不读盘：名字有没有被占用由调用方按已经列出的
+//! 条目回答。路径模式的字和地址栏一个意思，见 `bennu_theme::address_bar::typed_path`。
 
 use file_core::validate_entry_name;
-
-/// `~` 是主目录，相对路径接在当前文件夹后面。空的、或者是相对路径却没有当前文件夹（回收站、
-/// 搜索结果里）时为 None。
-pub(crate) fn jump_path(text: &str, current_dir: Option<&Path>, home: &Path) -> Option<PathBuf> {
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    if text == "~" {
-        return Some(home.to_path_buf());
-    }
-    if let Some(rest) = text.strip_prefix("~/") {
-        return Some(home.join(rest));
-    }
-    let path = Path::new(text);
-    if path.is_absolute() {
-        return Some(path.to_path_buf());
-    }
-    current_dir.map(|current_dir| current_dir.join(path))
-}
 
 /// 新建什么：结尾带 `/` 是文件夹。
 #[derive(Debug, Clone, PartialEq, Eq)]

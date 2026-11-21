@@ -1,7 +1,5 @@
 use std::collections::HashMap;
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use bennu_state::{BrowserSessionStore, StateDatabase, TaskQueueStore, UserSettingsStore};
 use desktop_linux::{
@@ -104,8 +102,6 @@ pub(crate) use wayland_dnd::wayland_dnd_window_handle_command;
 mod x11_dnd;
 pub(crate) use x11_dnd::x11_dnd_window_handle_command;
 
-const PATH_SUGGESTION_LIMIT: usize = 6;
-
 pub(crate) fn startup_environment_command(
     startup_rendering_environment: StartupRenderingEnvironment,
 ) -> Task<Message> {
@@ -173,7 +169,11 @@ pub(crate) fn load_trash_command(
 pub(crate) fn path_suggestions_command(request: AddressSuggestionRequest) -> Task<Message> {
     let issued_request = request.clone();
     Task::perform(
-        load_path_suggestions(request.draft, request.current_dir),
+        bennu_theme::address_bar::load_path_suggestions(
+            request.draft,
+            request.current_dir,
+            file_core::app_dirs::home_dir(),
+        ),
         move |suggestions| Message::AddressSuggestionsLoaded(issued_request.clone(), suggestions),
     )
 }
@@ -670,74 +670,6 @@ async fn load_sidebar_locations(
     locations
 }
 
-pub(crate) async fn load_path_suggestions(input: String, current_dir: PathBuf) -> Vec<PathBuf> {
-    let Some((directory, prefix)) = suggestion_directory_and_prefix(&input, &current_dir) else {
-        return Vec::new();
-    };
-    let mut reader = match tokio::fs::read_dir(directory).await {
-        Ok(reader) => reader,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut suggestions = Vec::new();
-    while let Ok(Some(dir_entry)) = reader.next_entry().await {
-        let file_name = dir_entry.file_name();
-        if !file_name_starts_with(&file_name, &prefix) {
-            continue;
-        }
-
-        let Ok(file_type) = dir_entry.file_type().await else {
-            continue;
-        };
-        if file_type.is_dir() {
-            suggestions.push(dir_entry.path());
-        }
-    }
-
-    suggestions.sort_unstable();
-    suggestions.truncate(PATH_SUGGESTION_LIMIT);
-    suggestions
-}
-
-#[cfg(unix)]
-fn file_name_starts_with(file_name: &std::ffi::OsStr, prefix: &str) -> bool {
-    file_name.as_bytes().starts_with(prefix.as_bytes())
-}
-
-#[cfg(not(unix))]
-fn file_name_starts_with(file_name: &std::ffi::OsStr, prefix: &str) -> bool {
-    file_name.to_string_lossy().starts_with(prefix)
-}
-
-fn suggestion_directory_and_prefix(input: &str, current_dir: &Path) -> Option<(PathBuf, String)> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let raw_path = PathBuf::from(trimmed);
-    let path = if raw_path.is_absolute() {
-        raw_path
-    } else {
-        current_dir.join(raw_path)
-    };
-
-    if trimmed.ends_with(std::path::MAIN_SEPARATOR) {
-        return Some((path, String::new()));
-    }
-
-    let prefix = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let directory = path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| current_dir.to_path_buf());
-
-    Some((directory, prefix))
-}
-
 #[cfg(test)]
 mod transfer_conflict_check_tests;
 
@@ -785,6 +717,8 @@ mod startup_environment_tests {
 
 #[cfg(test)]
 mod merge_expansion_tests {
+    use std::path::Path;
+
     use super::*;
 
     /// read_dir 顺序不稳定,按集合比较子项传输。

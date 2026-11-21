@@ -3,6 +3,7 @@
 use super::{calculate, complete, find, matching, mode, rename, targets};
 use super::{BoxContext, BoxMode, BoxRow, FindStatus, SuperBox, FOUND_IN_SEARCH, MOST_ROWS};
 use super::{PickedItems, Pipe, PipeSource, MOST_PICKED};
+use bennu_theme::address_bar::typed_path;
 
 /// 框是空的、没有胶囊（默认模式）时列几条历史（各种模式混在一起）。
 const HISTORY_MIXED: usize = 5;
@@ -52,8 +53,7 @@ impl SuperBox {
                 self.found_rows(MOST_ROWS).collect()
             }
             BoxMode::Path => {
-                let Some(target) = targets::jump_path(text, context.current_dir, context.home)
-                else {
+                let Some(target) = typed_path(text, context.current_dir, context.home) else {
                     return vec![BoxRow::Problem(tr!(
                         "Relative paths need a folder; type a path starting with / or ~"
                     ))];

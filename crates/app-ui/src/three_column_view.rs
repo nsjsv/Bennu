@@ -22,7 +22,6 @@ use crate::file_entry_view::{
     FileEntryVisualState,
 };
 use crate::formatting::empty_location_message;
-use crate::input_blocking_space::input_blocking_space;
 use crate::keyed_rows::keyed_rows;
 use crate::model::{BrowserPaneId, ExpandedDirectoryStatus, Message, ScrollbarRegion};
 use crate::view::{column_browser_scroll_id, pane_blank_area, rename_field, rename_input_id};
@@ -148,13 +147,6 @@ pub(crate) fn column_browser_view<'a>(
         if index + 1 < visible_column_count {
             columns = columns.push(column_resize_divider(pane.id, index));
         }
-    }
-    let scroll_spacer_width =
-        end_scroll_spacer_width(rendered_directories.len(), visible_column_count, |index| {
-            browser.column_width(index)
-        });
-    if scroll_spacer_width > f32::EPSILON {
-        columns = columns.push(end_scroll_spacer(scroll_spacer_width));
     }
     let scrollbar_region = ScrollbarRegion::ColumnBrowser(pane.id);
     let smooth = smooth_scroll(&scrollbar_region);
@@ -381,24 +373,6 @@ fn empty_column(
             directory: fallback_directory,
         },
     )
-}
-
-fn end_scroll_spacer(width: f32) -> Element<'static, Message> {
-    input_blocking_space(Length::Fixed(width), Length::Fill)
-}
-
-fn end_scroll_spacer_width(
-    real_column_count: usize,
-    visible_column_count: usize,
-    column_width_at: impl Fn(usize) -> f32,
-) -> f32 {
-    if real_column_count < visible_column_count {
-        return 0.0;
-    }
-
-    (real_column_count..real_column_count + visible_column_count - 1)
-        .map(|index| column_width_at(index) + COLUMN_RESIZE_DIVIDER_WIDTH)
-        .sum()
 }
 
 fn column_resize_divider(pane_id: BrowserPaneId, column_index: usize) -> Element<'static, Message> {
@@ -1005,33 +979,5 @@ mod tests {
         );
 
         assert!(column_directories_for_pane(pane).is_empty());
-    }
-
-    #[test]
-    fn end_scroll_spacer_width_keeps_default_placeholders_and_terminal_scroll() {
-        let column_width = 180.0;
-        let visible_column_count = 3;
-        let divider_count = (visible_column_count - 1) as f32;
-        let expected_spacer = divider_count * (column_width + COLUMN_RESIZE_DIVIDER_WIDTH);
-
-        for real_column_count in [1, visible_column_count - 1] {
-            assert_eq!(
-                end_scroll_spacer_width(real_column_count, visible_column_count, |_| column_width),
-                0.0
-            );
-        }
-        for real_column_count in [visible_column_count, 5] {
-            assert_eq!(
-                end_scroll_spacer_width(real_column_count, visible_column_count, |_| column_width),
-                expected_spacer
-            );
-        }
-
-        let viewport_width = visible_column_count as f32 * column_width
-            + divider_count * COLUMN_RESIZE_DIVIDER_WIDTH;
-        assert_eq!(
-            viewport_width + expected_spacer - viewport_width,
-            expected_spacer
-        );
     }
 }

@@ -400,28 +400,32 @@ fn completing_suggestion_writes_draft_and_requests_next_level() {
     });
     session.update(SessionMessage::AddressEditingStarted);
     let start = session.current_directory().unwrap().to_path_buf();
+    // 草稿 `../当前文件夹名/`：建议是它里面的子文件夹。
+    let typed = format!("../{}/", start.file_name().unwrap().to_string_lossy());
     let editing = session.address_editing.as_mut().expect("editing session");
+    editing.draft = typed.clone();
     editing.suggestions = vec![start.join("a"), start.join("b")];
 
-    // 首次 Complete 未选中时选第一项；草稿补尾分隔符并立即请求下一级。
+    // 首次 Complete 未选中时选第一项：打的 `..` 原样留着，只补最后一段并加分隔符，
+    // 旧建议（按旧草稿读的）作废，立即请求下一级。
     let effect = session.update(SessionMessage::CompleteSuggestion {
         direction: PathSuggestionDirection::Next,
     });
-    assert!(matches!(effect, SessionEffect::LoadPathSuggestions { .. }));
-    let editing = session.address_editing().expect("editing session");
-    let expected = format!(
-        "{}{}",
-        start.join("a").to_string_lossy(),
-        std::path::MAIN_SEPARATOR
+    assert!(
+        matches!(&effect, SessionEffect::LoadPathSuggestions { request } if request.draft == format!("{typed}a/"))
     );
-    assert_eq!(editing.draft, expected);
-    assert_eq!(editing.suggestion_selection, Some(0));
+    let editing = session.address_editing().expect("editing session");
+    assert_eq!(editing.draft, format!("{typed}a/"));
+    assert!(editing.suggestions.is_empty());
+    assert_eq!(editing.suggestion_selection, None);
 
-    // 无建议时 Complete 是 no-op（不产生请求）。
-    let editing = session.address_editing.as_mut().expect("editing session");
-    editing.suggestions.clear();
+    // 新建议回来之前再按：没有可补的，不重复补成 `a/a/`。
     let effect = session.update(SessionMessage::CompleteSuggestion {
         direction: PathSuggestionDirection::Next,
     });
     assert!(matches!(effect, SessionEffect::None));
+    assert_eq!(
+        session.address_editing().expect("editing session").draft,
+        format!("{typed}a/")
+    );
 }

@@ -51,13 +51,15 @@ fn without_dots(path: &Path) -> PathBuf {
     plain
 }
 
-/// 补全选中的目录写回输入框：结尾带分隔符，接着补就是在它里面找。
-pub fn completed_path_text(path: &Path) -> String {
-    let mut text = path.to_string_lossy().into_owned();
-    if !text.ends_with(std::path::MAIN_SEPARATOR) {
-        text.push(std::path::MAIN_SEPARATOR);
+/// 补全写回输入框：打的字到最后一个 `/` 为止原样留着（`..`、`~`、相对路径都不改写成绝对
+/// 路径），后面换成补全的名字再加 `/`，接着补就是在它里面找。`completion` 是按这份草稿读出的
+/// 建议，就在那个文件夹里。
+pub fn completed_path_text(draft: &str, completion: &Path) -> String {
+    let typed_folder = draft.rfind('/').map_or("", |slash| &draft[..=slash]);
+    match completion.file_name() {
+        Some(name) => format!("{typed_folder}{}/", name.to_string_lossy()),
+        None => format!("{}/", completion.to_string_lossy().trim_end_matches('/')),
     }
-    text
 }
 
 /// 最后一个 `/` 之前是要读的目录，之后是名字开头；只列目录，按名字排，最多
@@ -243,9 +245,18 @@ mod tests {
         assert_eq!(all[..2], [root.join("a-dir"), root.join("b-dir")]);
     }
 
+    /// 补全只换最后一段：打的 `..`、`~`、相对路径原样留着。
     #[test]
-    fn completed_text_appends_separator_once() {
-        assert_eq!(completed_path_text(Path::new("/tmp/docs")), "/tmp/docs/");
-        assert_eq!(completed_path_text(Path::new("/")), "/");
+    fn completion_keeps_what_was_typed_before_the_last_slash() {
+        let documents = Path::new("/home/me/Documents");
+        assert_eq!(completed_path_text("../Do", documents), "../Documents/");
+        assert_eq!(completed_path_text("~/Do", documents), "~/Documents/");
+        assert_eq!(completed_path_text("Do", documents), "Documents/");
+        assert_eq!(
+            completed_path_text("/home/me/", documents),
+            "/home/me/Documents/"
+        );
+        assert_eq!(completed_path_text("./../", documents), "./../Documents/");
+        assert_eq!(completed_path_text("/", Path::new("/")), "/");
     }
 }

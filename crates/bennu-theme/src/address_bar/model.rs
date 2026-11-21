@@ -207,6 +207,14 @@ impl AddressEditingSession {
         }
     }
 
+    /// 换草稿（打字、补全写回）：旧建议是按旧草稿读的，一起作废；返回按新草稿读建议的请求。
+    pub fn replace_draft(&mut self, draft: String, current_dir: &Path) -> AddressSuggestionRequest {
+        self.draft = draft;
+        self.suggestions.clear();
+        self.suggestion_selection = None;
+        self.next_suggestion_request(current_dir)
+    }
+
     pub fn next_suggestion_request(&mut self, current_dir: &Path) -> AddressSuggestionRequest {
         self.generation = self.generation.wrapping_add(1);
         AddressSuggestionRequest {

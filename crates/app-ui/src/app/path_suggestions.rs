@@ -79,10 +79,7 @@ impl FileBrowser {
             return Task::none();
         };
 
-        session.draft = value;
-        session.suggestions.clear();
-        session.suggestion_selection = None;
-        let request = session.next_suggestion_request(&address_bar_directory);
+        let request = session.replace_draft(value, &address_bar_directory);
         if request.draft.trim().is_empty() {
             return Task::none();
         }
@@ -274,8 +271,8 @@ impl FileBrowser {
             return Task::none();
         };
 
-        session.draft = completed_path_text(&path);
-        let request = session.next_suggestion_request(&address_bar_directory);
+        let draft = completed_path_text(&session.draft, &path);
+        let request = session.replace_draft(draft, &address_bar_directory);
         Task::batch([
             path_suggestions_command(request),
             iced::widget::operation::move_cursor_to_end(address_input_id(active_pane_id)),
@@ -537,6 +534,35 @@ mod tests {
         let _ = browser.jump_to_typed_name('a');
         let _ = browser.jump_to_typed_name('~');
         assert_eq!(draft(&browser), None);
+    }
+
+    /// Tab 补全只补最后一段，打的 `..` 原样留着；新建议回来之前再按 Tab 不会补成
+    /// `Documents/Documents/`（旧建议是按旧草稿读的，补全时已作废）。
+    #[test]
+    fn tab_completion_keeps_the_typed_dots() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/w/here"));
+        let pane_id = BrowserPaneId::PRIMARY;
+        let _ = browser.begin_address_editing(pane_id);
+        let _ = browser.update_address_draft(pane_id, "../Do".to_owned());
+        browser
+            .address_editing
+            .as_mut()
+            .unwrap()
+            .session
+            .suggestions = vec![PathBuf::from("/w/Documents")];
+        let draft = |browser: &FileBrowser| {
+            browser
+                .address_editing
+                .as_ref()
+                .map(|editing| editing.session.draft.clone())
+        };
+
+        let _ = browser.complete_path_suggestion_from_keyboard(PathSuggestionDirection::Next);
+        assert_eq!(draft(&browser).as_deref(), Some("../Documents/"));
+
+        let _ = browser.complete_path_suggestion_from_keyboard(PathSuggestionDirection::Next);
+        assert_eq!(draft(&browser).as_deref(), Some("../Documents/"));
     }
 
     #[test]

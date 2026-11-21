@@ -51,10 +51,7 @@ impl PickerSession {
         else {
             return SessionEffect::None;
         };
-        session.draft = value;
-        session.suggestions.clear();
-        session.suggestion_selection = None;
-        let request = session.next_suggestion_request(directory);
+        let request = session.replace_draft(value, directory);
         if request.draft.trim().is_empty() {
             return SessionEffect::None;
         }
@@ -178,8 +175,8 @@ impl PickerSession {
             return SessionEffect::None;
         };
 
-        session.draft = completed_path_text(&path);
-        let request = session.next_suggestion_request(directory);
+        let draft = completed_path_text(&session.draft, &path);
+        let request = session.replace_draft(draft, directory);
         SessionEffect::LoadPathSuggestions { request }
     }
 

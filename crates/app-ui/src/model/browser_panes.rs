@@ -627,7 +627,12 @@ impl BrowserTab {
     /// 没了）不再选着，和增量变化删掉条目时一样；子文件夹里的选择不归这次列表管。
     pub(crate) fn drop_selection_missing_from(&mut self, directory: &Path) {
         let in_directory = |path: &PathBuf| path.parent() == Some(directory);
-        if !self.selected.iter().chain(&self.selected_paths).any(in_directory) {
+        if !self
+            .selected
+            .iter()
+            .chain(&self.selected_paths)
+            .any(in_directory)
+        {
             return;
         }
         let listed = self
@@ -637,10 +642,10 @@ impl BrowserTab {
             .collect::<HashSet<_>>();
         let missing = |path: &PathBuf| in_directory(path) && !listed.contains(path.as_path());
         self.selected_paths.retain(|path| !missing(path));
-        if self.selected.as_ref().is_some_and(&missing) {
+        if self.selected.as_ref().is_some_and(missing) {
             self.selected = None;
         }
-        if self.selection_anchor.as_ref().is_some_and(&missing) {
+        if self.selection_anchor.as_ref().is_some_and(missing) {
             self.selection_anchor = None;
         }
     }

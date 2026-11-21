@@ -724,8 +724,7 @@ impl FileBrowser {
             match self.view_switch_reveal_scroll(&target_selection) {
                 Some(task) => return task,
                 None => {
-                    self.pending_selection_reveal =
-                        Some((self.active_pane_id(), target_selection));
+                    self.pending_selection_reveal = Some((self.active_pane_id(), target_selection));
                 }
             }
         }

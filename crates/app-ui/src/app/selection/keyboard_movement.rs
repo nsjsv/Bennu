@@ -144,10 +144,31 @@ impl FileBrowser {
     /// 打字跳转：在移动键走的同一串项里（列表的可见行、图标的格子、多栏的当前栏）找名字
     /// 以所打内容开头的项，跳过去单选它。到截止时刻发一条消息清掉显示的缓冲。
     pub(in crate::app) fn jump_to_typed_name(&mut self, typed: char) -> Task<Message> {
-        let query = self.type_ahead.push(typed, Instant::now());
+        let now = Instant::now();
+        // 名字里不会有 `/`，`~` 开头的名字也少见：一上来打这两个字是要输入路径，交给地址栏。
+        if matches!(typed, '/' | '~') && !self.type_ahead.is_active(now) {
+            return self.start_typing_path(typed);
+        }
+        let query = self.type_ahead.push(typed, now);
         let jump = self
             .jump_to_name_matching(|names, current| type_ahead::find_match(names, current, &query));
         Task::batch([jump, letter_input_deadline()])
+    }
+
+    /// 地址栏进入编辑，打的第一个字已经在里面、光标在它后面。
+    fn start_typing_path(&mut self, first: char) -> Task<Message> {
+        let pane_id = self.active_pane_id();
+        let begin = self.begin_address_editing(pane_id);
+        if self.address_editing.is_none() {
+            return begin;
+        }
+        let draft = self.update_address_draft(pane_id, first.to_string());
+        Task::batch([
+            begin.chain(iced::widget::operation::move_cursor_to_end(
+                crate::view::address_input_id(pane_id),
+            )),
+            draft,
+        ])
     }
 
     /// vim 的 n / N：从当前项往后 / 往前找下一个匹配上一次跳转的词的项。

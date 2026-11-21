@@ -513,6 +513,32 @@ mod tests {
         );
     }
 
+    /// 在文件里一上来打 `/` 或 `~` 是要输入路径：地址栏接过去，字已经在里面。打名字打到一半的
+    /// `~` 还算名字的一部分。
+    #[test]
+    fn typing_a_slash_or_tilde_in_the_files_starts_typing_a_path() {
+        let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/tmp"));
+        let draft = |browser: &FileBrowser| {
+            browser
+                .address_editing
+                .as_ref()
+                .map(|editing| editing.session.draft.clone())
+        };
+
+        let _ = browser.jump_to_typed_name('~');
+        assert_eq!(draft(&browser).as_deref(), Some("~"));
+        let _ = browser.cancel_address_editing();
+
+        let _ = browser.jump_to_typed_name('/');
+        assert_eq!(draft(&browser).as_deref(), Some("/"));
+        let _ = browser.cancel_address_editing();
+
+        let _ = browser.jump_to_typed_name('a');
+        let _ = browser.jump_to_typed_name('~');
+        assert_eq!(draft(&browser), None);
+    }
+
     #[test]
     fn trash_view_never_begins_address_editing() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());

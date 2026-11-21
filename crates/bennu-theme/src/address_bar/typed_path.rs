@@ -15,11 +15,17 @@ pub const PATH_SUGGESTION_INPUT_STABILIZATION_DELAY: Duration = Duration::from_m
 
 /// 打的字指的路径：`~`、`~/…` 是主目录，相对路径接在 `current_dir` 后面，`.` 和 `..`
 /// 按字面化简（不看磁盘、不跟符号链接，和 shell 里 `cd ..` 一样；根上的 `..` 还是根）。
-/// 空的，或者是相对路径却没有当前文件夹时为 None。
+/// 从终端、浏览器复制来的本机 `file:///…` 地址解开百分号转义照样认。空的，或者是相对路径
+/// 却没有当前文件夹时为 None。
 pub fn typed_path(text: &str, current_dir: Option<&Path>, home: &Path) -> Option<PathBuf> {
     let text = text.trim();
     if text.is_empty() {
         return None;
+    }
+    if text.starts_with("file://") {
+        // 别的机器上的（`file://host/…`）不是这台电脑的路径，不认。
+        let path = url::Url::parse(text).ok()?.to_file_path().ok()?;
+        return Some(without_dots(&path));
     }
     let path = match text.strip_prefix('~') {
         Some(rest) if rest.is_empty() || rest.starts_with('/') => {
@@ -146,6 +152,24 @@ mod tests {
         assert_eq!(typed("   ", Some("/work")), None);
         // 只有单独的 `~` 或 `~/` 开头才是主目录，`~x` 是当前文件夹里叫这个名字的条目。
         assert_eq!(typed("~x", Some("/work")), Some(PathBuf::from("/work/~x")));
+    }
+
+    #[test]
+    fn local_file_uris_are_paths() {
+        assert_eq!(
+            typed("file:///home/me/My%20Files/%E4%B8%8B%E8%BD%BD", None),
+            Some(PathBuf::from("/home/me/My Files/下载"))
+        );
+        assert_eq!(
+            typed("file://localhost/tmp/a/../b", None),
+            Some(PathBuf::from("/tmp/b"))
+        );
+        assert_eq!(typed("file://server/share", None), None);
+        // 没有 `//` 的是名字里带冒号的条目。
+        assert_eq!(
+            typed("file:notes", Some("/work")),
+            Some(PathBuf::from("/work/file:notes"))
+        );
     }
 
     #[test]

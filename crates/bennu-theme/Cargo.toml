@@ -27,6 +27,8 @@ tracing.workspace = true
 # 与 cosmic-text 用的同一个版本：字体回退按它的文字系统类型划分。
 unicode-script = "0.5"
 toml = "1.1.2"
+# 地址栏认复制来的 `file:///…`：解析、百分号转义交给它。
+url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

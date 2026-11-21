@@ -125,6 +125,11 @@ impl FileBrowser {
         if action == ShortcutAction::Preview && status == event::Status::Captured {
             return self.handle_captured_preview_shortcut();
         }
+        // 文件区的键在辅助窗口里不起作用；属性窗口里的刷新键刷新的是属性。
+        if action == ShortcutAction::Refresh && self.properties_window == Some(self.focused_window)
+        {
+            return self.refresh_file_properties();
+        }
         self.route_file_content_key(
             FileContentKey::Action(action),
             routing_context(&press, action.declared_context()),

@@ -28,10 +28,11 @@ use super::settings_group::{
 };
 use super::{auxiliary_window_message, themed_icon, IconTone};
 use bennu_preview::window_shell::{single_window, HeaderBar, WindowShell};
-use bennu_theme::controls::toggle_button_style;
+use bennu_theme::controls::{icon_button, toggle_button_style, tooltip, tooltip_bubble};
 use bennu_theme::typography::{BOLD, TITLE_SIZE};
 
 const PROPERTIES_ICON_SIZE: f32 = 44.0;
+const REFRESH_ICON_SIZE: f32 = 16.0;
 
 /// 一页从上到下看完：加载中、读不了、单选、多选都是同一个外壳，打开时布局不跳。
 pub(crate) fn view_properties_window<'a>(
@@ -42,7 +43,28 @@ pub(crate) fn view_properties_window<'a>(
         Some(properties) => properties_body(properties),
         None => auxiliary_window_message(tr!("No properties are available.")),
     };
-    single_window(HeaderBar::new().title(tr!("Properties")), body, &shell)
+    let header = HeaderBar::new()
+        .title(tr!("Properties"))
+        .end(refresh_button(properties));
+    single_window(header, body, &shell)
+}
+
+/// 平时跟着磁盘上的变化自己更新；按一下全部重读。权限还在写时按不了。
+fn refresh_button(properties: Option<&FilePropertiesState>) -> Element<'static, Message> {
+    let refresh = properties
+        .filter(|properties| !properties.permission_update.is_in_progress())
+        .map(|_| Message::FileProperties(FilePropertiesMessage::RefreshRequested));
+    tooltip(
+        icon_button(themed_icon(
+            IconSymbol::Refresh,
+            IconTone::Normal,
+            REFRESH_ICON_SIZE,
+        ))
+        .on_press_maybe(refresh),
+        tooltip_bubble(tr!("Refresh")),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
 }
 
 fn properties_body(properties: &FilePropertiesState) -> Element<'_, Message> {
@@ -203,7 +225,8 @@ fn contents_text(contents: &FilePropertiesDirectoryContentsState) -> String {
             .as_ref()
             .map(display_contents)
             .unwrap_or_else(|| tr!("Calculating...")),
-        FilePropertiesDirectoryContentsState::Loaded(contents) => display_contents(contents),
+        FilePropertiesDirectoryContentsState::Loaded(contents)
+        | FilePropertiesDirectoryContentsState::Refreshing(contents) => display_contents(contents),
         FilePropertiesDirectoryContentsState::Failed(error) => tr!("Unavailable (%1)", error),
     }
 }

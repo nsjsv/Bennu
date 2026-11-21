@@ -72,6 +72,25 @@ pub(crate) enum FilePropertiesMessage {
         Result<FilePropertiesPermissions, String>,
     ),
     Requested(PathBuf),
+    /// 顶栏的刷新按钮或刷新键：全部重读。
+    RefreshRequested,
+    /// 看着的目录（目标所在的、单个文件夹自己）有变化。
+    DiskChanged(file_core::DirectoryEntryChanges),
+    /// 磁盘上的变化攒够一会儿了，按攒下的重读。
+    ChangesSettled,
+}
+
+/// 重读多少。目标本身（大小、时间、权限、所有者、类型）每次都重新 stat；慢项（打开方式、
+/// 详细信息、文件夹大小）只在它们依据的东西变了时再读，没再读的沿用上次的。按变化从小到大
+/// 排，攒下几次变化取最大的那个。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum FilePropertiesReread {
+    /// 目标本身变了：类型变了才再问打开方式，大小或修改时间变了才再读详细信息，文件夹不重量。
+    Item,
+    /// 文件夹里的东西变了：另外重量大小。
+    Contents,
+    /// 第一次打开、用户按了刷新：全部重读。
+    All,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +101,8 @@ pub(crate) struct FilePropertiesState {
     pub(crate) load_generation: u64,
     /// 这次加载的所有后台读取（内容统计、打开方式、详细信息）共用；换目标、关窗时取消。
     pub(crate) load_cancel: CancellationToken,
+    /// 磁盘上有了变化、还没重读：在等它们停一会儿（`ChangesSettled`）。
+    pub(crate) unsettled_changes: Option<FilePropertiesReread>,
 }
 
 impl FilePropertiesState {
@@ -92,12 +113,63 @@ impl FilePropertiesState {
             permission_update: FilePropertiesPermissionUpdate::Idle,
             load_generation: request.generation,
             load_cancel: cancellation,
+            unsettled_changes: None,
         }
     }
 
     pub(crate) fn cancel_load(&mut self) {
         self.load_cancel.cancel();
         self.load_generation = self.load_generation.wrapping_add(1);
+    }
+
+    /// 要看着的目录：目标所在的文件夹（改名、删除、大小时间权限的变化都在那里报），单个文件夹
+    /// 再加它自己（里面的东西变了，大小要重新量）。
+    pub(crate) fn watched_directories(&self) -> Vec<PathBuf> {
+        let mut directories = self
+            .targets
+            .paths()
+            .iter()
+            .filter_map(|path| path.parent())
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
+        if let Some(directory) = self.single_directory() {
+            directories.push(directory.to_path_buf());
+        }
+        directories.sort();
+        directories.dedup();
+        directories
+    }
+
+    /// 只看着一个文件夹、并且已经读出它是文件夹时，这个文件夹。
+    pub(crate) fn single_directory(&self) -> Option<&Path> {
+        self.single_snapshot()
+            .filter(|snapshot| snapshot.details.kind() == FileKind::Directory)
+            .and(self.targets.single_path())
+    }
+
+    /// 读好了的单个目标。
+    pub(crate) fn single_snapshot(&self) -> Option<&FilePropertiesSnapshot> {
+        match &self.load_state {
+            FilePropertiesLoadState::Loaded(FilePropertiesPresentation::Single(snapshot)) => {
+                Some(snapshot)
+            }
+            _ => None,
+        }
+    }
+
+    /// 同一批目标重读：作废还在读的、换上新代号；正在显示的留着，新结果到了再整个换。
+    pub(crate) fn begin_reread(
+        &mut self,
+        generation: u64,
+    ) -> (FilePropertiesRequest, CancellationToken) {
+        self.load_cancel.cancel();
+        self.load_cancel = CancellationToken::new();
+        self.load_generation = generation;
+        let request = FilePropertiesRequest {
+            targets: self.targets.clone(),
+            generation,
+        };
+        (request, self.load_cancel.clone())
     }
 }
 
@@ -205,6 +277,8 @@ pub(crate) struct FilePropertiesOwner {
 #[derive(Debug, Clone)]
 pub(crate) enum FilePropertiesDirectoryContentsState {
     Loading(Option<FilePropertiesDirectoryContents>),
+    /// 里面的东西变了，正在重新量：一直显示上次量好的，量完整个换掉，不显示量到一半的数。
+    Refreshing(FilePropertiesDirectoryContents),
     Loaded(FilePropertiesDirectoryContents),
     Failed(String),
 }

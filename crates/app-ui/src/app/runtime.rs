@@ -14,7 +14,7 @@ use iced::Subscription;
 
 use super::FileBrowser;
 use crate::command_line::ApplicationLaunchRequest;
-use crate::model::{Message, X11DndMessage};
+use crate::model::{FilePropertiesMessage, Message, X11DndMessage};
 use crate::startup_rendering::StartupRenderingEnvironment;
 use crate::startup_trace;
 use bennu_theme::{read_matugen_colors_file, AppearanceMode};
@@ -134,6 +134,33 @@ pub(super) fn directory_watch_subscription(
     passes_hidden: bool,
 ) -> Subscription<Message> {
     Subscription::run_with((path, passes_hidden), directory_watch_stream)
+}
+
+/// 属性窗口看着的目录（见 `FilePropertiesState::watched_directories`）。和窗格的监听分开：
+/// 订阅身份不同，变化只交给属性窗口，隐藏条目的也算。
+pub(super) fn properties_watch_subscription(directory: PathBuf) -> Subscription<Message> {
+    Subscription::run_with(PropertiesWatch(directory), properties_watch_stream)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PropertiesWatch(PathBuf);
+
+fn properties_watch_stream(
+    PropertiesWatch(path): &PropertiesWatch,
+) -> impl iced::futures::Stream<Item = Message> + 'static {
+    let path = path.clone();
+    iced::stream::channel(DIRECTORY_WATCH_CHANNEL_SIZE, async move |mut output| {
+        // 连轮询都起不来说明目录读不到；属性照样能看，只是不跟着变。
+        if let Ok(mut watcher) = watch_directory(&path, DIRECTORY_WATCH_DEBOUNCE) {
+            while let Some(change) = watcher.recv().await {
+                let message = Message::FileProperties(FilePropertiesMessage::DiskChanged(change));
+                if output.send(message).await.is_err() {
+                    break;
+                }
+            }
+        }
+        iced::futures::future::pending().await
+    })
 }
 
 /// 状态库（含 WAL、回滚日志）有写入时报一次；开始监视时先报一次，补上监视建立之前

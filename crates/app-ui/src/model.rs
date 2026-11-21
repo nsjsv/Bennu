@@ -135,8 +135,8 @@ pub(crate) use properties::{
     FilePropertiesPermissionBaseline, FilePropertiesPermissionClass,
     FilePropertiesPermissionUpdate, FilePropertiesPermissionWriteOutcome,
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesRequest,
-    FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet, PermissionBatchOutcome,
-    PermissionBatchPathFailure,
+    FilePropertiesReread, FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet,
+    PermissionBatchOutcome, PermissionBatchPathFailure,
 };
 // 纯搬移：SQLite 预览模型类型已下沉 bennu-preview，此处 re-export 维持
 // crate::model::SqlitePreviewMessage 等既有调用路径不变。

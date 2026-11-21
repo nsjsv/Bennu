@@ -348,7 +348,9 @@ fn browser_with_loaded_properties(
         permission_update: FilePropertiesPermissionUpdate::Idle,
         load_generation: generation,
         load_cancel: CancellationToken::new(),
+        unsettled_changes: None,
     });
+    browser.properties_load_generation = generation;
     browser
 }
 
@@ -448,4 +450,259 @@ fn directory_contents(
         total_disk_size_bytes: total_size_bytes,
         unreadable_entries: 0,
     }
+}
+
+fn discovered(path: &std::path::Path) -> file_core::DiscoveredDirectoryEntry {
+    let metadata = std::fs::symlink_metadata(path).unwrap();
+    let kind = if metadata.is_dir() {
+        FileKind::Directory
+    } else {
+        FileKind::File
+    };
+    file_core::DiscoveredDirectoryEntry::with_complete_filesystem_metadata(
+        path.to_path_buf(),
+        path.file_name().unwrap().to_os_string(),
+        kind,
+        false,
+        false,
+        &metadata,
+    )
+}
+
+fn disk_changed(
+    browser: &mut FileBrowser,
+    directory: &std::path::Path,
+    changes: Vec<file_core::ResolvedEntryChange>,
+) {
+    drop(
+        browser.accept_file_properties_message(FilePropertiesMessage::DiskChanged(
+            file_core::DirectoryEntryChanges {
+                directory: directory.to_path_buf(),
+                changes,
+            },
+        )),
+    );
+}
+
+fn settle(browser: &mut FileBrowser) {
+    drop(browser.accept_file_properties_message(FilePropertiesMessage::ChangesSettled));
+}
+
+fn measured(total_size_bytes: u64) -> crate::model::FilePropertiesDirectoryContents {
+    crate::model::FilePropertiesDirectoryContents {
+        file_count: 1,
+        directory_count: 0,
+        total_size_bytes,
+        total_disk_size_bytes: total_size_bytes,
+        unreadable_entries: 0,
+    }
+}
+
+/// 看着目标所在的文件夹；单个文件夹读出来以后还看着它自己。
+#[test]
+fn properties_watch_the_folders_of_their_targets_and_a_single_folder_itself() {
+    let file = PathBuf::from("/w/a.txt");
+    let browser = browser_with_loaded_properties(file.clone(), 1, image_snapshot(file));
+    assert_eq!(
+        browser.properties.as_ref().unwrap().watched_directories(),
+        [PathBuf::from("/w")]
+    );
+
+    let folder = PathBuf::from("/w/dir");
+    let browser = browser_with_loaded_directory_properties(folder.clone(), 1);
+    assert_eq!(
+        browser.properties.as_ref().unwrap().watched_directories(),
+        [PathBuf::from("/w"), folder]
+    );
+}
+
+/// 改了名跟着新名字走；变化停一会儿才重读，重读时上次的照样显示着。
+#[test]
+fn a_renamed_target_is_followed_and_read_again_once_changes_settle() {
+    let temp = tempfile::tempdir().unwrap();
+    let original = temp.path().join("a.png");
+    let renamed = temp.path().join("b.png");
+    std::fs::write(&renamed, b"x").unwrap();
+    let mut browser =
+        browser_with_loaded_properties(original.clone(), 1, image_snapshot(original.clone()));
+
+    disk_changed(
+        &mut browser,
+        temp.path(),
+        vec![file_core::ResolvedEntryChange::Renamed {
+            from: original,
+            to: discovered(&renamed),
+        }],
+    );
+    let properties = browser.properties.as_ref().unwrap();
+    assert_eq!(properties.targets, FilePropertiesTargetSet::single(renamed));
+    assert_eq!(
+        properties.unsettled_changes,
+        Some(FilePropertiesReread::Item)
+    );
+    let generation = properties.load_generation;
+
+    settle(&mut browser);
+    let properties = browser.properties.as_ref().unwrap();
+    assert_eq!(properties.unsettled_changes, None);
+    assert_ne!(properties.load_generation, generation);
+    assert!(matches!(
+        properties.load_state,
+        FilePropertiesLoadState::Loaded(_)
+    ));
+}
+
+/// 同一个文件夹里别的东西变了不算；文件夹里面的东西变了要重量，攒着取大的。
+#[test]
+fn only_the_target_and_the_inside_of_a_single_folder_count() {
+    let temp = tempfile::tempdir().unwrap();
+    let folder = temp.path().join("dir");
+    std::fs::create_dir(&folder).unwrap();
+    let neighbour = temp.path().join("other.txt");
+    let inside = folder.join("new.txt");
+    std::fs::write(&neighbour, b"x").unwrap();
+    std::fs::write(&inside, b"x").unwrap();
+    let mut browser = browser_with_loaded_directory_properties(folder.clone(), 1);
+    let unsettled = |browser: &FileBrowser| browser.properties.as_ref().unwrap().unsettled_changes;
+
+    disk_changed(
+        &mut browser,
+        temp.path(),
+        vec![file_core::ResolvedEntryChange::Added(discovered(
+            &neighbour,
+        ))],
+    );
+    assert_eq!(unsettled(&browser), None);
+
+    disk_changed(
+        &mut browser,
+        &folder,
+        vec![file_core::ResolvedEntryChange::Added(discovered(&inside))],
+    );
+    assert_eq!(unsettled(&browser), Some(FilePropertiesReread::Contents));
+
+    disk_changed(
+        &mut browser,
+        temp.path(),
+        vec![file_core::ResolvedEntryChange::ContentChanged(discovered(
+            &folder,
+        ))],
+    );
+    assert_eq!(unsettled(&browser), Some(FilePropertiesReread::Contents));
+}
+
+/// 删掉了的拿掉；一个都不剩，属性窗口跟着关。
+#[test]
+fn removed_targets_leave_and_the_window_closes_when_none_is_left() {
+    let first = PathBuf::from("/w/first");
+    let second = PathBuf::from("/w/second");
+    let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
+    let targets = FilePropertiesTargetSet::new(vec![first.clone(), second.clone()]).unwrap();
+    drop(browser.open_file_properties_targets(targets));
+    assert!(browser.properties_window.is_some());
+    let removed = |path: &PathBuf| file_core::ResolvedEntryChange::Removed { path: path.clone() };
+
+    disk_changed(
+        &mut browser,
+        std::path::Path::new("/w"),
+        vec![removed(&first)],
+    );
+    assert_eq!(
+        browser.properties.as_ref().unwrap().targets,
+        FilePropertiesTargetSet::single(second.clone())
+    );
+
+    disk_changed(
+        &mut browser,
+        std::path::Path::new("/w"),
+        vec![removed(&second)],
+    );
+    assert!(browser.properties.is_none());
+    assert!(browser.properties_window.is_none());
+}
+
+/// 刷新全部重读、丢掉攒着的变化；权限还在写时刷新和攒着的重读都等它写完。
+#[test]
+fn refresh_reads_everything_again_but_waits_for_a_permission_write() {
+    let path = PathBuf::from("/w/a.png");
+    let mut browser = browser_with_loaded_properties(path.clone(), 1, image_snapshot(path));
+    browser.properties.as_mut().unwrap().unsettled_changes = Some(FilePropertiesReread::Item);
+    let generation = |browser: &FileBrowser| browser.properties.as_ref().unwrap().load_generation;
+
+    let before = generation(&browser);
+    drop(browser.accept_file_properties_message(FilePropertiesMessage::RefreshRequested));
+    assert_ne!(generation(&browser), before);
+    assert_eq!(browser.properties.as_ref().unwrap().unsettled_changes, None);
+    assert!(matches!(
+        browser.properties.as_ref().unwrap().load_state,
+        FilePropertiesLoadState::Loaded(_)
+    ));
+
+    let properties = browser.properties.as_mut().unwrap();
+    properties.permission_update = FilePropertiesPermissionUpdate::SavingCurrentItem {
+        permissions: FilePropertiesPermissions::from_mode(0o644),
+    };
+    properties.unsettled_changes = Some(FilePropertiesReread::Item);
+    let writing = generation(&browser);
+    drop(browser.accept_file_properties_message(FilePropertiesMessage::RefreshRequested));
+    settle(&mut browser);
+    assert_eq!(generation(&browser), writing);
+    assert_eq!(
+        browser.properties.as_ref().unwrap().unsettled_changes,
+        Some(FilePropertiesReread::Item)
+    );
+}
+
+/// 重量文件夹时一直显示上次量好的，量到一半的数不往上放，量完整个换。
+#[test]
+fn a_folder_measured_again_keeps_its_last_size_until_done() {
+    let path = PathBuf::from("/w/dir");
+    let mut snapshot = directory_snapshot(path.clone());
+    snapshot.details = FilePropertiesKindDetails::Directory(
+        FilePropertiesDirectoryContentsState::Refreshing(measured(100)),
+    );
+    snapshot.size_bytes = 100;
+    let mut browser = browser_with_loaded_properties(path.clone(), 7, snapshot);
+    let request = properties_request(path, 7);
+
+    drop(
+        browser.accept_file_properties_message(FilePropertiesMessage::DirectoryContentsUpdated(
+            request.clone(),
+            measured(10),
+        )),
+    );
+    assert_eq!(loaded_single_snapshot(&browser).size_bytes, 100);
+
+    drop(
+        browser.accept_file_properties_message(FilePropertiesMessage::DirectoryContentsLoaded(
+            request,
+            Ok(measured(150)),
+        )),
+    );
+    let snapshot = loaded_single_snapshot(&browser);
+    assert_eq!(snapshot.size_bytes, 150);
+    assert!(matches!(
+        snapshot.details,
+        FilePropertiesKindDetails::Directory(FilePropertiesDirectoryContentsState::Loaded(_))
+    ));
+}
+
+/// 属性窗口在前面时，刷新键刷新的是属性。
+#[test]
+fn the_refresh_key_in_the_properties_window_reads_them_again() {
+    let path = PathBuf::from("/w/a.png");
+    let mut browser = browser_with_loaded_properties(path.clone(), 1, image_snapshot(path));
+    let window = iced::window::Id::unique();
+    browser.properties_window = Some(window);
+    browser.focused_window = window;
+    let refresh = iced::keyboard::Key::Named(iced::keyboard::key::Named::F5);
+
+    drop(browser.handle_keyboard_key_pressed(
+        refresh.clone(),
+        refresh,
+        iced::keyboard::Modifiers::default(),
+        iced::event::Status::Ignored,
+    ));
+
+    assert_ne!(browser.properties.as_ref().unwrap().load_generation, 1);
 }

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use file_core::ResolvedEntryChange;
 use iced::Task;
 use tokio_util::sync::CancellationToken;
 
@@ -14,7 +16,8 @@ use crate::model::{
     FilePropertiesMessage, FilePropertiesPermissionAccess, FilePropertiesPermissionClass,
     FilePropertiesPermissionUpdate, FilePropertiesPermissionWriteOutcome,
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesRequest,
-    FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet, Message,
+    FilePropertiesReread, FilePropertiesSnapshot, FilePropertiesState, FilePropertiesTargetSet,
+    Message,
 };
 
 impl FileBrowser {
@@ -64,6 +67,107 @@ impl FileBrowser {
                 self.accept_file_properties_enclosed_permissions(request, outcome)
             }
             FilePropertiesMessage::Requested(path) => self.open_file_properties(path),
+            FilePropertiesMessage::RefreshRequested => self.refresh_file_properties(),
+            FilePropertiesMessage::DiskChanged(change) => {
+                self.accept_file_properties_disk_change(&change)
+            }
+            FilePropertiesMessage::ChangesSettled => self.settle_file_properties_changes(),
+        }
+    }
+
+    /// 用户要刷新：全部重读。权限还在写时不打断它（写完的结果按这次的代号收）。
+    pub(super) fn refresh_file_properties(&mut self) -> Task<Message> {
+        let Some(properties) = self.properties.as_mut() else {
+            return Task::none();
+        };
+        if properties.permission_update.is_in_progress() {
+            return Task::none();
+        }
+        properties.unsettled_changes = None;
+        self.reread_file_properties(FilePropertiesReread::All)
+    }
+
+    fn reread_file_properties(&mut self, reread: FilePropertiesReread) -> Task<Message> {
+        self.properties_load_generation = self.properties_load_generation.wrapping_add(1);
+        let generation = self.properties_load_generation;
+        let Some(properties) = self.properties.as_mut() else {
+            return Task::none();
+        };
+        let previous = properties.single_snapshot().cloned();
+        let (request, cancellation) = properties.begin_reread(generation);
+        file_properties_command(request, cancellation, reread, previous)
+    }
+
+    /// 看着的目录有变化：目标改了名跟着新名字走，没了的拿掉，全没了关掉窗口；目标自己、或者
+    /// 单个文件夹里的东西变了，攒着，停一会儿再重读。
+    fn accept_file_properties_disk_change(
+        &mut self,
+        change: &file_core::DirectoryEntryChanges,
+    ) -> Task<Message> {
+        let Some(properties) = self.properties.as_mut() else {
+            return Task::none();
+        };
+        let mut targets = properties.targets.paths().to_vec();
+        let mut item_changed = false;
+        for entry_change in &change.changes {
+            match entry_change {
+                ResolvedEntryChange::Removed { path } => {
+                    let count = targets.len();
+                    targets.retain(|target| target != path);
+                    item_changed |= targets.len() != count;
+                }
+                ResolvedEntryChange::Renamed { from, to } => {
+                    for target in targets.iter_mut().filter(|target| *target == from) {
+                        *target = to.path().to_path_buf();
+                        item_changed = true;
+                    }
+                }
+                ResolvedEntryChange::Added(entry) | ResolvedEntryChange::ContentChanged(entry) => {
+                    item_changed |= targets.iter().any(|target| target == entry.path());
+                }
+                ResolvedEntryChange::RescanRequired => {
+                    item_changed |= targets
+                        .iter()
+                        .any(|target| target.parent() == Some(change.directory.as_path()));
+                }
+            }
+        }
+        let reread = if properties.single_directory() == Some(change.directory.as_path()) {
+            FilePropertiesReread::Contents
+        } else if item_changed {
+            FilePropertiesReread::Item
+        } else {
+            return Task::none();
+        };
+        match FilePropertiesTargetSet::new(targets) {
+            Ok(targets) => properties.targets = targets,
+            Err(_) => return self.close_properties_window(),
+        }
+        let timer_running = properties.unsettled_changes.is_some();
+        properties.unsettled_changes = Some(
+            properties
+                .unsettled_changes
+                .map_or(reread, |unsettled| unsettled.max(reread)),
+        );
+        if timer_running {
+            Task::none()
+        } else {
+            changes_settle_timer()
+        }
+    }
+
+    fn settle_file_properties_changes(&mut self) -> Task<Message> {
+        let Some(properties) = self.properties.as_mut() else {
+            return Task::none();
+        };
+        match properties.unsettled_changes {
+            None => Task::none(),
+            // 权限还在写：写完的结果按这次的代号收，等它写完再重读。
+            Some(_) if properties.permission_update.is_in_progress() => changes_settle_timer(),
+            Some(reread) => {
+                properties.unsettled_changes = None;
+                self.reread_file_properties(reread)
+            }
         }
     }
 
@@ -112,7 +216,7 @@ impl FileBrowser {
         Task::batch([
             self.commit_rename_if_active(),
             self.ensure_properties_window(),
-            file_properties_command(request, cancellation),
+            file_properties_command(request, cancellation, FilePropertiesReread::All, None),
         ])
     }
 
@@ -168,7 +272,10 @@ impl FileBrowser {
         let Some(properties) = self.properties.as_mut() else {
             return Task::none();
         };
-        if file_properties_request_matches(properties, &request) {
+        // 重读时上次的结果一直显示到这次读完，不退回“计算中”。
+        if file_properties_request_matches(properties, &request)
+            && !matches!(properties.load_state, FilePropertiesLoadState::Loaded(_))
+        {
             properties.load_state = FilePropertiesLoadState::LoadingAggregate(snapshot);
         }
         Task::none()
@@ -213,6 +320,11 @@ impl FileBrowser {
         let FilePropertiesKindDetails::Directory(current) = &mut snapshot.details else {
             return;
         };
+        if matches!(current, FilePropertiesDirectoryContentsState::Refreshing(_))
+            && matches!(state, FilePropertiesDirectoryContentsState::Loading(_))
+        {
+            return;
+        }
         if let FilePropertiesDirectoryContentsState::Loading(Some(contents))
         | FilePropertiesDirectoryContentsState::Loaded(contents) = &state
         {
@@ -359,7 +471,7 @@ impl FileBrowser {
                     FilePropertiesState::loading(request.clone(), cancellation.clone());
                 reloading.permission_update = update;
                 self.properties = Some(reloading);
-                file_properties_command(request, cancellation)
+                file_properties_command(request, cancellation, FilePropertiesReread::All, None)
             }
             Err(error) => {
                 properties.permission_update = FilePropertiesPermissionUpdate::Failed(error);
@@ -393,6 +505,16 @@ impl FileBrowser {
         }
         Task::none()
     }
+}
+
+/// 磁盘上的变化停这么久才重读：下载、复制中的文件每秒最多重读一次，不连着起子进程、从头量。
+const FILE_PROPERTIES_CHANGES_SETTLE: Duration = Duration::from_secs(1);
+
+fn changes_settle_timer() -> Task<Message> {
+    Task::perform(
+        async { tokio::time::sleep(FILE_PROPERTIES_CHANGES_SETTLE).await },
+        |()| Message::FileProperties(FilePropertiesMessage::ChangesSettled),
+    )
 }
 
 fn file_properties_request_matches(

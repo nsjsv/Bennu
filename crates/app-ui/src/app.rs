@@ -159,8 +159,9 @@ use crate::app::column_resize::ColumnResizeDrag;
 use crate::app::events::global_event_message;
 use crate::app::runtime::{
     desktop_activation_subscription, directory_watch_subscription, foreign_task_wait_subscription,
-    matugen_colors_subscription, state_database_subscription, storage_change_subscription,
-    system_mode_subscription, wayland_file_dnd_subscription, x11_file_dnd_subscription,
+    matugen_colors_subscription, properties_watch_subscription, state_database_subscription,
+    storage_change_subscription, system_mode_subscription, wayland_file_dnd_subscription,
+    x11_file_dnd_subscription,
 };
 use crate::app::sidebar_bookmarks::SidebarBookmarkMotionState;
 use crate::app::sidebar_resize::SidebarResizeDrag;
@@ -970,6 +971,15 @@ impl FileBrowser {
             subscriptions.push(
                 time::every(APPLICATION_LOG_REFRESH_INTERVAL)
                     .map(|_| Message::ApplicationLogsRefreshRequested),
+            );
+        }
+
+        if let Some(properties) = &self.properties {
+            subscriptions.extend(
+                properties
+                    .watched_directories()
+                    .into_iter()
+                    .map(properties_watch_subscription),
             );
         }
 

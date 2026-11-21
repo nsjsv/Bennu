@@ -17,7 +17,8 @@ use crate::model::{
     FilePropertiesKindDetails, FilePropertiesLookup, FilePropertiesMessage, FilePropertiesOwner,
     FilePropertiesPermissionBaseline, FilePropertiesPermissionWriteOutcome,
     FilePropertiesPermissions, FilePropertiesPresentation, FilePropertiesRequest,
-    FilePropertiesSnapshot, Message, PermissionBatchOutcome, PermissionBatchPathFailure,
+    FilePropertiesReread, FilePropertiesSnapshot, Message, PermissionBatchOutcome,
+    PermissionBatchPathFailure,
 };
 use file_core::DirectoryUsage;
 
@@ -29,13 +30,17 @@ pub(crate) enum FilePropertiesPermissionTargets {
     TargetSet(Vec<FilePropertiesPermissionBaseline>),
 }
 
+/// 读一遍属性。重读时 `previous` 是上次读到的单个目标：慢项先摆上次的，`reread` 说不用再读的
+/// 就不读（多个目标总是整个重读）。
 pub(crate) fn file_properties_command(
     request: FilePropertiesRequest,
     cancellation: CancellationToken,
+    reread: FilePropertiesReread,
+    previous: Option<FilePropertiesSnapshot>,
 ) -> Task<Message> {
     let single_path = request.targets.single_path().map(Path::to_path_buf);
     if let Some(path) = single_path {
-        single_file_properties_command(request, path, cancellation)
+        single_file_properties_command(request, path, cancellation, reread, previous)
     } else {
         aggregate_file_properties_command(request, cancellation)
     }
@@ -45,12 +50,24 @@ fn single_file_properties_command(
     request: FilePropertiesRequest,
     path: PathBuf,
     cancellation: CancellationToken,
+    reread: FilePropertiesReread,
+    previous: Option<FilePropertiesSnapshot>,
 ) -> Task<Message> {
     Task::stream(iced::stream::channel(
         FILE_PROPERTIES_CHANNEL_SIZE,
         async move |mut output| {
             let (outcome, lookups) = match load_file_properties(path.clone()).await {
-                Ok((snapshot, lookups)) => (Ok(snapshot), Some(lookups)),
+                Ok((mut snapshot, mut lookups)) => {
+                    if let Some(previous) = &previous {
+                        keep_previous_slow_properties(
+                            &mut snapshot,
+                            &mut lookups,
+                            previous,
+                            reread,
+                        );
+                    }
+                    (Ok(snapshot), Some(lookups))
+                }
                 Err(error) => (Err(error), None),
             };
             if output
@@ -73,6 +90,10 @@ fn single_file_properties_command(
         },
     ))
 }
+
+#[path = "properties_reread.rs"]
+mod reread;
+use reread::keep_previous_slow_properties;
 
 /// 快照发出去以后在后台读的慢项；各读各的，谁先到谁先填。
 struct SlowPropertyLookups {

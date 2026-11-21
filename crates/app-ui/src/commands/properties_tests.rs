@@ -345,3 +345,93 @@ fn a_link_shows_where_it_points_without_following_it() {
     assert!(snapshot.volume.is_ok());
     assert_eq!(lookups.default_application_for, None);
 }
+
+/// 重读同一个条目：依据没变的慢项沿用、不再读，变了的再读；按了刷新都再读，但先摆着上次的。
+#[test]
+fn a_reread_keeps_what_did_not_change_and_reads_the_rest_again() {
+    let temp = tempdir().expect("create temp dir");
+    let picture = temp.path().join("photo.png");
+    fs::write(&picture, b"not really a png").expect("write picture");
+    let read = || read_file_properties(picture.clone()).expect("picture properties");
+    let viewer = FilePropertiesLookup::Ready(Some("Viewer".to_owned()));
+    let (mut previous, _) = read();
+    let FilePropertiesKindDetails::File(file) = &mut previous.details else {
+        panic!("a regular file is a file");
+    };
+    file.default_application = viewer.clone();
+    file.media_details = Some(FilePropertiesLookup::Ready(Vec::new()));
+    let reread = |reread| {
+        let (mut snapshot, mut lookups) = read();
+        keep_previous_slow_properties(&mut snapshot, &mut lookups, &previous, reread);
+        let FilePropertiesKindDetails::File(file) = snapshot.details else {
+            panic!("a regular file is a file");
+        };
+        (file, lookups)
+    };
+
+    // 只是权限、时间这类变了：类型、大小、修改时间都没变，两项沿用、不再读。
+    let (file, lookups) = reread(FilePropertiesReread::Item);
+    assert_eq!(file.default_application, viewer);
+    assert_eq!(
+        file.media_details,
+        Some(FilePropertiesLookup::Ready(Vec::new()))
+    );
+    assert_eq!(lookups.default_application_for, None);
+    assert_eq!(lookups.media, None);
+
+    // 按了刷新：先摆着上次的，照样再读。
+    let (file, lookups) = reread(FilePropertiesReread::All);
+    assert_eq!(file.default_application, viewer);
+    assert!(lookups.default_application_for.is_some());
+    assert!(lookups.media.is_some());
+
+    // 内容变了：详细信息再读，打开方式只看类型，不用再问。
+    fs::write(&picture, b"not really a png, only longer").expect("rewrite picture");
+    let (file, lookups) = reread(FilePropertiesReread::Item);
+    assert_eq!(file.default_application, viewer);
+    assert_eq!(lookups.default_application_for, None);
+    assert!(lookups.media.is_some());
+}
+
+/// 文件夹：目标本身变了不重量，大小还是上次量的；里面的东西变了重量，量完之前显示上次的。
+#[test]
+fn a_reread_folder_is_measured_again_only_when_its_contents_changed() {
+    let temp = tempdir().expect("create temp dir");
+    let (mut previous, _) =
+        read_file_properties(temp.path().to_path_buf()).expect("folder properties");
+    previous.details = FilePropertiesKindDetails::Directory(
+        FilePropertiesDirectoryContentsState::Loaded(FilePropertiesDirectoryContents {
+            file_count: 3,
+            directory_count: 1,
+            total_size_bytes: 100,
+            total_disk_size_bytes: 8192,
+            unreadable_entries: 0,
+        }),
+    );
+    let reread = |reread| {
+        let (mut snapshot, mut lookups) =
+            read_file_properties(temp.path().to_path_buf()).expect("folder properties");
+        keep_previous_slow_properties(&mut snapshot, &mut lookups, &previous, reread);
+        (snapshot, lookups)
+    };
+
+    let (snapshot, lookups) = reread(FilePropertiesReread::Item);
+    assert!(!lookups.directory_contents);
+    assert_eq!(snapshot.size_bytes, 100);
+    assert!(matches!(
+        snapshot.details,
+        FilePropertiesKindDetails::Directory(FilePropertiesDirectoryContentsState::Loaded(
+            FilePropertiesDirectoryContents { file_count: 3, .. }
+        ))
+    ));
+
+    let (snapshot, lookups) = reread(FilePropertiesReread::Contents);
+    assert!(lookups.directory_contents);
+    assert_eq!(snapshot.disk_size_bytes, 8192);
+    assert!(matches!(
+        snapshot.details,
+        FilePropertiesKindDetails::Directory(FilePropertiesDirectoryContentsState::Refreshing(
+            FilePropertiesDirectoryContents { file_count: 3, .. }
+        ))
+    ));
+}

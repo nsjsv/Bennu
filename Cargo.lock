@@ -135,7 +135,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app-ui"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "alacritty_terminal",
  "ashpd",
@@ -597,11 +597,11 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bennu-localization"
-version = "0.4.6"
+version = "0.4.7"
 
 [[package]]
 name = "bennu-preview"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "bennu-localization",
  "bennu-subprocess",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "bennu-sidebar"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "bennu-localization",
  "bennu-state",
@@ -654,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "bennu-state"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "rusqlite",
  "rustix 1.1.4",
@@ -665,14 +665,14 @@ dependencies = [
 
 [[package]]
 name = "bennu-subprocess"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "tokio",
 ]
 
 [[package]]
 name = "bennu-theme"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "bennu-localization",
  "iced",
@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "desktop-linux"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "display-renderer",
  "futures-util",
@@ -1549,7 +1549,7 @@ dependencies = [
 
 [[package]]
 name = "display-renderer"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "tempfile",
  "wgpu",
@@ -1780,7 +1780,7 @@ checksum = "7bf10938a7681e32b5b7d82ada720a04837f120e671c1e653309053e92c9e1e2"
 
 [[package]]
 name = "file-core"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "blake3",
  "cc",
@@ -1821,7 +1821,7 @@ dependencies = [
 
 [[package]]
 name = "file-operations"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "bennu-localization",
  "bennu-state",
@@ -1839,7 +1839,7 @@ dependencies = [
 
 [[package]]
 name = "file-search"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "bennu-localization",
  "file-core",
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "file-search-daemon"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "encoding_rs",
  "file-core",
@@ -3388,7 +3388,7 @@ dependencies = [
 
 [[package]]
 name = "local-send"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "async_zip",
  "axum",
@@ -4587,7 +4587,7 @@ dependencies = [
 
 [[package]]
 name = "portal-backend"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "bennu-localization",
  "bennu-preview",
@@ -5881,7 +5881,7 @@ dependencies = [
 
 [[package]]
 name = "thumbnails"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "blake3",
  "file-core",

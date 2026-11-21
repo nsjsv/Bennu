@@ -262,7 +262,12 @@ fn elastic_breadcrumbs<'a>(
             .height(Length::Fixed(ADDRESS_BAR_HEIGHT))
             .style(move |theme, status| faded_button_style(theme, status, opacity, is_drop_target))
             .on_press(Message::BreadcrumbSegmentPressed(pane_id, target.clone()));
+        // 中键和条目上的文件夹一样：在新标签页里打开（按住 Ctrl / Shift 是分屏）。
         let segment_target = mouse_area(segment_button)
+            .on_middle_press(Message::OpenDirectoryFromMiddleClick(
+                pane_id,
+                target.clone(),
+            ))
             .on_enter(Message::BreadcrumbDropTargetHovered(
                 pane_id,
                 target.clone(),

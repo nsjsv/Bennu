@@ -22,6 +22,7 @@ use crate::file_entry_view::{
     FileEntryVisualState,
 };
 use crate::formatting::empty_location_message;
+use crate::input_blocking_space::input_blocking_space;
 use crate::keyed_rows::keyed_rows;
 use crate::model::{BrowserPaneId, ExpandedDirectoryStatus, Message, ScrollbarRegion};
 use crate::view::{column_browser_scroll_id, pane_blank_area, rename_field, rename_input_id};
@@ -147,6 +148,19 @@ pub(crate) fn column_browser_view<'a>(
         if index + 1 < visible_column_count {
             columns = columns.push(column_resize_divider(pane.id, index));
         }
+    }
+    let real_column_count = rendered_directories.len();
+    let scroll_spacer_width = end_scroll_spacer_width(
+        real_column_count,
+        browser.user_config().visible_column_count,
+        browser.pane_content_width_for(pane.id),
+        browser.column_width(pane.id, real_column_count.saturating_sub(1)),
+    );
+    if scroll_spacer_width > f32::EPSILON {
+        columns = columns.push(input_blocking_space(
+            Length::Fixed(scroll_spacer_width),
+            Length::Fill,
+        ));
     }
     let scrollbar_region = ScrollbarRegion::ColumnBrowser(pane.id);
     let smooth = smooth_scroll(&scrollbar_region);
@@ -373,6 +387,20 @@ fn empty_column(
             directory: fallback_directory,
         },
     )
+}
+
+/// 最后一栏后面垫的空白：栏多过一页时最后一栏还能接着往左滚，最多滚到它贴着左边（宽 = 窗格宽 −
+/// 最后一栏宽），再往后没有了，怎么滚屏上都留着最后一栏。栏不够一页时空栏已经补满一页，不垫。
+fn end_scroll_spacer_width(
+    real_column_count: usize,
+    visible_column_count: usize,
+    viewport_width: f32,
+    last_column_width: f32,
+) -> f32 {
+    if real_column_count < visible_column_count {
+        return 0.0;
+    }
+    (viewport_width - last_column_width).max(0.0)
 }
 
 fn column_resize_divider(pane_id: BrowserPaneId, column_index: usize) -> Element<'static, Message> {
@@ -959,6 +987,29 @@ mod tests {
             column_directories_for_pane(pane),
             vec![current_dir, open_directory]
         );
+    }
+
+    /// 滚到最右时最后一栏正好贴着左边：内容宽减去视口宽 = 最后一栏左边的位置。栏宽、窗格宽
+    /// 怎么变都成立（分屏、拖宽过的栏），最后一栏比窗格还宽时不垫。
+    #[test]
+    fn scrolling_to_the_end_leaves_the_last_column_at_the_left_edge() {
+        let divider = COLUMN_RESIZE_DIVIDER_WIDTH;
+        for (real, visible, column_width, viewport_width) in [
+            (4, 4, 200.0, 815.0),
+            (7, 4, 200.0, 815.0),
+            (6, 3, 420.0, 600.0),
+            (5, 5, 96.0, 400.0),
+        ] {
+            let spacer = end_scroll_spacer_width(real, visible, viewport_width, column_width);
+            let content_width = real as f32 * column_width + (real - 1) as f32 * divider + spacer;
+            let last_column_left = (real - 1) as f32 * (column_width + divider);
+            assert!(
+                (content_width - viewport_width - last_column_left).abs() < 0.01,
+                "{real} columns of {column_width} in {viewport_width}"
+            );
+        }
+        assert_eq!(end_scroll_spacer_width(3, 4, 815.0, 200.0), 0.0);
+        assert_eq!(end_scroll_spacer_width(5, 4, 300.0, 400.0), 0.0);
     }
 
     #[test]

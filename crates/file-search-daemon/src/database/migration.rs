@@ -115,6 +115,25 @@ impl SearchDatabase {
         if current < 14 {
             self.requeue_text_content(&MimeDatabase::system())?;
         }
+        if current < 15 {
+            self.add_content_cooldown_columns()?;
+        }
+        Ok(())
+    }
+
+    /// schema 15：stage 行记下已入索引文字的指纹和正文冷却截止时间。旧行两列都是 NULL：
+    /// 指纹未知，下次一定改写全文；没有冷却，下次变化马上抽取。
+    fn add_content_cooldown_columns(&self) -> SearchResult<()> {
+        let transaction = self.connection.unchecked_transaction()?;
+        for column in ["content_digest", "content_cooldown_until_ms"] {
+            if !self.column_exists("file_stage_state", column)? {
+                transaction.execute_batch(&format!(
+                    "ALTER TABLE file_stage_state ADD COLUMN {column} INTEGER;"
+                ))?;
+            }
+        }
+        transaction.pragma_update(None, "user_version", 15)?;
+        transaction.commit()?;
         Ok(())
     }
 

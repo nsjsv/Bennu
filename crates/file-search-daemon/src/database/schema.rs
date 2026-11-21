@@ -28,7 +28,9 @@ pub(super) const BASE_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS files (
     CREATE TABLE IF NOT EXISTS file_stage_state (
         path BLOB PRIMARY KEY,
         metadata_stage_state TEXT NOT NULL,
-        content_stage_state TEXT NOT NULL
+        content_stage_state TEXT NOT NULL,
+        content_digest INTEGER,
+        content_cooldown_until_ms INTEGER
     );
     CREATE TABLE IF NOT EXISTS directory_snapshots (
         path BLOB PRIMARY KEY,
@@ -84,7 +86,10 @@ pub(super) const QUERY_INDEXES: &str = "CREATE INDEX IF NOT EXISTS files_visible
      CREATE INDEX IF NOT EXISTS directory_snapshots_root_path
         ON directory_snapshots(root_path, path);
      CREATE INDEX IF NOT EXISTS directory_snapshots_parent_path
-        ON directory_snapshots(parent_path, path);";
+        ON directory_snapshots(parent_path, path);
+     CREATE INDEX IF NOT EXISTS file_stage_state_content_refresh_due
+        ON file_stage_state(content_cooldown_until_ms)
+        WHERE content_stage_state = 'pending' AND content_cooldown_until_ms IS NOT NULL;";
 
 impl SearchDatabase {
     pub(super) fn initialize(&self) -> SearchResult<()> {
@@ -204,7 +209,8 @@ pub(super) fn verify_search_storage_schema(connection: &Connection) -> SearchRes
                'files_parent_visible_modified_name',
                'files_hidden_query_rows',
                'directory_snapshots_root_path',
-               'directory_snapshots_parent_path'
+               'directory_snapshots_parent_path',
+               'file_stage_state_content_refresh_due'
            )",
         [],
         |row| row.get::<_, i64>(0),
@@ -216,6 +222,12 @@ pub(super) fn verify_search_storage_schema(connection: &Connection) -> SearchRes
          )",
         [],
         |row| row.get::<_, bool>(0),
+    )?;
+    let stage_columns = connection.query_row(
+        "SELECT COALESCE(group_concat(name, ','), '')
+         FROM (SELECT name FROM pragma_table_info('file_stage_state') ORDER BY cid)",
+        [],
+        |row| row.get::<_, String>(0),
     )?;
     let search_name_column_exists = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('files') WHERE name = 'search_name')",
@@ -233,12 +245,14 @@ pub(super) fn verify_search_storage_schema(connection: &Connection) -> SearchRes
         || required_table_count != 6
         || path_configuration_columns != "singleton,revision,preferences"
         || search_root_mount_columns != "root_path,mount_point,device"
-        || required_index_count != 5
+        || required_index_count != 6
+        || stage_columns
+            != "path,metadata_stage_state,content_stage_state,content_digest,content_cooldown_until_ms"
         || raw_fts_content_table_exists
     {
         return Err(SearchError::InvalidDatabaseSchema {
             message: format!(
-                "schema {SCHEMA_VERSION} requires an exact durable path snapshot, root mount identities, normalized search names, a space-tokenized contentless full-detail FTS, and bounded snippets"
+                "schema {SCHEMA_VERSION} requires an exact durable path snapshot, root mount identities, normalized search names, a space-tokenized contentless full-detail FTS, bounded snippets, and content cooldown stage columns"
             ),
         });
     }

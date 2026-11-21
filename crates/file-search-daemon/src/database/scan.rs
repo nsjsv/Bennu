@@ -31,7 +31,8 @@ const KNOWN_FILES_PAGE_SQL: &str = "SELECT * FROM (
                     f.mime_type,
                     s.metadata_stage_state,
                     s.content_stage_state,
-                    f.observation_state
+                    f.observation_state,
+                    s.content_cooldown_until_ms
                 FROM files AS f
                 LEFT JOIN file_stage_state AS s ON s.path = f.path
                 WHERE likely(f.tombstoned = 0)
@@ -54,7 +55,8 @@ const KNOWN_FILES_PAGE_SQL: &str = "SELECT * FROM (
                     f.mime_type,
                     s.metadata_stage_state,
                     s.content_stage_state,
-                    f.observation_state
+                    f.observation_state,
+                    s.content_cooldown_until_ms
                 FROM files AS f
                 LEFT JOIN file_stage_state AS s ON s.path = f.path
                 WHERE likely(f.tombstoned = 0)
@@ -130,7 +132,8 @@ impl SearchDatabase {
                 f.mime_type,
                 s.metadata_stage_state,
                 s.content_stage_state,
-                f.observation_state
+                f.observation_state,
+                s.content_cooldown_until_ms
              FROM files AS f
              LEFT JOIN file_stage_state AS s ON s.path = f.path
              WHERE f.path = ?1 AND f.tombstoned = 0",
@@ -489,6 +492,7 @@ struct StoredKnownEntryFields {
     metadata_stage_state: Option<String>,
     content_stage_state: Option<String>,
     observation_state: String,
+    content_cooldown_until_ms: Option<i64>,
 }
 
 impl StoredKnownEntryFields {
@@ -503,6 +507,7 @@ impl StoredKnownEntryFields {
             metadata_stage_state: row.get(first_column + 6)?,
             content_stage_state: row.get(first_column + 7)?,
             observation_state: row.get(first_column + 8)?,
+            content_cooldown_until_ms: row.get(first_column + 9)?,
         })
     }
 
@@ -525,6 +530,7 @@ impl StoredKnownEntryFields {
             stage_state,
             mime_type: self.mime_type,
             observation_state: EntryObservationState::from_storage_value(&self.observation_state)?,
+            content_cooldown_until_ms: self.content_cooldown_until_ms,
         })
     }
 }

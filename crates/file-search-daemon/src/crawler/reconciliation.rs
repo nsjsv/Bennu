@@ -5,8 +5,8 @@ use file_search::mime::MimeDatabase;
 use tokio_util::sync::CancellationToken;
 
 use crate::database::{
-    DirectorySnapshot, EntryObservationState, KnownFileEntry, ObservedFile, ScanFileMutation,
-    MAX_KNOWN_ENTRY_PAGE_ENTRIES,
+    wall_clock_ms, DirectorySnapshot, EntryObservationState, KnownFileEntry, ObservedFile,
+    ScanFileMutation, MAX_KNOWN_ENTRY_PAGE_ENTRIES,
 };
 use crate::error::{SearchError, SearchResult};
 use crate::filesystem::{
@@ -17,10 +17,9 @@ use crate::model::SearchFileKind;
 use crate::writer::{scan_file_mutation_bytes, MAX_WRITER_FILE_PAYLOAD_BYTES};
 
 use super::{
-    directory_signature, extraction_plan_reads_content, name_type_for, observed_file_signature,
-    report_checking_if_needed, report_crawling, report_crawling_if_needed,
-    ChangedFilePipelineOutcome, IndexMaintenanceProgress, PendingClassificationBatch, RebuildStats,
-    SearchIndexer,
+    directory_signature, name_type_for, observed_file_signature, report_checking_if_needed,
+    report_crawling, report_crawling_if_needed, IndexMaintenanceProgress,
+    PendingClassificationBatch, RebuildStats, SearchIndexer,
 };
 
 impl SearchIndexer {
@@ -554,6 +553,7 @@ impl SearchIndexer {
 
         // 一批用同一个类型库：库在批中途被换掉时，这批仍按同一套规则判断。
         let types = MimeDatabase::system();
+        let now_ms = wall_clock_ms();
         let mut pending_mutations = Vec::new();
         let mut pending_mutation_bytes = 0_usize;
         for (entry, classification) in entries.into_iter().zip(classifications) {
@@ -581,19 +581,16 @@ impl SearchIndexer {
                     &types,
                 )
                 .await;
-            if extraction_plan_reads_content(&changed_file_pipeline.stage3_content_plan) {
-                stats.content_reads += 1;
-            }
-            let pipeline_outcome = self
-                .execute_changed_file_pipeline(entry.path(), changed_file_pipeline, cancellation)
+            let mutation = self
+                .changed_file_mutation(
+                    entry.path(),
+                    changed_file_pipeline,
+                    classification.known_entry.as_ref(),
+                    now_ms,
+                    stats,
+                    cancellation,
+                )
                 .await?;
-            ensure_not_cancelled(cancellation)?;
-            let mutation = match pipeline_outcome {
-                ChangedFilePipelineOutcome::Observable(file) => ScanFileMutation::Observable(file),
-                ChangedFilePipelineOutcome::Inaccessible { scope, file } => {
-                    ScanFileMutation::Inaccessible { scope, file }
-                }
-            };
             let mutation_bytes = scan_file_mutation_bytes(&mutation);
             if !pending_mutations.is_empty()
                 && pending_mutation_bytes.saturating_add(mutation_bytes)
@@ -609,7 +606,6 @@ impl SearchIndexer {
             pending_mutation_bytes = pending_mutation_bytes.saturating_add(mutation_bytes);
             pending_mutations.push(mutation);
             stats.changed += 1;
-            stats.reindexed += 1;
             report_crawling_if_needed(stats, current_scope, on_progress);
         }
 

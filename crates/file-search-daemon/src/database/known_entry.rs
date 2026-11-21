@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use crate::error::{SearchError, SearchResult};
 use crate::model::SearchFileKind;
 
+use super::content_cooldown::content_cooldown_active;
 use super::IndexedEntryStageState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +88,7 @@ pub struct KnownEntryState {
     pub stage_state: IndexedEntryStageState,
     pub(crate) mime_type: Option<String>,
     pub(crate) observation_state: EntryObservationState,
+    pub(crate) content_cooldown_until_ms: Option<i64>,
 }
 
 impl KnownEntryState {
@@ -101,5 +103,13 @@ impl KnownEntryState {
             && self.stage_state.allows_signature_skip()
             && type_unchanged
             && self.signature.matches(observed)
+    }
+
+    /// 已入索引的正文还在冷却：这次变化只记元数据，正文到期再补建。
+    pub(crate) fn content_is_cooling(&self, now_ms: i64) -> bool {
+        self.observation_state == EntryObservationState::Observable
+            && self
+                .content_cooldown_until_ms
+                .is_some_and(|cooldown_until_ms| content_cooldown_active(cooldown_until_ms, now_ms))
     }
 }

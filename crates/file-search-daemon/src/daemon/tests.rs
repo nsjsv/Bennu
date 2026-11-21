@@ -21,7 +21,7 @@ use super::watch_coverage::WatchCoverageHealth;
 use super::*;
 
 /// 测试把搜索路径偏好文件放在数据库旁边,不碰真实的用户配置目录。
-fn search_path_file_beside(database_path: &Path) -> PathBuf {
+pub(super) fn search_path_file_beside(database_path: &Path) -> PathBuf {
     database_path.with_file_name("search-paths.json")
 }
 
@@ -672,7 +672,7 @@ fn removing_an_exclusion_explicitly_recrawls_the_newly_included_frontier() {
     core.shutdown().unwrap();
 }
 
-fn wait_for_global_hit_count(database_path: &Path, terms: &str, expected: usize) {
+pub(super) fn wait_for_global_hit_count(database_path: &Path, terms: &str, expected: usize) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let database = SearchDatabase::open_read_only(database_path).unwrap();
@@ -922,7 +922,9 @@ fn repeated_overflow_while_recovering_keeps_one_follow_up() {
     let first_finished_at = now + DIRTY_ROOT_QUIET_WINDOW;
     pending.finish_dirty_root_recovery(
         std::slice::from_ref(&root),
-        &WorkOutcome::Succeeded,
+        &WorkOutcome::Succeeded {
+            next_content_refresh: None,
+        },
         first_finished_at,
     );
 
@@ -949,7 +951,9 @@ fn new_overflow_does_not_shorten_an_existing_recovery_backoff() {
     pending.request_dirty_roots(vec![root.clone()], first_started_at);
     pending.finish_dirty_root_recovery(
         std::slice::from_ref(&root),
-        &WorkOutcome::Succeeded,
+        &WorkOutcome::Succeeded {
+            next_content_refresh: None,
+        },
         first_started_at,
     );
 
@@ -1011,7 +1015,9 @@ fn watch_budget_patrol_queue_allows_only_one_pending_or_running_batch() {
         .try_enqueue_watch_budget_patrol(std::slice::from_ref(&second))
         .unwrap());
 
-    queue.finish_work(&WorkOutcome::Succeeded);
+    queue.finish_work(&WorkOutcome::Succeeded {
+        next_content_refresh: None,
+    });
 
     assert!(!queue
         .try_enqueue_watch_budget_patrol(std::slice::from_ref(&second))

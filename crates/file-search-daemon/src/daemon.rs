@@ -663,5 +663,8 @@ fn daemon_core_stopped() -> SearchError {
 }
 
 #[cfg(test)]
+#[path = "daemon/content_refresh_tests.rs"]
+mod content_refresh_tests;
+#[cfg(test)]
 #[path = "daemon/tests.rs"]
 mod tests;

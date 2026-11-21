@@ -2,9 +2,11 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
+use crate::database::wall_clock_ms;
 use crate::error::{SearchError, SearchResult};
 use crate::logging::bounded_search_log_detail;
 use crate::writer::IndexWriter;
@@ -124,7 +126,7 @@ fn spawn_daemon_worker(
                     .expect("search daemon lifecycle mutex poisoned");
                 match outcome {
                     WorkOutcome::Cancelled => snapshot.end_cancelled_work(),
-                    WorkOutcome::Succeeded | WorkOutcome::Failed { .. } => {
+                    WorkOutcome::Succeeded { .. } | WorkOutcome::Failed { .. } => {
                         snapshot.finish_work(completeness)
                     }
                 }
@@ -148,7 +150,9 @@ fn run_index_maintenance(
     let work_label = work_request_label(&work_request);
     let high_frequency_maintenance = matches!(
         &work_request,
-        DaemonWorkRequest::ChangedPaths { .. } | DaemonWorkRequest::WatchBudgetPatrol { .. }
+        DaemonWorkRequest::ChangedPaths { .. }
+            | DaemonWorkRequest::WatchBudgetPatrol { .. }
+            | DaemonWorkRequest::ContentRefresh
     );
     lifecycle_snapshot
         .lock()
@@ -203,14 +207,26 @@ fn run_index_maintenance(
                     )
                     .await?
             }
-            DaemonWorkRequest::Shutdown => return Ok::<_, SearchError>((Default::default(), 0)),
+            DaemonWorkRequest::ContentRefresh => {
+                indexer
+                    .refresh_cooled_content_with_progress_cancelled(crawl_cancellation, on_progress)
+                    .await?
+            }
+            DaemonWorkRequest::Shutdown => {
+                return Ok::<_, SearchError>((Default::default(), 0, None))
+            }
         };
         let total = writer.count()?;
-        Ok::<_, SearchError>((stats, total))
+        // 这件工作可能新添或还清了补建欠账，闹钟按库里的最新状态重排。
+        let now_ms = wall_clock_ms();
+        let next_content_refresh = writer
+            .next_content_refresh_due_ms(now_ms)?
+            .map(|due_ms| content_refresh_instant(due_ms, now_ms));
+        Ok::<_, SearchError>((stats, total, next_content_refresh))
     });
     release_allocator_idle_pages();
     match maintenance_outcome {
-        Ok((stats, total)) => {
+        Ok((stats, total, next_content_refresh)) => {
             if stats.directory_snapshots_changed > 0 {
                 directory_snapshot_epoch.fetch_add(1, Ordering::AcqRel);
             }
@@ -247,7 +263,9 @@ fn run_index_maintenance(
                 .lock()
                 .expect("search daemon lifecycle mutex poisoned")
                 .record_visible_count(total);
-            WorkOutcome::Succeeded
+            WorkOutcome::Succeeded {
+                next_content_refresh,
+            }
         }
         Err(_) if crawl_cancellation.is_cancelled() => WorkOutcome::Cancelled,
         Err(SearchError::Cancelled) => WorkOutcome::Cancelled,
@@ -281,6 +299,12 @@ fn work_request_label(work_request: &DaemonWorkRequest) -> String {
         DaemonWorkRequest::DirtyRootRecovery { roots } => {
             format!("dirty root recovery ({})", roots.len())
         }
+        DaemonWorkRequest::ContentRefresh => "content refresh".to_owned(),
         DaemonWorkRequest::Shutdown => "shutdown".to_owned(),
     }
+}
+
+/// 墙钟毫秒换成本进程的单调时刻，已过的算作现在。
+fn content_refresh_instant(due_ms: i64, now_ms: i64) -> Instant {
+    Instant::now() + Duration::from_millis(due_ms.saturating_sub(now_ms).max(0) as u64)
 }

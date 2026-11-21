@@ -7,8 +7,11 @@ use crate::extractor::{DurableContentStageState, ExtractionStatus};
 use crate::model::SearchFileKind;
 use crate::path_encoding::{path_from_storage, storage_bytes};
 use crate::text_matching::{content_index_text, name_index_text, normalize_search_text};
+use content_cooldown::{content_cooldown_until_ms, fulltext_digest, record_cooling_file};
 use write_batch::WriteSavepoint;
 
+#[path = "database/content_cooldown.rs"]
+mod content_cooldown;
 #[path = "database/known_entry.rs"]
 mod known_entry;
 #[path = "database/migration.rs"]
@@ -29,6 +32,7 @@ mod storage_workspace;
 #[path = "database/write_batch.rs"]
 mod write_batch;
 
+pub(crate) use content_cooldown::{wall_clock_ms, CoolingFile};
 pub(crate) use known_entry::{
     DirectorySignature, DirectorySnapshot, EntryObservationState, KnownDirectChild, KnownFileEntry,
 };
@@ -40,7 +44,7 @@ pub(crate) use scan::{
 };
 
 /// Bumped whenever the on-disk schema changes in a way that requires a migration.
-pub(crate) const SCHEMA_VERSION: i64 = 14;
+pub(crate) const SCHEMA_VERSION: i64 = 15;
 pub(super) const SEARCH_CONTENT_PREVIEW_CHARACTER_LIMIT: usize = 1_024;
 
 const WRITER_PAGE_CACHE_KIB: i64 = 2_048;
@@ -132,7 +136,12 @@ pub struct IndexedFile {
 #[derive(Debug)]
 pub(crate) enum ScanFileMutation {
     Observable(IndexedFile),
-    Inaccessible { scope: PathBuf, file: IndexedFile },
+    Inaccessible {
+        scope: PathBuf,
+        file: IndexedFile,
+    },
+    /// 正文还在冷却：只记这次的元数据，正文等冷却到期再补建。
+    ContentCooling(CoolingFile),
 }
 
 struct QueryVisibleMetadataRow<'file> {
@@ -233,11 +242,7 @@ impl SearchDatabase {
 
     pub fn upsert_file(&self, file: &IndexedFile) -> SearchResult<()> {
         let transaction = WriteSavepoint::begin(&self.connection)?;
-        let metadata_row = file.query_visible_metadata_row();
-        let fulltext_row = file.fulltext_content_row();
-        upsert_query_visible_metadata(&transaction, &metadata_row)?;
-        upsert_stage_state(&transaction, metadata_row.path, &file.stage_state)?;
-        replace_fulltext_content(&transaction, &fulltext_row)?;
+        write_observable_file(&transaction, file)?;
         transaction.release()?;
         Ok(())
     }
@@ -275,18 +280,13 @@ impl SearchDatabase {
         let transaction = WriteSavepoint::begin(&self.connection)?;
         for mutation in mutations {
             match mutation {
-                ScanFileMutation::Observable(file) => {
-                    let metadata_row = file.query_visible_metadata_row();
-                    let fulltext_row = file.fulltext_content_row();
-                    upsert_query_visible_metadata(&transaction, &metadata_row)?;
-                    upsert_stage_state(&transaction, metadata_row.path, &file.stage_state)?;
-                    replace_fulltext_content(&transaction, &fulltext_row)?;
-                }
+                ScanFileMutation::Observable(file) => write_observable_file(&transaction, file)?,
                 ScanFileMutation::Inaccessible { file, .. } => {
                     let metadata_row = file.query_visible_metadata_row();
                     upsert_inaccessible_metadata(&transaction, &metadata_row)?;
                     upsert_stage_state(&transaction, metadata_row.path, &file.stage_state)?;
                 }
+                ScanFileMutation::ContentCooling(file) => record_cooling_file(&transaction, file)?,
             }
         }
         transaction.release()?;
@@ -506,14 +506,62 @@ fn upsert_stage_state(
     Ok(())
 }
 
+/// 元数据 → 全文 → stage：stage 行里的旧指纹要在全文比对之后才能覆盖。
+fn write_observable_file(connection: &Connection, file: &IndexedFile) -> SearchResult<()> {
+    let metadata_row = file.query_visible_metadata_row();
+    upsert_query_visible_metadata(connection, &metadata_row)?;
+    let content_digest = replace_fulltext_content(connection, &file.fulltext_content_row())?;
+    let cooldown_until_ms = file
+        .content
+        .as_deref()
+        .map(|content| content_cooldown_until_ms(content.len(), wall_clock_ms()));
+    connection
+        .prepare_cached(
+            "INSERT INTO file_stage_state (
+                path, metadata_stage_state, content_stage_state, content_digest,
+                content_cooldown_until_ms
+             )
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(path) DO UPDATE SET
+                metadata_stage_state = excluded.metadata_stage_state,
+                content_stage_state = excluded.content_stage_state,
+                content_digest = excluded.content_digest,
+                content_cooldown_until_ms = excluded.content_cooldown_until_ms",
+        )?
+        .execute(params![
+            path_to_storage(metadata_row.path),
+            file.stage_state.metadata.as_storage_value(),
+            file.stage_state.content.as_storage_value(),
+            content_digest,
+            cooldown_until_ms,
+        ])?;
+    Ok(())
+}
+
+/// 返回写进去（或本来就在）的文字的指纹。
 fn replace_fulltext_content(
     connection: &Connection,
     fulltext_row: &FulltextContentRow<'_>,
-) -> SearchResult<()> {
+) -> SearchResult<i64> {
     let storage_path = path_to_storage(fulltext_row.path);
-    let file_rowid: i64 = connection
-        .prepare_cached("SELECT rowid FROM files WHERE path = ?1")?
-        .query_row(params![storage_path], |row| row.get(0))?;
+    let (file_rowid, indexed_digest): (i64, Option<i64>) = connection
+        .prepare_cached(
+            "SELECT f.rowid, s.content_digest
+             FROM files AS f
+             LEFT JOIN file_stage_state AS s ON s.path = f.path
+             WHERE f.path = ?1",
+        )?
+        .query_row(params![storage_path], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    let name_text = name_index_text(&normalize_search_text(fulltext_row.display_name));
+    let content_text = content_index_text(fulltext_row.content.unwrap_or(""));
+    let preview = fulltext_row
+        .content
+        .and_then(bounded_search_content_preview);
+    let digest = fulltext_digest(&name_text, &content_text, preview.as_deref());
+    // 同样的文字再写一遍只会多出一个 segment 和之后的合并，删插都省掉。
+    if indexed_digest == Some(digest) {
+        return Ok(digest);
+    }
     connection
         .prepare_cached("DELETE FROM file_search_fts WHERE rowid = ?1")?
         .execute(params![file_rowid])?;
@@ -522,15 +570,8 @@ fn replace_fulltext_content(
         .execute(params![file_rowid])?;
     connection
         .prepare_cached("INSERT INTO file_search_fts (rowid, name, content) VALUES (?1, ?2, ?3)")?
-        .execute(params![
-            file_rowid,
-            name_index_text(&normalize_search_text(fulltext_row.display_name)),
-            content_index_text(fulltext_row.content.unwrap_or(""))
-        ])?;
-    if let Some(preview) = fulltext_row
-        .content
-        .and_then(bounded_search_content_preview)
-    {
+        .execute(params![file_rowid, name_text, content_text])?;
+    if let Some(preview) = preview {
         // 命中身份只属于 FTS；预览受硬上限约束，不能成为正文副本。
         connection
             .prepare_cached(
@@ -538,7 +579,7 @@ fn replace_fulltext_content(
             )?
             .execute(params![file_rowid, preview])?;
     }
-    Ok(())
+    Ok(digest)
 }
 
 fn bounded_search_content_preview(content: &str) -> Option<String> {

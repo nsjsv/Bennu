@@ -6,9 +6,9 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::database::{
-    validate_classification_batch, DirectorySnapshot, FileClassification, IndexedFile,
+    validate_classification_batch, CoolingFile, DirectorySnapshot, FileClassification, IndexedFile,
     KnownDirectChild, KnownFileEntry, ObservedFile, ScanFileMutation, SearchDatabase,
-    SearchRootMount,
+    SearchRootMount, MAX_KNOWN_ENTRY_PAGE_ENTRIES,
 };
 use crate::error::{SearchError, SearchResult};
 use crate::extractor::ExtractionStatus;
@@ -81,6 +81,14 @@ enum WriteCommand {
         invalidated_roots: Vec<PathBuf>,
         affected_scopes: Vec<PathBuf>,
         reply: Sender<SearchResult<()>>,
+    },
+    TakeDueContentRefreshes {
+        now_ms: i64,
+        reply: Sender<SearchResult<Vec<PathBuf>>>,
+    },
+    NextContentRefreshDue {
+        now_ms: i64,
+        reply: Sender<SearchResult<Option<i64>>>,
     },
     /// 提交当前批。一件维护工作返回前调用，让批不跨工作，提交失败也算在这件工作头上。
     CommitPending(Sender<SearchResult<()>>),
@@ -284,6 +292,23 @@ impl IndexWriter {
         outcome.recv().map_err(|_| writer_gone())?
     }
 
+    /// 一页冷却已到期的补建路径；交出的行不会再被选中。
+    pub(crate) fn take_due_content_refreshes(&self, now_ms: i64) -> SearchResult<Vec<PathBuf>> {
+        let (reply, outcome) = mpsc::channel();
+        self.sender
+            .send(WriteCommand::TakeDueContentRefreshes { now_ms, reply })
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
+    }
+
+    pub(crate) fn next_content_refresh_due_ms(&self, now_ms: i64) -> SearchResult<Option<i64>> {
+        let (reply, outcome) = mpsc::channel();
+        self.sender
+            .send(WriteCommand::NextContentRefreshDue { now_ms, reply })
+            .map_err(|_| writer_gone())?;
+        outcome.recv().map_err(|_| writer_gone())?
+    }
+
     pub(crate) fn commit_pending(&self) -> SearchResult<()> {
         let (reply, outcome) = mpsc::channel();
         self.sender
@@ -459,6 +484,15 @@ fn writer_loop(
                 );
                 let _ = reply.send(outcome);
             }
+            WriteCommand::TakeDueContentRefreshes { now_ms, reply } => {
+                let outcome = batch.write(&database, cancelled, |database| {
+                    database.take_due_content_refreshes(now_ms, MAX_KNOWN_ENTRY_PAGE_ENTRIES)
+                });
+                let _ = reply.send(outcome);
+            }
+            WriteCommand::NextContentRefreshDue { now_ms, reply } => {
+                let _ = reply.send(database.next_content_refresh_due_ms(now_ms));
+            }
             WriteCommand::CommitPending(reply) => {
                 let _ = reply.send(logged_write(batch.commit(&database), cancelled));
             }
@@ -623,7 +657,14 @@ pub(crate) fn scan_file_mutation_bytes(mutation: &ScanFileMutation) -> usize {
         ScanFileMutation::Observable(file) => indexed_file_payload_bytes(file),
         ScanFileMutation::Inaccessible { scope, file } => indexed_file_payload_bytes(file)
             .saturating_add(scope.as_os_str().as_encoded_bytes().len()),
+        ScanFileMutation::ContentCooling(file) => cooling_file_payload_bytes(file),
     }
+}
+
+fn cooling_file_payload_bytes(file: &CoolingFile) -> usize {
+    INDEXED_FILE_FIXED_BYTES
+        .saturating_add(file.path.as_os_str().as_encoded_bytes().len())
+        .saturating_add(file.mime_type.as_ref().map_or(0, String::len))
 }
 
 fn validate_scan_file_batch(mutations: &[ScanFileMutation]) -> SearchResult<()> {

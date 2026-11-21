@@ -19,7 +19,7 @@ use file_search::mime::MimeDatabase;
 
 use super::{collapse_affected_prefixes, observed_file_signature, SearchIndexer};
 
-fn config_for(root: &std::path::Path) -> SearchIndexConfig {
+pub(super) fn config_for(root: &std::path::Path) -> SearchIndexConfig {
     SearchIndexConfig {
         roots: vec![root.to_path_buf()],
         excluded_paths: Vec::new(),
@@ -32,9 +32,21 @@ fn config_for(root: &std::path::Path) -> SearchIndexConfig {
 /// Opens a writer over a fresh on-disk database in its own directory, kept
 /// separate from the content root so the database file is never itself
 /// crawled.
-fn writer_in(db_dir: &tempfile::TempDir) -> Arc<IndexWriter> {
+pub(super) fn writer_in(db_dir: &tempfile::TempDir) -> Arc<IndexWriter> {
     let db_path = db_dir.path().join("search.sqlite");
     Arc::new(IndexWriter::spawn(SearchDatabase::open(&db_path).unwrap()))
+}
+
+/// 已入索引正文的冷却全部算作已到期，测试不用真等。
+pub(super) fn expire_content_cooldowns(db_dir: &tempfile::TempDir) {
+    Connection::open(db_dir.path().join("search.sqlite"))
+        .unwrap()
+        .execute(
+            "UPDATE file_stage_state SET content_cooldown_until_ms = 1
+             WHERE content_cooldown_until_ms IS NOT NULL",
+            [],
+        )
+        .unwrap();
 }
 
 #[test]
@@ -491,6 +503,7 @@ async fn bulk_recovery_leaves_full_text_compaction_to_automerge() {
             .unwrap()
     };
 
+    expire_content_cooldowns(&db_dir);
     for (index, path) in paths.iter().take(2).enumerate() {
         fs::write(path, format!("needle local update {index}")).unwrap();
         indexer.rebuild_paths(vec![path.clone()]).await.unwrap();
@@ -552,6 +565,7 @@ async fn watch_budget_patrol_checks_parent_and_nested_directories_independently(
     let writer = writer_in(&db_dir);
     let indexer = SearchIndexer::new(Arc::clone(&writer), config_for(content.path()));
     indexer.rebuild().await.unwrap();
+    expire_content_cooldowns(&db_dir);
     fs::write(&direct_file, "fresh direct token").unwrap();
     fs::write(&nested_file, "fresh nested token").unwrap();
 
@@ -627,6 +641,7 @@ async fn modified_file_is_reindexed() {
     // Rewriting with different-length content changes the recorded size, so
     // the signature no longer matches and the file must be re-indexed —
     // independent of mtime resolution, which avoids same-nanosecond flakiness.
+    expire_content_cooldowns(&db_dir);
     fs::write(&path, "needle two words").unwrap();
 
     let second = indexer.rebuild().await.unwrap();

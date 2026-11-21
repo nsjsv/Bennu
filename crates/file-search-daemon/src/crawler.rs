@@ -9,7 +9,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::{SearchExcludeRules, SearchIndexConfig};
 use crate::database::{
-    DirectorySignature, EntryStageProgress, FileSignature, IndexedEntryStageState, IndexedFile,
+    wall_clock_ms, CoolingFile, DirectorySignature, EntryStageProgress, FileSignature,
+    IndexedEntryStageState, IndexedFile, KnownEntryState, ScanFileMutation,
     MAX_CLASSIFICATION_BATCH_BYTES, MAX_CLASSIFICATION_BATCH_ENTRIES,
 };
 use crate::error::{SearchError, SearchResult};
@@ -228,6 +229,24 @@ impl SearchIndexer {
         .await
     }
 
+    /// 补建一页冷却已到期的正文。取出的路径照普通变化重新核对：冷却已清，正文这次会读；
+    /// 删掉、不可访问或归了别的 root 的各走原有处理。
+    pub(crate) async fn refresh_cooled_content_with_progress_cancelled(
+        &self,
+        cancellation: &CancellationToken,
+        mut on_progress: impl FnMut(IndexMaintenanceProgress),
+    ) -> SearchResult<RebuildStats> {
+        self.committed(async {
+            ensure_not_cancelled(cancellation)?;
+            let mut stats = RebuildStats::default();
+            let due_paths = self.writer.take_due_content_refreshes(wall_clock_ms())?;
+            self.reconcile_changed_paths(due_paths, &mut stats, cancellation, &mut on_progress)
+                .await?;
+            Ok(stats)
+        })
+        .await
+    }
+
     /// 一件索引工作返回时，它的写入一定已经提交。写库线程按批提交，批不能跨工作，
     /// 否则这件工作的提交失败会算到下一件头上。所以成功、失败、取消都要提交。
     async fn committed(
@@ -317,6 +336,44 @@ impl SearchIndexer {
         }
     }
 
+    /// 签名变了的文件要交给写库线程的变更：已入索引的正文还在冷却就只记元数据，
+    /// 否则走完整条流水线。
+    async fn changed_file_mutation(
+        &self,
+        path: &Path,
+        changed_file_pipeline: ChangedFilePipelinePlan,
+        known_entry: Option<&KnownEntryState>,
+        now_ms: i64,
+        stats: &mut RebuildStats,
+        cancellation: &CancellationToken,
+    ) -> SearchResult<ScanFileMutation> {
+        let reads_content =
+            extraction_plan_reads_content(&changed_file_pipeline.stage3_content_plan);
+        // 冷却只省掉读正文；文件还能不能读要这次就看清，读不了的要马上隐藏，交给流水线。
+        if reads_content
+            && known_entry.is_some_and(|known| known.content_is_cooling(now_ms))
+            && std::fs::File::open(path).is_ok()
+        {
+            return Ok(ScanFileMutation::ContentCooling(cooling_file(
+                changed_file_pipeline,
+            )));
+        }
+        if reads_content {
+            stats.content_reads += 1;
+        }
+        let pipeline_outcome = self
+            .execute_changed_file_pipeline(path, changed_file_pipeline, cancellation)
+            .await?;
+        ensure_not_cancelled(cancellation)?;
+        stats.reindexed += 1;
+        Ok(match pipeline_outcome {
+            ChangedFilePipelineOutcome::Observable(file) => ScanFileMutation::Observable(file),
+            ChangedFilePipelineOutcome::Inaccessible { scope, file } => {
+                ScanFileMutation::Inaccessible { scope, file }
+            }
+        })
+    }
+
     async fn execute_changed_file_pipeline(
         &self,
         path: &Path,
@@ -374,6 +431,18 @@ impl SearchIndexer {
             content: extraction.text,
             extraction_status: extraction.status,
         })
+    }
+}
+
+fn cooling_file(changed_file_pipeline: ChangedFilePipelinePlan) -> CoolingFile {
+    let visible_fields = changed_file_pipeline.stage1_visible_fields;
+    CoolingFile {
+        path: visible_fields.path,
+        signature: visible_fields.signature,
+        modified_ms: visible_fields.modified_ms,
+        accessed_ms: visible_fields.accessed_ms,
+        created_ms: visible_fields.created_ms,
+        mime_type: changed_file_pipeline.stage2_metadata_shape.mime_type,
     }
 }
 
@@ -649,6 +718,9 @@ fn report_crawling(
     });
 }
 
+#[cfg(test)]
+#[path = "crawler/content_cooldown_tests.rs"]
+mod content_cooldown_tests;
 #[cfg(test)]
 #[path = "crawler/tests.rs"]
 mod tests;

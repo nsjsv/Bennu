@@ -72,7 +72,7 @@ impl FileBrowser {
         self.options.sort_direction = after_sort.direction;
         Task::batch([
             self.persist_user_preferences_command(),
-            self.reload_visible_panes_preserving_list_directory_summaries(),
+            self.relist_visible_panes(),
         ])
     }
 
@@ -127,7 +127,7 @@ impl FileBrowser {
         } else {
             Task::batch([
                 self.persist_user_preferences_command(),
-                self.reload_visible_panes_preserving_list_directory_summaries(),
+                self.relist_visible_panes(),
             ])
         }
     }

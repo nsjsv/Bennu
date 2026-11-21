@@ -417,6 +417,14 @@ impl FileBrowser {
         Task::batch(commands)
     }
 
+    /// 显不显示隐藏文件、怎么排序是所有窗格共用的列表规则：变了以后可见窗格都按新规则重读
+    /// （后台标签切过去时本来就重读）。回收站快照按旧规则拉，正在拉的作废重拉。目录摘要
+    /// 隐藏的也数、和顺序无关，留着。
+    pub(super) fn relist_visible_panes(&mut self) -> Task<Message> {
+        self.invalidate_trash_snapshot_refresh();
+        self.reload_visible_panes_preserving_list_directory_summaries()
+    }
+
     pub(super) fn reload_visible_panes_preserving_list_directory_summaries(
         &mut self,
     ) -> Task<Message> {

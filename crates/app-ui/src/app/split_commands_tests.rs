@@ -138,3 +138,45 @@ async fn shift_f5_and_shift_f6_copy_and_move_into_the_other_side() {
     );
     assert!(browser.pending_operation.is_some());
 }
+
+/// 显不显示隐藏文件、怎么排序是两侧共用的规则：在哪一侧改，两侧都按新规则重读。
+#[test]
+fn listing_rule_changes_reload_both_sides_of_the_split() {
+    let mut browser = browser_in(Path::new("/workspace"));
+    drop(browser.open_directory_in_split(
+        PathBuf::from("/elsewhere"),
+        crate::model::SplitAxis::Horizontal,
+    ));
+    let generations = |browser: &FileBrowser| {
+        browser
+            .pane_layout
+            .visible_pane_ids()
+            .into_iter()
+            .map(|pane_id| {
+                browser
+                    .pane_by_id(pane_id)
+                    .unwrap()
+                    .directory_load_generation
+            })
+            .collect::<Vec<_>>()
+    };
+    let all_reloaded = |before: &[u64], after: &[u64]| {
+        before.len() == 2
+            && before
+                .iter()
+                .zip(after)
+                .all(|(before, after)| after > before)
+    };
+
+    let before = generations(&browser);
+    drop(browser.toggle_show_hidden_files());
+    let after_hidden = generations(&browser);
+    assert!(all_reloaded(&before, &after_hidden));
+    for pane_id in browser.pane_layout.visible_pane_ids() {
+        assert!(browser.listing_options(pane_id).include_hidden);
+    }
+
+    let active = browser.active_pane_id();
+    drop(browser.select_list_sort_column(active, crate::model::ListColumnKind::Size));
+    assert!(all_reloaded(&after_hidden, &generations(&browser)));
+}

@@ -755,6 +755,8 @@ mod tests {
             test_entry(file_in_a.clone(), FileKind::File),
         ]
         .into();
+        browser.tab_mut().directory_collection_phase =
+            crate::model::DirectoryCollectionPhase::Ready;
         drop(browser.open_column_for_directory(sub.clone()));
 
         // 按多栏方式起拖(捕获真实栏链快照 [dir_a, dir_a/sub])。

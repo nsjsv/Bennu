@@ -96,3 +96,61 @@ async fn the_folder_just_left_is_scrolled_to_once_the_list_arrives() {
         Some(temp.path().join("b").as_path())
     );
 }
+
+/// 地址栏打的是文件：读不了（不是文件夹）就退回上级并选中它，多栏里也一样，不把文件当栏开。
+#[tokio::test]
+async fn a_typed_file_opens_its_folder_with_the_file_selected() {
+    let temp = tempfile::tempdir().unwrap();
+    let file = temp.path().join("notes.txt");
+    std::fs::write(&file, b"x").unwrap();
+    for view_mode in [BrowserViewMode::List, BrowserViewMode::Columns] {
+        let mut browser = browser_in(temp.path(), view_mode);
+        drop(browser.navigate_to(file.clone(), NavigationMode::RecordHistory));
+        let request = browser.next_directory_load_request(file.clone());
+        let failure = crate::model::DirectoryLoadFailure::DirectoryUnavailable {
+            message: "not a directory".to_owned(),
+        };
+
+        drop(browser.accept_directory_load_failure(request, failure));
+
+        assert_eq!(browser.tab().current_directory(), Some(temp.path()));
+        assert_eq!(browser.tab().selected.as_deref(), Some(file.as_path()));
+        assert_eq!(browser.tab().deepest_open_column_directory, None);
+        let request = browser.next_directory_load_request(temp.path().to_path_buf());
+        let scan = file_core::scan_directory(
+            temp.path(),
+            browser.listing_options(browser.active_pane_id()),
+        )
+        .await
+        .unwrap();
+        drop(browser.accept_complete_directory_fixture(request, scan));
+        assert_eq!(browser.tab().selected.as_deref(), Some(file.as_path()));
+    }
+}
+
+/// 看着的文件夹没了：退回上级，列表里已经没有它，就什么都不选。
+#[tokio::test]
+async fn a_vanished_folder_is_not_left_selected_in_its_parent() {
+    let temp = tempfile::tempdir().unwrap();
+    let gone = temp.path().join("gone");
+    let mut browser = browser_in(&gone, BrowserViewMode::List);
+    browser.tab_mut().directory_collection_phase = DirectoryCollectionPhase::Discovering;
+    let request = browser.next_directory_load_request(gone.clone());
+    let failure = crate::model::DirectoryLoadFailure::DirectoryUnavailable {
+        message: "no such directory".to_owned(),
+    };
+    drop(browser.accept_directory_load_failure(request, failure));
+
+    let request = browser.next_directory_load_request(temp.path().to_path_buf());
+    let scan = file_core::scan_directory(
+        temp.path(),
+        browser.listing_options(browser.active_pane_id()),
+    )
+    .await
+    .unwrap();
+    drop(browser.accept_complete_directory_fixture(request, scan));
+
+    assert_eq!(browser.tab().current_directory(), Some(temp.path()));
+    assert_eq!(browser.tab().selected, None);
+    assert_eq!(browser.pending_selection_reveal, None);
+}

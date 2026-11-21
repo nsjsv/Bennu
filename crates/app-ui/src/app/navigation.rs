@@ -147,6 +147,7 @@ impl FileBrowser {
         let tab = pane.tab_mut();
         tab.location = BrowserLocation::Directory(path.clone());
         tab.entries = entries.clone();
+        tab.drop_selection_missing_from(&path);
         tab.directory_discovery = discovery;
         // 扫描读到的是启动那一刻的磁盘，期间到达的变化排在队里，落地后补上。
         replay_changes_queued_during_current_scan(tab, request.generation, &sort_options);
@@ -269,8 +270,10 @@ impl FileBrowser {
         if current == destination || !current.starts_with(destination) {
             return None;
         }
+        // 刚出来的地方根本没列出来过（打的是文件、或者它已经没了）：没有栏可留，在上级里选中它。
+        let was_shown = !tab.directory_collection_phase.is_discovering();
         Some(match tab.view_mode() {
-            BrowserViewMode::Columns => {
+            BrowserViewMode::Columns if was_shown => {
                 let folder = tab
                     .deepest_open_column_directory
                     .clone()
@@ -280,12 +283,14 @@ impl FileBrowser {
                     folder,
                 }
             }
-            BrowserViewMode::List | BrowserViewMode::Icons => CameOutOf::Folder(
-                current
-                    .ancestors()
-                    .find(|ancestor| ancestor.parent() == Some(destination))?
-                    .to_path_buf(),
-            ),
+            BrowserViewMode::Columns | BrowserViewMode::List | BrowserViewMode::Icons => {
+                CameOutOf::Folder(
+                    current
+                        .ancestors()
+                        .find(|ancestor| ancestor.parent() == Some(destination))?
+                        .to_path_buf(),
+                )
+            }
         })
     }
 

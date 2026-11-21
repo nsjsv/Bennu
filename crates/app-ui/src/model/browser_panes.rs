@@ -623,6 +623,28 @@ impl BrowserTab {
         self.selection_anchor = None;
     }
 
+    /// `directory` 的列表整个换成新读到的之后：在这个目录里选中、新列表里却没有的（读之前就
+    /// 没了）不再选着，和增量变化删掉条目时一样；子文件夹里的选择不归这次列表管。
+    pub(crate) fn drop_selection_missing_from(&mut self, directory: &Path) {
+        let in_directory = |path: &PathBuf| path.parent() == Some(directory);
+        if !self.selected.iter().chain(&self.selected_paths).any(in_directory) {
+            return;
+        }
+        let listed = self
+            .entries
+            .iter()
+            .map(DirectoryEntry::path)
+            .collect::<HashSet<_>>();
+        let missing = |path: &PathBuf| in_directory(path) && !listed.contains(path.as_path());
+        self.selected_paths.retain(|path| !missing(path));
+        if self.selected.as_ref().is_some_and(&missing) {
+            self.selected = None;
+        }
+        if self.selection_anchor.as_ref().is_some_and(&missing) {
+            self.selection_anchor = None;
+        }
+    }
+
     /// 只保留仍是主列表直接条目的选择（切换到/离开图标视图时展开内容不再可见）。
     pub(crate) fn retain_direct_entry_selection(&mut self) {
         retain_direct_entry_selection(

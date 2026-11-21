@@ -168,7 +168,7 @@ impl FileBrowser {
         } else {
             Task::none()
         };
-        let view_switch_reveal = self.complete_pending_view_switch_reveal(&loaded_path);
+        let view_switch_reveal = self.complete_pending_selection_reveal(&loaded_path);
         let command = self.focus_created_entry_for_rename();
         self.resort_size_sorted_list_panes();
         Task::batch([

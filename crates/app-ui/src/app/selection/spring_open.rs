@@ -743,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn breadcrumb_hover_in_columns_view_resets_chain_and_keeps_drag() {
+    fn breadcrumb_hover_in_columns_view_goes_up_on_the_live_chain_and_keeps_drag() {
         let (mut browser, dir_a, _dir_b, _file, workspace) = spring_browser();
         browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
         // 模拟已在 dir_a 内:当前目录、内容与其展开子栏。
@@ -776,8 +776,8 @@ mod tests {
             vec![dir_a.clone(), sub.clone()]
         );
 
-        // 悬停面包屑 workspace 段落(dir_a 的父级),到点导航:栏链重置
-        // 回活链,拖拽存活。
+        // 悬停面包屑 workspace 段落(dir_a 的父级),到点导航:快照作废、
+        // 回到活链(往上走,原来那串栏照旧开着),拖拽存活。
         browser.handle_breadcrumb_drop_target_hovered(workspace.clone());
         assert_eq!(
             browser
@@ -790,7 +790,10 @@ mod tests {
             Instant::now() - FILE_DRAG_SPRING_OPEN_DELAY - Duration::from_millis(1);
         drop(browser.handle_file_drag_spring_open_tick());
         assert_eq!(browser.tab().current_directory().unwrap(), workspace);
-        assert!(browser.tab().expanded_directories.is_empty());
+        assert_eq!(
+            crate::three_column_view::column_directories(&browser),
+            vec![workspace.clone(), dir_a.clone(), sub.clone()]
+        );
         let drag = browser.file_drag.as_ref().unwrap();
         assert!(drag.column_directories_snapshot.is_empty());
         assert!(drag.is_dragging());

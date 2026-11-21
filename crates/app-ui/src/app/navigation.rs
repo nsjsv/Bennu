@@ -188,6 +188,8 @@ impl FileBrowser {
         self.resort_size_sorted_list_panes();
         Task::batch([
             command,
+            // 往上走时选中的子文件夹：列表到了才知道它在哪一行，这时滚到看得见。
+            self.complete_pending_selection_reveal(&path),
             self.clamp_pane_viewports(&[pane_id]),
             self.schedule_thumbnail_refresh_for_pane(pane_id),
             self.schedule_visible_list_directory_summaries_for_pane(pane_id),
@@ -199,6 +201,7 @@ impl FileBrowser {
     }
 
     pub(super) fn navigate_to(&mut self, path: PathBuf, mode: NavigationMode) -> Task<Message> {
+        let came_out_of = self.came_out_of(&path);
         self.cancel_expansion_follow_plans();
         let cancel_address_editing = self.cancel_address_editing();
         let loading_placeholder = self.capture_directory_loading_placeholder();
@@ -236,7 +239,7 @@ impl FileBrowser {
         let (request, cancellation) = self.begin_directory_load(self.active_pane_id(), path);
         // 目录已切换：按新存活树裁剪摘要缓存（内存上界机制）。
         self.prune_list_directory_summaries_to_live_roots();
-        Task::batch([
+        let navigated = Task::batch([
             cancel_address_editing,
             load_directory_command(
                 request,
@@ -245,7 +248,45 @@ impl FileBrowser {
             ),
             self.request_browser_session_save(),
             self.reveal_address_bar_current_segment(self.active_pane_id()),
-        ])
+        ]);
+        match came_out_of {
+            None => navigated,
+            Some(CameOutOf::Columns { folder, selection }) => {
+                Task::batch([navigated, self.reveal_in_columns(folder, selection)])
+            }
+            Some(CameOutOf::Folder(child)) => {
+                self.select_path(child.clone());
+                self.pending_selection_reveal = Some((self.active_pane_id(), child));
+                navigated
+            }
+        }
+    }
+
+    /// 去的是现在所在文件夹的上级（上一级、后退、点面包屑、地址栏都算）时，刚从哪里出来。
+    fn came_out_of(&self, destination: &Path) -> Option<CameOutOf> {
+        let tab = self.tab();
+        let current = tab.current_directory()?;
+        if current == destination || !current.starts_with(destination) {
+            return None;
+        }
+        Some(match tab.view_mode() {
+            BrowserViewMode::Columns => {
+                let folder = tab
+                    .deepest_open_column_directory
+                    .clone()
+                    .unwrap_or_else(|| current.to_path_buf());
+                CameOutOf::Columns {
+                    selection: tab.selected.clone().or_else(|| Some(folder.clone())),
+                    folder,
+                }
+            }
+            BrowserViewMode::List | BrowserViewMode::Icons => CameOutOf::Folder(
+                current
+                    .ancestors()
+                    .find(|ancestor| ancestor.parent() == Some(destination))?
+                    .to_path_buf(),
+            ),
+        })
     }
 
     pub(super) fn open_trash_view(&mut self, mode: NavigationMode) -> Task<Message> {
@@ -668,7 +709,7 @@ impl FileBrowser {
         self.last_activation_click = None;
         self.column_return_targets.clear();
         self.pending_keyboard_column_focus = None;
-        self.pending_view_switch_reveal = None;
+        self.pending_selection_reveal = None;
         self.preview_engine.clear_preview();
         self.context_menu = None;
         self.renaming = None;
@@ -761,6 +802,20 @@ fn directory_load_request_matches_pane(
 ) -> bool {
     request.generation == generation && current_directory == Some(request.path.as_path())
 }
+
+/// 往上级走时刚出来的地方：列表、图标里是途经的那个子文件夹，到了上级选中它；多栏里那串栏
+/// 照旧开着、选中的照旧选中，只是左边多出上级的栏。
+enum CameOutOf {
+    Folder(PathBuf),
+    Columns {
+        folder: PathBuf,
+        selection: Option<PathBuf>,
+    },
+}
+
+#[cfg(test)]
+#[path = "navigation_ancestor_tests.rs"]
+mod ancestor_tests;
 
 #[cfg(test)]
 mod tests {

@@ -134,8 +134,9 @@ async fn revealed_entry_stays_while_clicking_around_and_goes_with_the_first_colu
         home.join("Documents"),
         crate::model::NavigationMode::RecordHistory,
     ));
+    // 回到上级：多栏里那串栏留着（点名的是 Documents），点名过的隐藏 .config 不再列出。
     drop(browser.navigate_to(home.clone(), crate::model::NavigationMode::RecordHistory));
-    assert_eq!(browser.tab().revealed_path, None);
+    assert_eq!(browser.tab().revealed_path, Some(home.join("Documents")));
     assert_eq!(listed_names(&browser, &home).await, ["Documents"]);
 }
 

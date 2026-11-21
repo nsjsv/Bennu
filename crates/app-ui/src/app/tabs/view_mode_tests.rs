@@ -825,7 +825,7 @@ fn switching_from_columns_to_list_reveals_selected_entry_immediately() {
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
 
-    assert_eq!(browser.pending_view_switch_reveal, None);
+    assert_eq!(browser.pending_selection_reveal, None);
     assert!(browser.view_switch_reveal_scroll(&notes).is_some());
 }
 
@@ -842,7 +842,7 @@ fn switching_from_list_to_columns_reveals_selected_entry_immediately() {
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Columns));
 
-    assert_eq!(browser.pending_view_switch_reveal, None);
+    assert_eq!(browser.pending_selection_reveal, None);
     assert!(browser.view_switch_reveal_scroll(&notes).is_some());
 }
 
@@ -859,7 +859,7 @@ fn switching_from_list_to_icons_reveals_selected_entry_immediately() {
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
 
-    assert_eq!(browser.pending_view_switch_reveal, None);
+    assert_eq!(browser.pending_selection_reveal, None);
     assert!(browser.view_switch_reveal_scroll(&notes).is_some());
 }
 
@@ -884,7 +884,7 @@ fn switching_with_loading_directory_parks_pending_reveal() {
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Columns));
 
     assert_eq!(
-        browser.pending_view_switch_reveal,
+        browser.pending_selection_reveal,
         Some((BrowserPaneId::PRIMARY, notes.clone()))
     );
 
@@ -892,13 +892,13 @@ fn switching_with_loading_directory_parks_pending_reveal() {
         project.clone(),
         loaded_directory(vec![test_entry(notes.clone(), FileKind::File)]),
     );
-    drop(browser.complete_pending_view_switch_reveal(&project));
+    drop(browser.complete_pending_selection_reveal(&project));
 
-    assert_eq!(browser.pending_view_switch_reveal, None);
+    assert_eq!(browser.pending_selection_reveal, None);
 }
 
 #[test]
-fn pending_view_switch_reveal_discarded_when_selection_changes() {
+fn pending_selection_reveal_discarded_when_selection_changes() {
     let root = PathBuf::from("/workspace");
     let project = root.join("project");
     let notes = project.join("notes.txt");
@@ -916,13 +916,13 @@ fn pending_view_switch_reveal_discarded_when_selection_changes() {
         .insert(project.clone(), loading);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Columns));
-    assert!(browser.pending_view_switch_reveal.is_some());
+    assert!(browser.pending_selection_reveal.is_some());
 
     browser.tab_mut().selected = None;
     browser.tab_mut().selected_paths.clear();
-    drop(browser.complete_pending_view_switch_reveal(&project));
+    drop(browser.complete_pending_selection_reveal(&project));
 
-    assert_eq!(browser.pending_view_switch_reveal, None);
+    assert_eq!(browser.pending_selection_reveal, None);
 }
 
 #[test]
@@ -934,5 +934,5 @@ fn switching_without_selection_skips_pending_reveal() {
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
 
-    assert_eq!(browser.pending_view_switch_reveal, None);
+    assert_eq!(browser.pending_selection_reveal, None);
 }

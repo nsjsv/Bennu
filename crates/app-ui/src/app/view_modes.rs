@@ -138,7 +138,7 @@ impl FileBrowser {
 
     /// 视图切换后让主选中项在新视图中可见；切到多栏时同时横向滚到选中列。
     fn reveal_selected_after_view_switch(&mut self) -> Task<Message> {
-        self.pending_view_switch_reveal = None;
+        self.pending_selection_reveal = None;
         let Some(path) = self.tab().selected.clone() else {
             return Task::none();
         };
@@ -147,7 +147,7 @@ impl FileBrowser {
             Some(task) => task,
             // 选中项所在目录仍在加载：挂起等待加载完成后补聚焦
             None => {
-                self.pending_view_switch_reveal = Some((pane_id, path.clone()));
+                self.pending_selection_reveal = Some((pane_id, path.clone()));
                 Task::none()
             }
         };
@@ -724,7 +724,7 @@ impl FileBrowser {
             match self.view_switch_reveal_scroll(&target_selection) {
                 Some(task) => return task,
                 None => {
-                    self.pending_view_switch_reveal =
+                    self.pending_selection_reveal =
                         Some((self.active_pane_id(), target_selection));
                 }
             }
@@ -964,17 +964,17 @@ impl FileBrowser {
     }
 
     /// 目录加载完成后补做视图切换聚焦：匹配挂起的选中项时纵向定位一次。
-    pub(super) fn complete_pending_view_switch_reveal(
+    pub(super) fn complete_pending_selection_reveal(
         &mut self,
         loaded_path: &Path,
     ) -> Task<Message> {
-        let Some((pane_id, path)) = self.pending_view_switch_reveal.clone() else {
+        let Some((pane_id, path)) = self.pending_selection_reveal.clone() else {
             return Task::none();
         };
         if pane_id != self.active_pane_id() || path.parent() != Some(loaded_path) {
             return Task::none();
         }
-        self.pending_view_switch_reveal = None;
+        self.pending_selection_reveal = None;
         if self.tab().selected.as_deref() != Some(path.as_path()) {
             return Task::none();
         }
@@ -982,7 +982,7 @@ impl FileBrowser {
             Some(task) => task,
             // 链式展开仍在继续：保留等待最后一环加载
             None => {
-                self.pending_view_switch_reveal = Some((pane_id, path));
+                self.pending_selection_reveal = Some((pane_id, path));
                 Task::none()
             }
         }

@@ -90,7 +90,7 @@ impl FileBrowser {
                 match self.view_switch_reveal_scroll(&path) {
                     Some(task) => task,
                     None => {
-                        self.pending_view_switch_reveal = Some((self.active_pane_id(), path));
+                        self.pending_selection_reveal = Some((self.active_pane_id(), path));
                         Task::none()
                     }
                 }

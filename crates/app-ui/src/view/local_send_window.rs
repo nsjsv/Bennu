@@ -1,7 +1,7 @@
 //! LocalSend 窗口：打开就能发。上面选要发的（文件或文字），中间点一台设备就发过去，
 //! 底下是本机能不能被找到。传输记录、从手机接收在顶栏两边。
 
-use iced::widget::{button, column, container, row, scrollable, tooltip, Column, Space};
+use iced::widget::{button, column, container, row, scrollable, Column, Space};
 use iced::{Alignment, Background, Element, Length, Theme};
 
 use crate::app::transfer::{
@@ -16,7 +16,7 @@ use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_preview::window_shell::HeaderBar;
 use bennu_theme::controls::{
-    icon_button, icon_button_style, normal_button, switch, text_area, toggle_button_style,
+    icon_button, icon_button_style, normal_button, switch, text_area, toggle_button_style, tooltip,
     tooltip_bubble_style,
 };
 use bennu_theme::icons::IconSymbol;
@@ -107,7 +107,7 @@ fn header_button(
         container(readable_text(label).size(CAPTION_SIZE))
             .padding([5, 7])
             .style(tooltip_bubble_style),
-        tooltip::Position::Bottom,
+        iced::widget::tooltip::Position::Bottom,
     )
     .into()
 }

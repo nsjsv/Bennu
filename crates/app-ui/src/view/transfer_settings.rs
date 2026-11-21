@@ -1,13 +1,12 @@
 //! 设置 → 传输：接收开关与原因、接收确认、PIN、端口、接收目录、设备名、收藏设备。
 
-use iced::widget::tooltip;
 use iced::Element;
 
 use crate::app::transfer::{receiver_failure_message, TransferMessage};
 use crate::app::FileBrowser;
 use crate::config::{TransferAcceptMode, TRANSFER_PORT_RANGE};
 use crate::model::Message;
-use bennu_theme::controls::{icon_button, tooltip_bubble, SegmentedChoice};
+use bennu_theme::controls::{icon_button, tooltip, tooltip_bubble, SegmentedChoice};
 use bennu_theme::icons::IconSymbol;
 
 use super::settings_group::{
@@ -153,7 +152,7 @@ fn receive_directory_row(browser: &FileBrowser) -> SettingsRow<'_> {
             TransferMessage::DownloadDirChooserPressed,
         )),
         tooltip_bubble(tr!("Choose directory")),
-        tooltip::Position::Left,
+        iced::widget::tooltip::Position::Left,
     )
     .into();
     entry_row(EntryRow {

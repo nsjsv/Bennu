@@ -1,7 +1,7 @@
 //! 转换对话框：最上面快捷设置，中间每类媒体一块卡片，下面保存位置。
 //! 次要选项都收在每块卡片的「更多」里，默认只露格式和质量。
 
-use iced::widget::{row, tooltip};
+use iced::widget::row;
 use iced::{Alignment, Element, Length};
 
 use crate::app::convert::ConvertMessage;
@@ -10,8 +10,8 @@ use crate::model::{
 };
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::{
-    icon_button, normal_button, segmented_choice_row, suggested_button, text_field, tooltip_bubble,
-    SegmentedChoice,
+    icon_button, normal_button, segmented_choice_row, suggested_button, text_field, tooltip,
+    tooltip_bubble, SegmentedChoice,
 };
 use bennu_theme::icons::IconSymbol;
 
@@ -90,7 +90,7 @@ fn output_field(state: &ConvertState) -> Element<'_, Message> {
         ))
         .on_press(Message::Convert(ConvertMessage::OutputDirectoryBrowse)),
         tooltip_bubble(tr!("Choose directory")),
-        tooltip::Position::Left,
+        iced::widget::tooltip::Position::Left,
     );
     dialog::field(
         tr!("Save to"),

@@ -2,10 +2,12 @@
 //! （页码框里输数字回车跳页）；顶上是搜索条（Ctrl+F），页上画匹配和拖选的文字。
 //! 事件滚动接线经 ScrollRegionWiring 由宿主注入。
 
-use iced::widget::{button, container, image, row, text, tooltip, Column, Space, Stack};
+use iced::widget::{button, container, image, row, text, Column, Space, Stack};
 use iced::{Alignment, ContentFit, Element, Length};
 
-use bennu_theme::controls::{icon_button, text_field, toggle_button_style, tooltip_bubble};
+use bennu_theme::controls::{
+    icon_button, text_field, toggle_button_style, tooltip, tooltip_bubble,
+};
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::preview_styles::document_page_style;
 use bennu_theme::scrollbar::enhanced_scrollbar_both;
@@ -193,7 +195,7 @@ where
                 .style(toggle_button_style(search.case_sensitive))
                 .on_press(text_message(DocumentTextMessage::CaseToggled)),
             tooltip_bubble(tr!("Match case")),
-            tooltip::Position::Bottom,
+            iced::widget::tooltip::Position::Bottom,
         ),
         text(status).size(CAPTION_SIZE),
         arrow(IconSymbol::ArrowUp, SearchDirection::Backward),

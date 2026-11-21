@@ -2,7 +2,7 @@ use file_search::{
     IndexHealth, IndexPhase, IndexedQueryAvailability, SearchPathConfigurationPhase,
     SearchRootAvailability, SearchServicePhase, SearchServiceStatus,
 };
-use iced::widget::{tooltip, Column};
+use iced::widget::Column;
 use iced::{Element, Length};
 
 use crate::app::FileBrowser;
@@ -13,7 +13,7 @@ use crate::model::{
     SearchServiceRecoveryState,
 };
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::controls::{icon_button, normal_button, tooltip_bubble};
+use bennu_theme::controls::{icon_button, normal_button, tooltip, tooltip_bubble};
 use bennu_theme::icons::IconSymbol;
 
 use super::settings_group::{
@@ -200,7 +200,7 @@ fn search_path_row<'a>(
         ))
         .on_press(Message::SearchPathEntryRemoved(kind, path.to_path_buf())),
         tooltip_bubble(tr!("Remove location")),
-        tooltip::Position::Left,
+        iced::widget::tooltip::Position::Left,
     );
     control_row(
         format_middle_ellipsized_text(&path.to_string_lossy(), 72),
@@ -226,7 +226,7 @@ fn search_path_input_row(
     let chooser: Element<'_, Message> = tooltip(
         chooser,
         tooltip_bubble(tr!("Choose directory")),
-        tooltip::Position::Left,
+        iced::widget::tooltip::Position::Left,
     )
     .into();
     entry_row(EntryRow {

@@ -23,13 +23,13 @@ use crate::sidebar_devices::SidebarDeviceEntry;
 use bennu_preview::panel_text::readable_text;
 use bennu_sidebar::SidebarLocationKind;
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::measured_text::measured_middle_ellipsized_text_with_hint;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use iced::alignment::Vertical;
 
 use super::local_send_tiles::device_icon;
 use super::{tab_motion, themed_icon, IconTone, MENU_ICON_SIZE};
-use bennu_theme::controls::{icon_button, icon_button_style};
+use bennu_theme::controls::{full_name_bubble, icon_button, icon_button_style};
 use bennu_theme::typography::{BODY_SIZE, BOLD, CAPTION_SIZE};
 
 /// 位置行图标。侧边栏数据 crate 不依赖图标词汇，映射由两个宿主的视图各持一份
@@ -681,10 +681,15 @@ impl SidebarPresentation {
     }
 }
 
+/// 侧栏一行放不下的名字、说明：中间省略，鼠标停一会儿显示全文。
+fn ellipsized_with_full_text(content: String, size: f32) -> Element<'static, Message> {
+    measured_middle_ellipsized_text_with_hint(content.clone(), size, full_name_bubble(content))
+}
+
 fn sidebar_label(icon: IconSymbol, label: &str, tone: IconTone) -> Row<'static, Message> {
     row![
         themed_icon(icon, tone, MENU_ICON_SIZE),
-        measured_middle_ellipsized_text(label.to_owned(), BODY_SIZE)
+        ellipsized_with_full_text(label.to_owned(), BODY_SIZE)
     ]
     .spacing(SIDEBAR_LABEL_SPACING)
     .align_y(Alignment::Center)
@@ -699,8 +704,8 @@ fn sidebar_device_label(
     row![
         themed_icon(IconSymbol::HardDrive, tone, MENU_ICON_SIZE),
         column![
-            measured_middle_ellipsized_text(device.label.clone(), BODY_SIZE),
-            measured_middle_ellipsized_text(detail, CAPTION_SIZE)
+            ellipsized_with_full_text(device.label.clone(), BODY_SIZE),
+            ellipsized_with_full_text(detail, CAPTION_SIZE)
         ]
         .spacing(1)
         .width(Length::Fill)
@@ -718,8 +723,8 @@ fn sidebar_network_connection_label(
     row![
         themed_icon(IconSymbol::Link, tone, MENU_ICON_SIZE),
         column![
-            measured_middle_ellipsized_text(connection.label(), BODY_SIZE),
-            measured_middle_ellipsized_text(detail, CAPTION_SIZE)
+            ellipsized_with_full_text(connection.label(), BODY_SIZE),
+            ellipsized_with_full_text(detail, CAPTION_SIZE)
         ]
         .spacing(1)
         .width(Length::Fill)

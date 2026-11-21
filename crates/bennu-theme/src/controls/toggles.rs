@@ -2,10 +2,12 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use iced::widget::{button, checkbox, container, row, text, tooltip, Checkbox, Row, Space};
+use iced::widget::{
+    button, checkbox, container, row, text, tooltip as iced_tooltip, Checkbox, Row, Space,
+};
 use iced::{Alignment, Background, Border, Element, Length, Shadow, Theme, Vector};
 
-use super::feedback::tooltip_bubble;
+use super::feedback::{tooltip, tooltip_bubble};
 use super::{foreground_tint, knob_color, raised_surface};
 use crate::metrics::{CHECKBOX_RADIUS, CONTROL_HEIGHT, CONTROL_RADIUS};
 use crate::styles::{elevation_shadow_color, muted_text_color};
@@ -88,7 +90,12 @@ fn segment<'a, Message: Clone + 'a>(choice: SegmentedChoice<Message>) -> Element
         segment = segment.on_press(message);
     }
     match choice.tooltip {
-        Some(hint) => tooltip(segment, tooltip_bubble(hint), tooltip::Position::Bottom).into(),
+        Some(hint) => tooltip(
+            segment,
+            tooltip_bubble(hint),
+            iced_tooltip::Position::Bottom,
+        )
+        .into(),
         None => segment.into(),
     }
 }

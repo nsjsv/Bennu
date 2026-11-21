@@ -134,7 +134,7 @@ fn row_icon_button(
     tooltip: String,
     message: Message,
 ) -> Element<'static, Message> {
-    iced::widget::tooltip(
+    bennu_theme::controls::tooltip(
         icon_button(themed_icon(icon, IconTone::Normal, ROW_ICON_SIZE)).on_press(message),
         tooltip_bubble(tooltip),
         iced::widget::tooltip::Position::Left,

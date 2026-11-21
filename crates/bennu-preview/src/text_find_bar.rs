@@ -5,14 +5,16 @@
 //! 对自己的子树跑一次焦点操作得出，不另记状态。
 
 use bennu_localization::tr;
-use bennu_theme::controls::{icon_button, text_field, toggle_button_style, tooltip_bubble};
+use bennu_theme::controls::{
+    icon_button, text_field, toggle_button_style, tooltip, tooltip_bubble,
+};
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::typography::CAPTION_SIZE;
 use bennu_theme::ui_colors;
 use iced::advanced::widget::operation::{Focusable, Operation, Outcome};
 use iced::advanced::{layout, mouse, overlay, renderer, widget, Clipboard, Layout, Shell, Widget};
 use iced::keyboard::{self, key};
-use iced::widget::{button, container, row, text, tooltip};
+use iced::widget::{button, container, row, text};
 use iced::{Alignment, Element, Event, Length, Padding, Rectangle, Size, Task, Vector};
 
 use crate::preview_message::PreviewMessage;
@@ -153,7 +155,7 @@ where
             .style(toggle_button_style(query.case_sensitive))
             .on_press(find_message(FindEvent::CaseToggled)),
         tooltip_bubble(tr!("Match case")),
-        tooltip::Position::Bottom,
+        iced::widget::tooltip::Position::Bottom,
     );
     let arrow = |symbol, direction| {
         icon_button(themed_icon(symbol, IconTone::Normal, ICON_SIZE))

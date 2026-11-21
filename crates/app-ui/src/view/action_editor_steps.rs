@@ -113,7 +113,7 @@ fn step_button(
 ) -> Element<'static, Message> {
     let button = icon_button(themed_icon(icon, IconTone::Normal, ROW_ICON_SIZE))
         .on_press_maybe(edit_on_press.map(edit));
-    iced::widget::tooltip(
+    bennu_theme::controls::tooltip(
         button,
         tooltip_bubble(tooltip),
         iced::widget::tooltip::Position::Top,

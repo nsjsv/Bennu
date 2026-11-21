@@ -27,9 +27,12 @@ use crate::model::{
 use crate::view::{pane_blank_area, rename_field, rename_input_id};
 use crate::virtual_range::{both_quiet, covered_offsets};
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::full_name_bubble;
 use bennu_theme::controls::inline_text_field;
 use bennu_theme::icons::rotated_chevron_right_view;
-use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::measured_text::{
+    measured_middle_ellipsized_text, measured_middle_ellipsized_text_with_hint,
+};
 use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::{BODY_SIZE, CAPTION_SIZE};
@@ -844,9 +847,11 @@ fn list_name_cell<'a>(
     } else if let Some(name) = search_rows::emphasized_name(pane, entry, geometry.text_size) {
         name
     } else {
-        measured_middle_ellipsized_text(
-            entry.name().to_string_lossy().into_owned(),
+        let name = entry.name().to_string_lossy().into_owned();
+        measured_middle_ellipsized_text_with_hint(
+            name.clone(),
             geometry.text_size,
+            full_name_bubble(name),
         )
     };
 

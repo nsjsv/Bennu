@@ -7,8 +7,6 @@ use iced::{alignment, Element, Font, Length, Pixels, Point, Rectangle, Size};
 mod emphasis;
 mod tooltip;
 
-pub use tooltip::measured_middle_ellipsized_wrapped_text_with_tooltip;
-
 const ELLIPSIS_MARKER: &str = "...";
 const TEXT_MEASUREMENT_WIDTH: f32 = 100_000.0;
 const TEXT_MEASUREMENT_HEIGHT: f32 = 10_000.0;
@@ -21,32 +19,41 @@ pub fn measured_middle_ellipsized_text<'a, Message>(
 where
     Message: 'a,
 {
-    Element::new(
-        MeasuredMiddleEllipsizedText::new(content)
-            .size(size)
-            .width(Length::Fill),
-    )
+    Element::new(MeasuredMiddleEllipsizedText::single_line(content, size))
 }
 
-/// 有加粗片段的单行变体：`emphasized` 是原文里的字节区间（按顺序、不重叠、落在字符边界上），
-/// 省略后只加粗还看得见的部分。
-pub fn measured_middle_ellipsized_emphasized_text<'a, Message>(
+/// 单行变体，被省略时鼠标停一会儿显示 `hint`（完整的名字）。
+pub fn measured_middle_ellipsized_text_with_hint<'a, Message>(
     content: impl Into<String>,
-    emphasized: Vec<Range<usize>>,
     size: f32,
+    hint: impl Into<Element<'a, Message>>,
 ) -> Element<'a, Message>
 where
     Message: 'a,
 {
-    let mut text = MeasuredMiddleEllipsizedText::new(content)
-        .size(size)
-        .width(Length::Fill);
-    text.emphasized = emphasized;
-    Element::new(text)
+    tooltip::with_hint(
+        MeasuredMiddleEllipsizedText::single_line(content, size),
+        hint,
+    )
 }
 
-/// 网格瓦片用的居中变体:与带 tooltip 版的文本配置一致(对齐/换行/行高),
-/// 只去掉悬停浮层——占位行等纯展示场景用。
+/// 有加粗片段的单行变体：`emphasized` 是原文里的字节区间（按顺序、不重叠、落在字符边界上），
+/// 省略后只加粗还看得见的部分。被省略时鼠标停一会儿显示 `hint`。
+pub fn measured_middle_ellipsized_emphasized_text_with_hint<'a, Message>(
+    content: impl Into<String>,
+    emphasized: Vec<Range<usize>>,
+    size: f32,
+    hint: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    let mut text = MeasuredMiddleEllipsizedText::single_line(content, size);
+    text.emphasized = emphasized;
+    tooltip::with_hint(text, hint)
+}
+
+/// 网格瓦片用的居中、可换行变体——占位瓦片等纯展示场景用。
 pub fn measured_middle_ellipsized_centered_text<'a, Message>(
     content: impl Into<String>,
     size: f32,
@@ -55,14 +62,26 @@ pub fn measured_middle_ellipsized_centered_text<'a, Message>(
 where
     Message: 'a,
 {
-    Element::new(
-        MeasuredMiddleEllipsizedText::file_name(content)
-            .size(size)
-            .line_height(text::LineHeight::Absolute(Pixels(line_height_pixels)))
-            .wrapping(text::Wrapping::WordOrGlyph)
-            .align_x(text::Alignment::Center)
-            .width(Length::Fill)
-            .height(Length::Fill),
+    Element::new(MeasuredMiddleEllipsizedText::centered(
+        content,
+        size,
+        line_height_pixels,
+    ))
+}
+
+/// 居中变体，被省略时鼠标停一会儿显示 `hint`：网格里的名字。
+pub fn measured_middle_ellipsized_centered_text_with_hint<'a, Message>(
+    content: impl Into<String>,
+    size: f32,
+    line_height_pixels: f32,
+    hint: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    tooltip::with_hint(
+        MeasuredMiddleEllipsizedText::centered(content, size, line_height_pixels),
+        hint,
     )
 }
 
@@ -76,13 +95,7 @@ pub fn measured_middle_ellipsized_centered_emphasized_text<'a, Message>(
 where
     Message: 'a,
 {
-    let mut text = MeasuredMiddleEllipsizedText::file_name(content)
-        .size(size)
-        .line_height(text::LineHeight::Absolute(Pixels(line_height_pixels)))
-        .wrapping(text::Wrapping::WordOrGlyph)
-        .align_x(text::Alignment::Center)
-        .width(Length::Fill)
-        .height(Length::Fill);
+    let mut text = MeasuredMiddleEllipsizedText::centered(content, size, line_height_pixels);
     text.emphasized = emphasized;
     Element::new(text)
 }
@@ -113,6 +126,22 @@ impl MeasuredMiddleEllipsizedText {
 
     fn file_name(content: impl Into<String>) -> Self {
         Self::with_ellipsis_kind(content, MiddleEllipsisKind::FileName)
+    }
+
+    /// 占满一行宽的单行字。
+    fn single_line(content: impl Into<String>, size: f32) -> Self {
+        Self::new(content).size(size).width(Length::Fill)
+    }
+
+    /// 网格瓦片里居中、可换成几行的名字。
+    fn centered(content: impl Into<String>, size: f32, line_height_pixels: f32) -> Self {
+        Self::file_name(content)
+            .size(size)
+            .line_height(text::LineHeight::Absolute(Pixels(line_height_pixels)))
+            .wrapping(text::Wrapping::WordOrGlyph)
+            .align_x(text::Alignment::Center)
+            .width(Length::Fill)
+            .height(Length::Fill)
     }
 
     fn with_ellipsis_kind(content: impl Into<String>, ellipsis_kind: MiddleEllipsisKind) -> Self {

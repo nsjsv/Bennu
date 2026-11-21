@@ -1,4 +1,4 @@
-use iced::widget::{button, container, mouse_area, row, scrollable, tooltip, Column};
+use iced::widget::{button, container, mouse_area, row, scrollable, Column};
 use iced::{Alignment, Element, Length};
 
 use super::{themed_icon, IconTone};
@@ -12,8 +12,8 @@ use crate::formatting::format_middle_ellipsized_text;
 use crate::model::{Message, ScrollbarRegion};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::anchored_popup;
-use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::text_field;
+use bennu_theme::controls::{icon_button_style, tooltip};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 use bennu_theme::typography::CAPTION_SIZE;
@@ -57,7 +57,7 @@ pub(super) fn search_input_panel(browser: &FileBrowser) -> Element<'_, Message> 
                     .padding([8, 8])
                     .style(icon_button_style),
                 tooltip_label(tr!("Clear search text")),
-                tooltip::Position::Bottom,
+                iced::widget::tooltip::Position::Bottom,
             )
         ]
         .spacing(4)
@@ -126,7 +126,7 @@ fn search_history_row(keyword: &str) -> Element<'static, Message> {
             .padding([6, 7])
             .style(icon_button_style),
         tooltip_label(tr!("Remove from search history")),
-        tooltip::Position::Bottom,
+        iced::widget::tooltip::Position::Bottom,
     );
 
     container(

@@ -29,9 +29,9 @@ use crate::virtual_range::{
     covered_offsets, initial_virtual_range, virtual_range_for_viewport, VirtualRange,
 };
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::controls::inline_text_field;
+use bennu_theme::controls::{full_name_bubble, inline_text_field};
 use bennu_theme::icons::IconSymbol;
-use bennu_theme::measured_text::measured_middle_ellipsized_text;
+use bennu_theme::measured_text::measured_middle_ellipsized_text_with_hint;
 use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
 
@@ -463,9 +463,11 @@ fn column_entry_row<'a>(
             browser.active_language(),
         )
     } else {
-        container(measured_middle_ellipsized_text(
-            entry.name().to_string_lossy().into_owned(),
+        let name = entry.name().to_string_lossy().into_owned();
+        container(measured_middle_ellipsized_text_with_hint(
+            name.clone(),
             geometry.text_size,
+            full_name_bubble(name),
         ))
         .style(visual_state.content_style(modifier))
         .into()

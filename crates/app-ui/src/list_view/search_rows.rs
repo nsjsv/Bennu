@@ -12,8 +12,9 @@ use crate::app::panes::BrowserPaneView;
 use crate::file_entry_view::FileEntryVisualState;
 use crate::model::{FileEntryContentModifier, Message, SearchHitDetail};
 use crate::search_result_text::{emphasized_spans, location_text};
+use bennu_theme::controls::full_name_bubble;
 use bennu_theme::measured_text::{
-    measured_middle_ellipsized_emphasized_text, measured_middle_ellipsized_text,
+    measured_middle_ellipsized_emphasized_text_with_hint, measured_middle_ellipsized_text,
 };
 use bennu_theme::typography::CAPTION_SIZE;
 
@@ -44,10 +45,12 @@ pub(super) fn emphasized_name<'a>(
     if detail.name_highlights.is_empty() {
         return None;
     }
-    Some(measured_middle_ellipsized_emphasized_text(
-        entry.name().to_string_lossy().into_owned(),
+    let name = entry.name().to_string_lossy().into_owned();
+    Some(measured_middle_ellipsized_emphasized_text_with_hint(
+        name.clone(),
         detail.name_highlights.clone(),
         text_size,
+        full_name_bubble(name),
     ))
 }
 

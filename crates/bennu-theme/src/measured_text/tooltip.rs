@@ -1,34 +1,19 @@
-use std::time::Duration;
-
 use iced::advanced::{layout, overlay, renderer, text, widget, Clipboard, Layout, Shell, Widget};
 use iced::widget::{tooltip, Tooltip};
-use iced::{Element, Event, Length, Pixels, Rectangle, Size, Vector};
+use iced::{Element, Event, Length, Rectangle, Size, Vector};
 
 use super::{
     displayed_content_is_ellipsized, MeasuredMiddleEllipsizedText,
     MeasuredMiddleEllipsizedTextState,
 };
 
-pub fn measured_middle_ellipsized_wrapped_text_with_tooltip<'a, Message>(
-    content: impl Into<String>,
-    size: f32,
-    line_height_pixels: f32,
-    tooltip_content: impl Into<Element<'a, Message>>,
-    delay: Duration,
-) -> Element<'a, Message>
-where
-    Message: 'a,
-{
-    let content = content.into();
-    let text = MeasuredMiddleEllipsizedText::file_name(content.clone())
-        .size(size)
-        .line_height(text::LineHeight::Absolute(Pixels(line_height_pixels)))
-        .wrapping(text::Wrapping::WordOrGlyph)
-        .align_x(text::Alignment::Center)
-        .width(Length::Fill)
-        .height(Length::Fill);
-    let tooltip = Tooltip::new(text, tooltip_content, tooltip::Position::Bottom).delay(delay);
-
+/// 文字被省略了，鼠标停一会儿（`TOOLTIP_DELAY`）显示 `hint`；没被省略的不出提示。
+pub(super) fn with_hint<'a, Message: 'a>(
+    text: MeasuredMiddleEllipsizedText,
+    hint: impl Into<Element<'a, Message>>,
+) -> Element<'a, Message> {
+    let content = text.content.clone();
+    let tooltip = crate::controls::tooltip(text, hint, tooltip::Position::Bottom);
     Element::new(EllipsizedTextTooltip { content, tooltip })
 }
 
@@ -210,27 +195,25 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for EllipsizedTextToo
 
 #[cfg(test)]
 mod tests {
-    use super::{measured_middle_ellipsized_wrapped_text_with_tooltip, EllipsizedTextTooltipState};
+    use super::super::measured_middle_ellipsized_centered_text_with_hint;
+    use super::EllipsizedTextTooltipState;
     use iced::advanced::widget::Tree;
     use iced::Element;
-    use std::time::Duration;
 
     #[test]
     fn diff_tracks_content_identity_for_delay_reset() {
-        let first: Element<'_, ()> = measured_middle_ellipsized_wrapped_text_with_tooltip(
+        let first: Element<'_, ()> = measured_middle_ellipsized_centered_text_with_hint(
             "first-long-name.txt",
             12.0,
             16.0,
             "first tooltip",
-            Duration::from_millis(500),
         );
         let mut tree = Tree::new(first.as_widget());
-        let second: Element<'_, ()> = measured_middle_ellipsized_wrapped_text_with_tooltip(
+        let second: Element<'_, ()> = measured_middle_ellipsized_centered_text_with_hint(
             "second-long-name.txt",
             12.0,
             16.0,
             "second tooltip",
-            Duration::from_millis(500),
         );
 
         tree.diff(second.as_widget());

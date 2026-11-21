@@ -1,19 +1,16 @@
 use std::path::Path;
-use std::time::Duration;
 
 use file_core::DirectoryEntry;
 use iced::alignment::{Horizontal, Vertical};
-use iced::widget::{
-    button, container, mouse_area, scrollable, text, tooltip, Column, Row, Space, Stack,
-};
+use iced::widget::{button, container, mouse_area, scrollable, Column, Row, Space, Stack};
 use iced::{Alignment, Element, Length};
 
 use crate::app::panes::{BrowserPaneView, DirectoryContentAvailability};
 use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
 use crate::app::FileBrowser;
 use crate::appearance::{
-    context_menu_style, enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction,
-    group_header_style, icon_grid_expansion_panel_style, icon_svg_style, list_panel_style,
+    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, group_header_style,
+    icon_grid_expansion_panel_style, icon_svg_style, list_panel_style,
 };
 use crate::column_entry_bounds::track_column_entry_bounds;
 use crate::file_drag_hit_test_bounds::FileDragHitTestMarker;
@@ -38,12 +35,12 @@ use crate::model::{IconGridExpansionAnchor, IconGridViewport, Message, Scrollbar
 use crate::view::{pane_blank_area, rename_field, rename_input_id};
 use crate::virtual_range::both_quiet;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::controls::icon_button_style;
 use bennu_theme::controls::inline_text_field;
+use bennu_theme::controls::{full_name_bubble, icon_button_style, tooltip, tooltip_bubble};
 use bennu_theme::icons::rotated_chevron_right_view;
 use bennu_theme::measured_text::{
     measured_middle_ellipsized_centered_emphasized_text,
-    measured_middle_ellipsized_wrapped_text_with_tooltip,
+    measured_middle_ellipsized_centered_text_with_hint,
 };
 use bennu_theme::scroll_report::report_scroll;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
@@ -54,7 +51,6 @@ const DISCLOSURE_BUTTON_SIZE: f32 = 24.0;
 const DISCLOSURE_ICON_SIZE: f32 = 14.0;
 const PANEL_INDICATOR_SIZE: f32 = 14.0;
 const ICON_GRID_NAME_TOOLTIP_WIDTH: f32 = 320.0;
-const ICON_GRID_NAME_TOOLTIP_DELAY: Duration = Duration::from_millis(500);
 /// 分组标题条字号:与列表组头同族的 12px 面板 chrome 文字。
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -464,10 +460,8 @@ fn icon_grid_entry<'a>(
             };
             let disclosure_button = tooltip(
                 disclosure_button,
-                container(readable_text(label).size(CAPTION_SIZE))
-                    .padding([5, 7])
-                    .style(context_menu_style),
-                tooltip::Position::Bottom,
+                tooltip_bubble(label),
+                iced::widget::tooltip::Position::Bottom,
             );
             let disclosure_overlay = container(disclosure_button)
                 .width(Length::Fill)
@@ -520,26 +514,16 @@ fn icon_grid_entry<'a>(
                 &browser.home_dir,
                 ICON_GRID_NAME_TOOLTIP_WIDTH,
             ),
-            tooltip::Position::Bottom,
+            iced::widget::tooltip::Position::Bottom,
         )
-        .delay(ICON_GRID_NAME_TOOLTIP_DELAY)
         .into()
     } else {
         let full_name = entry.name().to_string_lossy().into_owned();
-        let full_name_tooltip = container(
-            readable_text(full_name.clone())
-                .wrapping(text::Wrapping::WordOrGlyph)
-                .width(Length::Fill),
-        )
-        .padding([5, 7])
-        .width(Length::Fixed(ICON_GRID_NAME_TOOLTIP_WIDTH))
-        .style(context_menu_style);
-        container(measured_middle_ellipsized_wrapped_text_with_tooltip(
-            full_name,
+        container(measured_middle_ellipsized_centered_text_with_hint(
+            full_name.clone(),
             label_size(icon_edge),
             label_line_height(icon_edge),
-            full_name_tooltip,
-            ICON_GRID_NAME_TOOLTIP_DELAY,
+            full_name_bubble(full_name),
         ))
         .style(visual_state.content_style(content_modifier))
         .width(Length::Fill)

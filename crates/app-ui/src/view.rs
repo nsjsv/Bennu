@@ -105,6 +105,7 @@ use crate::operation_queue_view::{
 use crate::selection_marquee::selection_marquee_layer;
 use crate::three_column_view::column_browser_view;
 use bennu_preview::panel_text::readable_text;
+use bennu_theme::controls::{full_name_bubble, tooltip};
 use bennu_theme::icons::IconSymbol;
 
 use self::network_connections::network_connection_editor_panel;
@@ -1034,7 +1035,7 @@ fn search_tab_title(search: &crate::model::SearchWorkspaceState) -> String {
     if terms.is_empty() {
         tr!("Search")
     } else {
-        format_middle_ellipsized_text(&tr!("Search “%1”", terms), TAB_LABEL_MAX_CHARS)
+        tr!("Search “%1”", terms)
     }
 }
 
@@ -1042,22 +1043,30 @@ fn directory_title_content<'a>(directory: &Path) -> Row<'a, Message> {
     title_row(IconSymbol::Folder, tab_title_text(directory))
 }
 
+/// 标题太长时中间省略到 `TAB_LABEL_MAX_CHARS` 个字，鼠标停一会儿显示全文。
 fn title_row<'a>(symbol: IconSymbol, title: String) -> Row<'a, Message> {
-    row![
-        themed_icon(symbol, IconTone::Normal, TAB_ICON_SIZE),
-        readable_text(title),
-    ]
-    .spacing(6)
-    .align_y(Alignment::Center)
+    let shown = format_middle_ellipsized_text(&title, TAB_LABEL_MAX_CHARS);
+    let label: Element<'a, Message> = if shown == title {
+        readable_text(shown).into()
+    } else {
+        tooltip(
+            readable_text(shown),
+            full_name_bubble(title),
+            iced::widget::tooltip::Position::Bottom,
+        )
+        .into()
+    };
+    row![themed_icon(symbol, IconTone::Normal, TAB_ICON_SIZE), label]
+        .spacing(6)
+        .align_y(Alignment::Center)
 }
 
 fn tab_title_text(directory: &Path) -> String {
-    let title = directory
+    directory
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| directory.to_string_lossy().into_owned());
-    format_middle_ellipsized_text(&title, TAB_LABEL_MAX_CHARS)
+        .unwrap_or_else(|| directory.to_string_lossy().into_owned())
 }
 
 /// 图标颜色向背景色褪色(fade 0=原色,1=完全融入背景):拖拽堆叠的

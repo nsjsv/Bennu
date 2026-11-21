@@ -2,10 +2,10 @@
 //! 所有窗口经 `window_shell` 共用这一份实现；按钮消息属于宿主，经闭包注入。
 
 use bennu_localization::tr;
-use iced::widget::{button, tooltip, Row};
+use iced::widget::{button, Row};
 use iced::{window, Background, Element, Length};
 
-use bennu_theme::controls::tooltip_bubble;
+use bennu_theme::controls::{tooltip, tooltip_bubble};
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::window_chrome_styles::{window_control_button_style, WINDOW_CONTROL_SIZE};
 use bennu_theme::window_controls::{
@@ -105,5 +105,10 @@ fn with_tooltip<Message: Clone + 'static>(
     control: iced::widget::Button<'static, Message>,
     label: String,
 ) -> Element<'static, Message> {
-    tooltip(control, tooltip_bubble(label), tooltip::Position::Bottom).into()
+    tooltip(
+        control,
+        tooltip_bubble(label),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
 }

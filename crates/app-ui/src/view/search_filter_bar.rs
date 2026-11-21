@@ -3,7 +3,7 @@
 //! 所有筛选始终看得见。
 
 use file_search::{SearchMatchMode, SearchTextScope};
-use iced::widget::{button, container, row, tooltip, Column, Row, Space};
+use iced::widget::{button, container, row, Column, Row, Space};
 use iced::{Alignment, Element, Length};
 
 use super::search_panel::tooltip_label;
@@ -19,7 +19,8 @@ use crate::model::{
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::anchored_popup::{anchored_dropdown, dismiss_on_outside_press};
 use bennu_theme::controls::{
-    icon_button_style, segmented_choice_row, text_field, toggle_button_style, SegmentedChoice,
+    icon_button_style, segmented_choice_row, text_field, toggle_button_style, tooltip,
+    SegmentedChoice,
 };
 use bennu_theme::icons::{icon_tone_style, rotated_chevron_right_view, IconSymbol};
 use bennu_theme::styles::{context_menu_item_button_style, context_menu_style, muted_text_color};
@@ -95,7 +96,7 @@ fn status_area<'a>(search: &SearchWorkspaceState, loaded_results: usize) -> Elem
         status = status.push(tooltip(
             themed_icon(IconSymbol::TriangleAlert, IconTone::Warning, 14.0),
             tooltip_label(notices.join("\n")),
-            tooltip::Position::Bottom,
+            iced::widget::tooltip::Position::Bottom,
         ));
     }
     status
@@ -105,7 +106,7 @@ fn status_area<'a>(search: &SearchWorkspaceState, loaded_results: usize) -> Elem
                 .padding([6, 8])
                 .style(icon_button_style),
             tooltip_label(tr!("Close search")),
-            tooltip::Position::Bottom,
+            iced::widget::tooltip::Position::Bottom,
         ))
         .height(Length::Fixed(FILTER_BUTTON_HEIGHT))
         .into()

@@ -1,5 +1,5 @@
 //! 统一控件：全应用（含 portal）的按钮、输入框、下拉框、复选框、开关、
-//! 分段选择、滑块、进度条和提示气泡只在这里构造。
+//! 分段选择、滑块、进度条、悬浮提示和提示气泡只在这里构造。
 //!
 //! 构造函数返回已设好样式、尺寸和内边距的 iced widget，调用方只挂行为
 //! （`on_press`、`on_input`……）。iced 原始的输入类控件构造函数被仓库根
@@ -18,7 +18,8 @@ pub use buttons::{
 };
 pub use escape::on_escape;
 pub use feedback::{
-    progress_bar, progress_bar_style, slider, slider_style, tooltip_bubble, tooltip_bubble_style,
+    full_name_bubble, progress_bar, progress_bar_style, slider, slider_style, tooltip,
+    tooltip_bubble, tooltip_bubble_style, TOOLTIP_DELAY,
 };
 pub use fields::{
     dropdown, dropdown_menu_style, dropdown_style, inline_text_field, text_area, text_field,

@@ -4,7 +4,7 @@
 //! 是多选，勾上的头像带强调色描边。要输 PIN、能取消、失败要看详情的，在格子下面的“进行中”
 //! 里处理。
 
-use iced::widget::{button, column, container, tooltip, Row, Stack};
+use iced::widget::{button, column, container, Row, Stack};
 use iced::{alignment, Alignment, Background, Border, Color, Element, Length, Theme};
 
 use crate::app::transfer::{
@@ -17,7 +17,7 @@ use crate::formatting::format_middle_ellipsized_text;
 use crate::model::Message;
 use crate::progress_ring::progress_ring;
 use bennu_preview::panel_text::readable_text;
-use bennu_theme::controls::{icon_button, tooltip_bubble_style};
+use bennu_theme::controls::{icon_button, tooltip, tooltip_bubble_style};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::typography::CAPTION_SIZE;
 use bennu_theme::ui_colors;
@@ -409,7 +409,7 @@ fn favor_star(device: &DeviceInfo) -> Element<'static, Message> {
         )
         .padding([5, 7])
         .style(tooltip_bubble_style),
-        tooltip::Position::Bottom,
+        iced::widget::tooltip::Position::Bottom,
     )
     .into()
 }

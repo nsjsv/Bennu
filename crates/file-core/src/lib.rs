@@ -75,8 +75,8 @@ pub use directory_usage::{
 };
 pub use entry::{DirectoryEntry, DirectoryMetadataAvailability, EntryMetadata, FileKind};
 pub use entry_naming::{
-    entry_name_candidates, entry_name_with_suffix, validate_entry_name, EntryNameCandidates,
-    EntryNameKind, InvalidEntryName, ENTRY_NAME_LAST_CANDIDATE_NUMBER,
+    entry_name_candidates, entry_name_with_suffix, entry_stem, validate_entry_name,
+    EntryNameCandidates, EntryNameKind, InvalidEntryName, ENTRY_NAME_LAST_CANDIDATE_NUMBER,
 };
 pub use external_tools::ExternalTool;
 pub use media::{

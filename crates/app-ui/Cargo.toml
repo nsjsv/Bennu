@@ -41,6 +41,8 @@ tokio-util.workspace = true
 toml = "1.1.2"
 toml_edit = "0.25.11"
 tracing.workspace = true
+# 输入框的光标位置按字素数：重命名先选中主名要按同一种数法。
+unicode-segmentation = "1.13.2"
 url.workspace = true
 tracing-journald.workspace = true
 tracing-subscriber.workspace = true

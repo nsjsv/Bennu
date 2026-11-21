@@ -125,6 +125,13 @@ impl Iterator for EntryNameCandidates {
     }
 }
 
+/// 主名（`report.pdf` → `report`）：重命名时先选中的那一段，和派生名、编号同一条拆法。
+pub fn entry_stem(name: &str, kind: EntryNameKind) -> &str {
+    let (stem, _) = split_entry_name(OsStr::new(name), kind);
+    // 主名是名字开头的一段，在点（单字节）前断开，切在字符边界上。
+    &name[..stem.len()]
+}
+
 /// 以点开头且没有扩展名的隐藏文件（`.bashrc`）由 `Path::extension` 判为无扩展名，
 /// 整体当主名。
 pub(crate) fn split_entry_name(name: &OsStr, kind: EntryNameKind) -> (OsString, Option<OsString>) {
@@ -188,6 +195,20 @@ mod tests {
         assert_eq!(
             validate_entry_name(OsStr::new("a\0b")),
             Err(InvalidEntryName::ContainsNul)
+        );
+    }
+
+    #[test]
+    fn the_stem_is_the_name_without_its_last_extension() {
+        let file = |name| entry_stem(name, EntryNameKind::File);
+        assert_eq!(file("report.pdf"), "report");
+        assert_eq!(file("archive.tar.gz"), "archive.tar");
+        assert_eq!(file(".bashrc"), ".bashrc");
+        assert_eq!(file("相册.照片.jpg"), "相册.照片");
+        assert_eq!(file("README"), "README");
+        assert_eq!(
+            entry_stem("photos.2024", EntryNameKind::Directory),
+            "photos.2024"
         );
     }
 

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use file_core::{validate_entry_name, ResolvedEntryChange};
+use file_core::{validate_entry_name, EntryNameKind, ResolvedEntryChange};
 use file_operations::{
     path_after_completed_migrations, CompletedPathMigration, FileOperationCompletion,
     FileOperationOutcome, RenameRejection,
@@ -646,8 +646,16 @@ impl FileBrowser {
         self.select_path(path.clone());
         self.rename_input_history.reset();
         self.rename_rejection = None;
+        let kind = self
+            .entry_kind(&path)
+            .map_or(EntryNameKind::File, EntryNameKind::from);
+        let stem = rename_stem_graphemes(&self.rename_input, kind);
         self.renaming = Some(path);
-        focus_rename_input_command()
+        let input_id = rename_input_id();
+        Task::batch([
+            iced::widget::operation::focus(input_id.clone()),
+            iced::widget::operation::select_range(input_id, 0, stem),
+        ])
     }
 
     pub(super) fn begin_rename_selected(&mut self) -> Task<Message> {
@@ -729,6 +737,13 @@ impl FileBrowser {
             _ => Task::none(),
         }
     }
+}
+
+/// 改名多半只改主名：开始重命名时选中主名（文件夹整个名字），扩展名留着不动。输入框的位置
+/// 按字素数。
+fn rename_stem_graphemes(name: &str, kind: EntryNameKind) -> usize {
+    use unicode_segmentation::UnicodeSegmentation;
+    file_core::entry_stem(name, kind).graphemes(true).count()
 }
 
 fn focus_rename_input_command() -> Task<Message> {

@@ -181,3 +181,15 @@ fn new_rename_session_drops_previous_rejection() {
 
     assert_eq!(browser.rename_hint(), None);
 }
+
+/// 开始重命名时选中主名：扩展名不选，文件夹、没有扩展名的隐藏文件选整个名字；位置按字素数。
+#[test]
+fn renaming_preselects_the_name_without_its_extension() {
+    use file_core::EntryNameKind::{Directory, File};
+    assert_eq!(rename_stem_graphemes("report.pdf", File), 6);
+    assert_eq!(rename_stem_graphemes(".bashrc", File), 7);
+    assert_eq!(rename_stem_graphemes("相册.照片.jpg", File), 5);
+    // e 加上组合重音是一个字素。
+    assert_eq!(rename_stem_graphemes("e\u{301}.txt", File), 1);
+    assert_eq!(rename_stem_graphemes("photos.2024", Directory), 11);
+}

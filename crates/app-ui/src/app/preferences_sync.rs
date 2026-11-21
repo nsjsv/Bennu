@@ -117,7 +117,13 @@ impl FileBrowser {
         if before.terminal_emulator != after.terminal_emulator {
             self.terminal_emulator = after.terminal_emulator;
         }
+        if before.visible_column_count != after.visible_column_count {
+            self.forget_column_widths();
+        }
         let mut tasks = Vec::new();
+        if before.interface_text_size != after.interface_text_size {
+            tasks.push(self.reread_window_sizes());
+        }
         if before.network_connections != after.network_connections {
             self.network_connections
                 .adopt_saved_connections(after.network_connections.clone());

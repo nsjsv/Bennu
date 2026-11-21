@@ -6,7 +6,6 @@ use iced::Task;
 use super::FileBrowser;
 use crate::app::smooth_scroll::smooth_scroll_id;
 use crate::commands::load_expanded_directory_command;
-use crate::config::normalize_visible_column_count;
 use crate::list_view::LIST_HEADER_HEIGHT;
 use crate::model::{
     BrowserPaneId, BrowserViewMode, DirectoryExpansionLoadContext, ExpandedDirectory,
@@ -35,15 +34,6 @@ struct DirectoryExpansionTransfer {
 }
 
 impl FileBrowser {
-    pub(crate) fn select_visible_column_count(&mut self, count: usize) -> Task<Message> {
-        let count = normalize_visible_column_count(count);
-        if self.user_config.visible_column_count == count {
-            return Task::none();
-        }
-        self.user_config.visible_column_count = count;
-        self.persist_user_preferences_command()
-    }
-
     /// 选择文件分组维度:只写全局配置并持久化。分组是纯视图概念,
     /// 视图层下次渲染自然重算,绝不触碰目录加载生命周期(不重扫)。
     pub(super) fn select_file_grouping_mode(&mut self, mode: FileGroupingMode) -> Task<Message> {

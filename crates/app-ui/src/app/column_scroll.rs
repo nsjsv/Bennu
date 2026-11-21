@@ -120,18 +120,15 @@ impl FileBrowser {
             .position(|column_directory| column_directory == directory)
     }
 
-    fn column_scroll_offset(&self, start_column_index: usize) -> f32 {
-        (0..start_column_index)
-            .map(|column_index| self.column_width(column_index) + COLUMN_RESIZE_DIVIDER_WIDTH)
-            .sum()
-    }
-
     fn reveal_column_index(&self, column_index: usize) -> Task<Message> {
-        let column_left_x = self.column_scroll_offset(column_index);
+        let pane_id = self.active_pane_id();
+        let column_left_x = (0..column_index)
+            .map(|index| self.column_width(pane_id, index) + COLUMN_RESIZE_DIVIDER_WIDTH)
+            .sum::<f32>();
         advanced_widget::operate(ColumnBrowserRevealColumn {
-            target: column_browser_scroll_id(self.active_pane_id()).into(),
+            target: column_browser_scroll_id(pane_id).into(),
             column_left_x,
-            column_right_x: column_left_x + self.column_width(column_index),
+            column_right_x: column_left_x + self.column_width(pane_id, column_index),
         })
     }
 }

@@ -140,7 +140,7 @@ pub(crate) fn column_browser_view<'a>(
             columns = columns.push(empty_column(
                 pane.id,
                 current_directory.to_path_buf(),
-                browser.column_width(index),
+                browser.column_width(pane.id, index),
             ));
         }
 
@@ -328,7 +328,7 @@ fn directory_column<'a>(
     );
 
     let column = container(column_scroll)
-        .width(Length::Fixed(browser.column_width(column_index)))
+        .width(Length::Fixed(browser.column_width(pane.id, column_index)))
         .height(Length::Fill)
         .style(column_panel_style);
 

@@ -67,7 +67,24 @@ impl FileBrowser {
             return Task::none();
         }
         self.user_config.interface_text_size = text_size;
-        self.persist_user_preferences_command()
+        Task::batch([
+            self.persist_user_preferences_command(),
+            self.reread_window_sizes(),
+        ])
+    }
+
+    /// 界面一放大缩小，窗口的布局尺寸就变了，可窗口实际没变大小，系统不会发 Resized：按新
+    /// 比例取回主窗口、预览窗口的大小，走窗口变大小的同一处理，栏宽、网格才按真实宽度排。
+    pub(super) fn reread_window_sizes(&self) -> Task<Message> {
+        Task::batch(
+            std::iter::once(self.main_window)
+                .chain(self.preview_engine.preview_window)
+                .map(|window| {
+                    iced::window::size(window).map(move |size| {
+                        Message::AuxiliaryWindowResized(window, size.width, size.height)
+                    })
+                }),
+        )
     }
 }
 

@@ -104,3 +104,35 @@ fn native_drop_positions_follow_the_interface_scale() {
     assert!((position.x - 180.0 / scale).abs() < 0.001, "{position:?}");
     assert!((position.y - 90.0 / scale).abs() < 0.001, "{position:?}");
 }
+
+/// 主窗口里按宽度排的东西（栏宽、网格、分屏）都读记下的窗口大小：字号一换（这里选的或
+/// 别的窗口改的），要按新比例取回窗口大小，不然一直按旧比例排，一页摆不下设的栏数。
+#[tokio::test]
+async fn a_new_text_size_rereads_the_main_window_size() {
+    async fn asks_size_of(window: iced::window::Id, task: Task<crate::model::Message>) -> bool {
+        use iced::futures::StreamExt;
+        let Some(mut stream) = iced_runtime::task::into_stream(task) else {
+            return false;
+        };
+        while let Some(action) = stream.next().await {
+            if matches!(
+                action,
+                iced_runtime::Action::Window(iced_runtime::window::Action::GetSize(asked, _))
+                    if asked == window
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    assert!(asks_size_of(browser.main_window, browser.select_text_size(16)).await);
+
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    let mut saved_elsewhere = browser.user_config.user_preferences();
+    saved_elsewhere.interface_text_size = 14;
+    let adopted = browser.accept_stored_user_preferences(Ok(saved_elsewhere));
+    assert_eq!(browser.user_config.interface_text_size, 14);
+    assert!(asks_size_of(browser.main_window, adopted).await);
+}

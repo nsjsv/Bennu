@@ -152,16 +152,26 @@ impl FileBrowser {
         crate::view::main_toolbar_height(self.main_content_width())
     }
 
+    /// 主窗口此刻的布局宽度：记下的大小按当前界面缩放折算。
+    pub(crate) fn main_window_width(&self) -> f32 {
+        self.main_window_logical_width / self.interface_scale()
+    }
+
+    /// 主窗口此刻的布局高度。
+    pub(crate) fn main_window_height(&self) -> f32 {
+        self.main_window_logical_height / self.interface_scale()
+    }
+
     /// 内容栏宽度：侧栏右边整段（工具栏、窗格、预览面板、终端抽屉都在这一栏里）。
     pub(crate) fn main_content_width(&self) -> f32 {
-        self.main_window_width - self.sidebar_layout_width()
+        self.main_window_width() - self.sidebar_layout_width()
     }
 
     pub(super) fn pane_id_at_position(&self, position: Point) -> Option<BrowserPaneId> {
         let sidebar_width = self.sidebar_layout_width();
         let content_width = self.split_content_width();
         let panes_top = self.main_panes_area_top();
-        let content_height = (self.main_window_height - panes_top).max(1.0);
+        let content_height = (self.main_window_height() - panes_top).max(1.0);
         if position.x < sidebar_width
             || position.x > sidebar_width + content_width
             || position.y < panes_top
@@ -333,19 +343,19 @@ impl FileBrowser {
 
     pub(super) fn split_region_at(&self, position: Point) -> Option<SplitRegion> {
         let content_width = self.split_content_width();
-        if content_width <= SPLIT_TARGET_MIN_CONTENT_WIDTH || self.main_window_height <= 1.0 {
+        if content_width <= SPLIT_TARGET_MIN_CONTENT_WIDTH || self.main_window_height() <= 1.0 {
             return None;
         }
         let sidebar_width = self.sidebar_layout_width();
         if position.x < sidebar_width || position.y < 0.0 {
             return None;
         }
-        if position.x > sidebar_width + content_width || position.y > self.main_window_height {
+        if position.x > sidebar_width + content_width || position.y > self.main_window_height() {
             return None;
         }
 
         let local_x = ((position.x - sidebar_width) / content_width).clamp(0.0, 1.0);
-        let local_y = (position.y / self.main_window_height).clamp(0.0, 1.0);
+        let local_y = (position.y / self.main_window_height()).clamp(0.0, 1.0);
         let horizontal_bias = (local_x - 0.5).abs();
         let vertical_bias = (local_y - 0.5).abs();
 
@@ -370,7 +380,7 @@ impl FileBrowser {
         let target = drag.split_target?;
         let content_width = self.split_content_width();
         let panes_top = self.main_panes_area_top();
-        let content_height = (self.main_window_height - panes_top).max(1.0);
+        let content_height = (self.main_window_height() - panes_top).max(1.0);
         let sidebar_width = self.sidebar_layout_width();
         let half_width = content_width / 2.0;
         let half_height = content_height / 2.0;
@@ -547,7 +557,7 @@ mod tests {
     fn open_preview_panel_narrows_the_pane_width_it_sits_beside() {
         // #2：网格列数按窗格宽度排；面板开着却没扣掉，最右边几列就排到面板底下被盖住。
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.main_window_width = 1_200.0;
+        browser.main_window_logical_width = 1_200.0;
         browser.sidebar_width_when_shown = 180.0;
         assert_eq!(browser.pane_content_width(), 1_020.0);
 
@@ -571,8 +581,8 @@ mod tests {
     #[test]
     fn unequal_split_uses_same_boundary_for_hit_test_and_pane_width() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.main_window_width = 1_000.0;
-        browser.main_window_height = 800.0;
+        browser.main_window_logical_width = 1_000.0;
+        browser.main_window_logical_height = 800.0;
         browser.sidebar_width_when_shown = 200.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis: SplitAxis::Horizontal,
@@ -599,8 +609,8 @@ mod tests {
     #[test]
     fn unequal_vertical_split_uses_shared_boundary_for_hit_test() {
         let (mut browser, _) = FileBrowser::new(crate::config::default_user_config());
-        browser.main_window_width = 1_000.0;
-        browser.main_window_height = 800.0;
+        browser.main_window_logical_width = 1_000.0;
+        browser.main_window_logical_height = 800.0;
         browser.sidebar_width_when_shown = 200.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis: SplitAxis::Vertical,

@@ -105,10 +105,29 @@ fn native_drop_positions_follow_the_interface_scale() {
     assert!((position.y - 90.0 / scale).abs() < 0.001, "{position:?}");
 }
 
-/// 主窗口里按宽度排的东西（栏宽、网格、分屏）都读记下的窗口大小：字号一换（这里选的或
-/// 别的窗口改的），要按新比例取回窗口大小，不然一直按旧比例排，一页摆不下设的栏数。
+/// 主窗口的布局大小跟着界面缩放走，不靠窗口再发大小：启动读到的字号、在这里改的、别的窗口
+/// 改的都一样（启动时按默认字号记下窗口大小，读到设置后不改，栏宽就一直按大了的宽度排，
+/// 一页摆不下设的栏数）。
+#[test]
+fn the_main_window_layout_size_follows_the_interface_scale() {
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    drop(browser.handle_auxiliary_window_resized(browser.main_window, 1282.0, 900.0));
+    assert_eq!(browser.main_window_width(), 1282.0);
+
+    browser.user_config.interface_text_size = 15;
+    let scale = browser.interface_scale();
+    assert!(scale > 1.0);
+    assert!((browser.main_window_width() - 1282.0 / scale).abs() < 0.01);
+    assert!((browser.main_window_height() - 900.0 / scale).abs() < 0.01);
+
+    // 这之后窗口发来的大小是按新缩放折算的布局大小，记下来仍然一致。
+    drop(browser.handle_auxiliary_window_resized(browser.main_window, 1000.0, 800.0));
+    assert!((browser.main_window_width() - 1000.0).abs() < 0.01);
+}
+
+/// 预览窗口记的是布局大小：字号一换（这里选的或别的窗口改的）按新比例取回它的大小。
 #[tokio::test]
-async fn a_new_text_size_rereads_the_main_window_size() {
+async fn a_new_text_size_rereads_the_preview_window_size() {
     async fn asks_size_of(window: iced::window::Id, task: Task<crate::model::Message>) -> bool {
         use iced::futures::StreamExt;
         let Some(mut stream) = iced_runtime::task::into_stream(task) else {
@@ -125,14 +144,17 @@ async fn a_new_text_size_rereads_the_main_window_size() {
         }
         false
     }
+    let preview = iced::window::Id::unique();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
-    assert!(asks_size_of(browser.main_window, browser.select_text_size(16)).await);
+    browser.preview_engine.preview_window = Some(preview);
+    assert!(asks_size_of(preview, browser.select_text_size(16)).await);
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    browser.preview_engine.preview_window = Some(preview);
     let mut saved_elsewhere = browser.user_config.user_preferences();
     saved_elsewhere.interface_text_size = 14;
     let adopted = browser.accept_stored_user_preferences(Ok(saved_elsewhere));
     assert_eq!(browser.user_config.interface_text_size, 14);
-    assert!(asks_size_of(browser.main_window, adopted).await);
+    assert!(asks_size_of(preview, adopted).await);
 }

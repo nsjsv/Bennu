@@ -98,7 +98,7 @@ impl FileBrowser {
         let x = self.sidebar_layout_width();
         let width = self.split_content_width();
         let y = self.main_panes_area_top();
-        let height = (self.main_window_height - y).max(1.0);
+        let height = (self.main_window_height() - y).max(1.0);
         let full = Rectangle::new(Point::new(x, y), Size::new(width, height));
         match self.pane_layout {
             BrowserPaneLayout::Single { active } => (pane_id == active).then_some(full),

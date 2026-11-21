@@ -61,15 +61,15 @@ impl FileBrowser {
         self.cursor_strictly_outside_main_window(position)
             || position.x < EDGE_HANDOFF_BAND
             || position.y < EDGE_HANDOFF_BAND
-            || position.x > self.main_window_width - EDGE_HANDOFF_BAND
-            || position.y > self.main_window_height - EDGE_HANDOFF_BAND
+            || position.x > self.main_window_width() - EDGE_HANDOFF_BAND
+            || position.y > self.main_window_height() - EDGE_HANDOFF_BAND
     }
 
     fn cursor_strictly_outside_main_window(&self, position: iced::Point) -> bool {
         position.x < 0.0
             || position.y < 0.0
-            || position.x > self.main_window_width
-            || position.y > self.main_window_height
+            || position.x > self.main_window_width()
+            || position.y > self.main_window_height()
     }
 
     /// 激活即把拖放交给 Wayland 原生会话:窗口内外从此只有合成器位图

@@ -183,7 +183,7 @@ impl FileBrowser {
         });
         ColumnViewport {
             offset_y: anchor.unwrap_or(0.0).max(0.0),
-            height: self.main_window_height,
+            height: self.main_window_height(),
         }
     }
 

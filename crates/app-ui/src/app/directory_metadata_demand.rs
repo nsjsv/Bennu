@@ -187,7 +187,7 @@ impl FileBrowser {
             .map(|pane| pane.directory_load_generation)
             .unwrap_or_default();
         let root_cancellation = self.directory_load_cancel_for_pane(pane_id);
-        let window_height = self.main_window_height;
+        let window_height = self.main_window_height();
         let sources = {
             let Some(pane) = self.pane_view(pane_id) else {
                 return Task::none();

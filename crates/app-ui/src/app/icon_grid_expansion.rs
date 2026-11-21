@@ -114,7 +114,7 @@ impl FileBrowser {
             pane.entries,
             &plan,
             pane.icon_grid_viewport.width,
-            self.main_window_height,
+            self.main_window_height(),
             self.user_config.icons_icon_edge(),
             expansion,
         )

@@ -332,15 +332,15 @@ impl FileBrowser {
         let sidebar_width = self.sidebar_layout_width();
         PaneDragContentBounds {
             top_left: Point::new(sidebar_width, 0.0),
-            width: (self.main_window_width - sidebar_width).max(1.0),
-            height: self.main_window_height.max(1.0),
+            width: (self.main_window_width() - sidebar_width).max(1.0),
+            height: self.main_window_height().max(1.0),
         }
     }
 
     fn split_region_overlay_bounds(&self, region: SplitRegion) -> SplitOverlayBounds {
         let sidebar_width = self.sidebar_layout_width();
-        let content_width = (self.main_window_width - sidebar_width).max(1.0);
-        let content_height = self.main_window_height.max(1.0);
+        let content_width = (self.main_window_width() - sidebar_width).max(1.0);
+        let content_height = self.main_window_height().max(1.0);
         let half_width = content_width / 2.0;
         let half_height = content_height / 2.0;
 
@@ -470,8 +470,8 @@ mod tests {
         let (mut browser, _) = FileBrowser::new(config);
 
         browser.sidebar_width_when_shown = 0.0;
-        browser.main_window_width = 200.0;
-        browser.main_window_height = 100.0;
+        browser.main_window_logical_width = 200.0;
+        browser.main_window_logical_height = 100.0;
         browser.pane_layout = BrowserPaneLayout::Split {
             axis: SplitAxis::Horizontal,
             first: BrowserPaneId::PRIMARY,

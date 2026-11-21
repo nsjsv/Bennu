@@ -353,7 +353,7 @@ impl FileBrowser {
             return Vec::new();
         }
 
-        let window_height = self.main_window_height;
+        let window_height = self.main_window_height();
         let Some(pane) = self.pane_view(pane_id) else {
             return Vec::new();
         };

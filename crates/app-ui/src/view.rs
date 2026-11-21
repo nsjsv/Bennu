@@ -875,8 +875,8 @@ fn drag_preview_panel(browser: &FileBrowser) -> Option<(Element<'_, Message>, Fl
         None => {
             stack_origin.x < 0.0
                 || stack_origin.y < 0.0
-                || stack_origin.x + stack_width > browser.main_window_width
-                || stack_origin.y + stack_height > browser.main_window_height
+                || stack_origin.x + stack_width > browser.main_window_width()
+                || stack_origin.y + stack_height > browser.main_window_height()
         }
     };
     if selection_overflows_screen || overflows_viewport {

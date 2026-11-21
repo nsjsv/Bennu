@@ -21,10 +21,10 @@ use file_operations::QueuedTransfer;
 #[test]
 fn missing_viewport_schedules_list_thumbnails_for_full_window_height() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.main_window_height = 2000.0;
+    browser.main_window_logical_height = 2000.0;
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     let initial_rows = crate::list_view::list_initial_rows(
-        browser.main_window_height,
+        browser.main_window_height(),
         browser.user_config.list_view_density,
     );
     // 回归：初始预热行数由真实窗口高度推导（2000px 下远超旧固定 25 行），
@@ -44,7 +44,7 @@ fn missing_viewport_schedules_list_thumbnails_for_full_window_height() {
 #[test]
 fn missing_viewport_schedules_column_thumbnails_for_full_window_height() {
     let (mut browser, _) = FileBrowser::new(ui_thread_startup_config());
-    browser.main_window_height = 2000.0;
+    browser.main_window_logical_height = 2000.0;
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().entries = (0..120)
         .map(|index| image_entry(&format!("/workspace/{index}.png")))
@@ -57,7 +57,7 @@ fn missing_viewport_schedules_column_thumbnails_for_full_window_height() {
     );
 
     let initial_rows = crate::three_column_view::column_initial_rows(
-        browser.main_window_height,
+        browser.main_window_height(),
         browser.user_config.columns_view_density,
     );
     assert!(initial_rows > 25);
@@ -245,7 +245,7 @@ fn icon_grid_schedules_only_shared_visible_range_at_dynamic_edge() {
     let (mut browser, _) = FileBrowser::new(config);
     browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
     browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
-    browser.main_window_width = 500.0;
+    browser.main_window_logical_width = 500.0;
     browser.sidebar_width_when_shown = 0.0;
     browser.tab_mut().entries = (0..100)
         .map(|index| image_entry(&format!("/workspace/{index}.png")))

@@ -53,8 +53,8 @@ impl FileBrowser {
     pub(super) fn main_window_video_fullscreen_view(&self) -> Element<'_, Message> {
         self.preview_window_content(
             PreviewSize {
-                width: self.main_window_width,
-                height: self.main_window_height,
+                width: self.main_window_width(),
+                height: self.main_window_height(),
             },
             self.preview_engine.preview_window_bottom_controls.opacity(),
         )

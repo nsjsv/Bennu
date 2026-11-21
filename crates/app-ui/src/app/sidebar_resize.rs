@@ -73,7 +73,7 @@ impl FileBrowser {
     }
 
     pub(crate) fn sidebar_width_for_window(&self, width: f32) -> f32 {
-        let max_sidebar_width = (self.main_window_width - config::MIN_COLUMN_WIDTH)
+        let max_sidebar_width = (self.main_window_width() - config::MIN_COLUMN_WIDTH)
             .max(config::MIN_SIDEBAR_WIDTH)
             .min(config::MAX_SIDEBAR_WIDTH);
         config::normalize_sidebar_width(width).min(max_sidebar_width)
@@ -91,8 +91,8 @@ mod tests {
     #[test]
     fn f9_hides_the_sidebar_for_layout_and_hit_testing_and_keeps_its_width() {
         let (mut browser, _) = FileBrowser::new(config::default_user_config());
-        browser.main_window_width = 1000.0;
-        browser.main_window_height = 700.0;
+        browser.main_window_logical_width = 1000.0;
+        browser.main_window_logical_height = 700.0;
         browser.sidebar_width_when_shown = 220.0;
         let inside_old_sidebar = Point::new(100.0, 400.0);
         assert_eq!(browser.pane_id_at_position(inside_old_sidebar), None);

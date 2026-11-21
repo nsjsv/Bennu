@@ -122,7 +122,7 @@ impl FileBrowser {
         }
         let mut tasks = Vec::new();
         if before.interface_text_size != after.interface_text_size {
-            tasks.push(self.reread_window_sizes());
+            tasks.push(self.reread_preview_window_size());
         }
         if before.network_connections != after.network_connections {
             self.network_connections

@@ -236,7 +236,7 @@ fn render_rows<'a>(
         clip_bottom,
         viewport,
         icon_edge,
-        browser.main_window_height,
+        browser.main_window_height(),
     ) else {
         return vertical_spacer(rows.height);
     };

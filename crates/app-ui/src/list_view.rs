@@ -171,7 +171,7 @@ pub(crate) fn list_browser_view<'a>(
                 })
                 .unwrap_or_else(|| {
                     layout.initial_range(list_initial_rows(
-                        browser.main_window_height,
+                        browser.main_window_height(),
                         browser.user_config().list_view_density,
                     ))
                 });

@@ -15,6 +15,7 @@ where
         anchor: anchor.into(),
         popup,
         placement: PopupPlacement::AnchorWidth,
+        on_outside_press: None,
     })
 }
 
@@ -31,6 +32,7 @@ where
         anchor: anchor.into(),
         popup,
         placement: PopupPlacement::RightAligned,
+        on_outside_press: None,
     })
 }
 
@@ -47,6 +49,7 @@ where
         anchor: anchor.into(),
         popup,
         placement: PopupPlacement::Dropdown,
+        on_outside_press: None,
     })
 }
 
@@ -63,6 +66,25 @@ where
         anchor: anchor.into(),
         popup,
         placement: PopupPlacement::DropUp,
+        on_outside_press: None,
+    })
+}
+
+/// 贴着底栏的菜单按钮：摆法同 [`anchored_dropup`]，另外在弹层和按钮以外按下鼠标时发
+/// `on_dismiss` 并吞掉这一下——菜单的通行规矩，点外面只是把菜单收起来，不顺带点到下面的东西。
+pub fn anchored_dropup_menu<'a, Message>(
+    anchor: impl Into<Element<'a, Message>>,
+    popup: Option<Element<'a, Message>>,
+    on_dismiss: impl Fn() -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: 'a,
+{
+    Element::new(AnchoredPopup {
+        anchor: anchor.into(),
+        popup,
+        placement: PopupPlacement::DropUp,
+        on_outside_press: Some(Box::new(on_dismiss)),
     })
 }
 
@@ -86,6 +108,8 @@ where
     anchor: Element<'a, Message, Theme, Renderer>,
     popup: Option<Element<'a, Message, Theme, Renderer>>,
     placement: PopupPlacement,
+    /// 弹层开着时在它和锚点以外按下鼠标发的消息（菜单收起来）；`None` 的弹层不管外面的点击。
+    on_outside_press: Option<Box<dyn Fn() -> Message + 'a>>,
 }
 
 impl<'a, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -231,6 +255,7 @@ where
                 state: popup_tree,
                 anchor_bounds,
                 placement: self.placement,
+                on_outside_press: self.on_outside_press.as_deref(),
             })));
         }
 
@@ -246,6 +271,7 @@ where
     state: &'b mut widget::Tree,
     anchor_bounds: Rectangle,
     placement: PopupPlacement,
+    on_outside_press: Option<&'b (dyn Fn() -> Message + 'a)>,
 }
 
 impl<'a, 'b, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
@@ -313,6 +339,18 @@ where
         shell: &mut Shell<'_, Message>,
     ) {
         let bounds = layout.bounds();
+        if let (Some(on_outside_press), Event::Mouse(mouse::Event::ButtonPressed(_))) =
+            (self.on_outside_press, event)
+        {
+            let pressed_outside = cursor.position().is_some_and(|position| {
+                !bounds.contains(position) && !self.anchor_bounds.contains(position)
+            });
+            if pressed_outside {
+                shell.publish(on_outside_press());
+                shell.capture_event();
+                return;
+            }
+        }
 
         self.popup.as_widget_mut().update(
             self.state, event, layout, cursor, renderer, clipboard, shell, &bounds,
@@ -494,5 +532,83 @@ where
             cursor,
             viewport,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::advanced::clipboard;
+    use iced::widget::Space;
+
+    use super::*;
+
+    #[derive(Debug, Clone, PartialEq)]
+    enum Message {
+        Dismissed,
+    }
+
+    struct NoClipboard;
+
+    impl Clipboard for NoClipboard {
+        fn read(&self, _kind: clipboard::Kind) -> Option<String> {
+            None
+        }
+
+        fn write(&mut self, _kind: clipboard::Kind, _contents: String) {}
+    }
+
+    fn sized(width: f32, height: f32) -> Element<'static, Message, iced::Theme, ()> {
+        Space::new()
+            .width(Length::Fixed(width))
+            .height(Length::Fixed(height))
+            .into()
+    }
+
+    /// 底栏上的菜单按钮（窗口 400×400，按钮在 (20, 360)，弹层向上开）：按一下鼠标，
+    /// 返回发出的消息和事件有没有被吞掉。
+    fn press_at(point: Point) -> (Vec<Message>, bool) {
+        let mut popup: AnchoredPopup<'static, Message, iced::Theme, ()> = AnchoredPopup {
+            anchor: sized(60.0, 24.0),
+            popup: Some(sized(120.0, 200.0)),
+            placement: PopupPlacement::DropUp,
+            on_outside_press: Some(Box::new(|| Message::Dismissed)),
+        };
+        let mut tree = widget::Tree::new(&popup as &dyn Widget<Message, iced::Theme, ()>);
+        let limits = layout::Limits::new(Size::ZERO, Size::new(400.0, 400.0));
+        let node = popup
+            .layout(&mut tree, &(), &limits)
+            .move_to(Point::new(20.0, 360.0));
+        let window = Rectangle::new(Point::ORIGIN, Size::new(400.0, 400.0));
+        let mut overlay = popup
+            .overlay(&mut tree, Layout::new(&node), &(), &window, Vector::ZERO)
+            .expect("an open popup has an overlay");
+        let overlay_node = overlay.as_overlay_mut().layout(&(), window.size());
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+        overlay.as_overlay_mut().update(
+            &Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+            Layout::new(&overlay_node),
+            mouse::Cursor::Available(point),
+            &(),
+            &mut NoClipboard,
+            &mut shell,
+        );
+        let captured = shell.is_event_captured();
+        (messages, captured)
+    }
+
+    #[test]
+    fn a_press_outside_the_menu_dismisses_it_and_goes_no_further() {
+        assert_eq!(
+            press_at(Point::new(300.0, 50.0)),
+            (vec![Message::Dismissed], true)
+        );
+    }
+
+    #[test]
+    fn presses_on_the_menu_or_its_button_are_left_to_them() {
+        // 弹层在按钮上方：右缘对齐按钮右缘（80），底边在按钮上沿往上一个间隙。
+        assert_eq!(press_at(Point::new(40.0, 250.0)), (vec![], false));
+        assert_eq!(press_at(Point::new(40.0, 370.0)), (vec![], false));
     }
 }

@@ -225,7 +225,23 @@ impl PreviewEngine {
             PreviewMessage::TextRead { document, reply } => self.accept_text_read(document, reply),
             PreviewMessage::TextFileChanged { document } => self.handle_text_file_changed(document),
             PreviewMessage::TextPreviewEncodingSelected(encoding) => {
+                if let Some(document) = self.active_text_preview_document_mut() {
+                    document.set_encoding_menu_open(false);
+                }
                 self.select_text_preview_encoding(encoding)
+            }
+            PreviewMessage::TextEncodingMenuToggled => {
+                if let Some(document) = self.active_text_preview_document_mut() {
+                    let open = document.encoding_menu_open();
+                    document.set_encoding_menu_open(!open);
+                }
+                Task::none()
+            }
+            PreviewMessage::TextEncodingMenuDismissed => {
+                if let Some(document) = self.active_text_preview_document_mut() {
+                    document.set_encoding_menu_open(false);
+                }
+                Task::none()
             }
             PreviewMessage::MarkdownPreviewModeSelected(mode) => self.select_markdown_mode(mode),
             PreviewMessage::PreviewTreeAnimationTick => self.advance_preview_tree_animation(),

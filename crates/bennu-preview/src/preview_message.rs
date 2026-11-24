@@ -17,8 +17,7 @@ use crate::document_preview::DocumentPreviewMessage;
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::original_image_preview::{ImageProbe, ImageProbeError, OriginalImagePreview};
 use crate::preview::{
-    AudioTimelineView, PreviewContent, RemotePreviewCacheMessage,
-    VideoPreviewFrame,
+    AudioTimelineView, PreviewContent, RemotePreviewCacheMessage, VideoPreviewFrame,
 };
 use crate::sqlite_preview::SqlitePreviewMessage;
 use crate::text_document::{TextReadReply, TextViewerEvent};
@@ -56,6 +55,10 @@ pub enum PreviewMessage {
     MarkdownPreviewModeSelected(MarkdownPreviewMode),
     /// 用户为当前文本预览指定编码；只对这次预览有效。
     TextPreviewEncodingSelected(&'static encoding_rs::Encoding),
+    /// 状态栏的编码按钮：开或关编码菜单。
+    TextEncodingMenuToggled,
+    /// 在编码菜单外面按了鼠标：收起菜单。
+    TextEncodingMenuDismissed,
     ImagePreviewDimensionsLoaded(PathBuf, u64, Result<ImageProbe, ImageProbeError>),
     /// ←/→：换到当前列表里的上一张/下一张图片（列表归宿主）。
     ImageStepRequested(ImageStep),

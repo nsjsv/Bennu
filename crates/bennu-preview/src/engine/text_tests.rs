@@ -202,6 +202,37 @@ async fn choosing_an_encoding_keeps_the_position_and_the_markdown_mode() {
     assert_eq!(row.text, focus_text);
 }
 
+/// 编码菜单：按钮开关它，点外面收起，选了一个编码也收起。
+#[tokio::test]
+async fn the_encoding_menu_opens_from_its_button_and_closes_on_a_choice_or_outside() {
+    let dir = tempdir().expect("dir");
+    let path = dir.path().join("notes.txt");
+    std::fs::write(&path, numbered(20)).expect("write");
+    let mut engine = test_engine();
+    open(&mut engine, &path).await;
+    let send = |engine: &mut PreviewEngine, message| {
+        drop(engine.handle(message));
+        document(engine).encoding_menu_open()
+    };
+
+    assert!(!document(&engine).encoding_menu_open());
+    assert!(send(&mut engine, PreviewMessage::TextEncodingMenuToggled));
+    assert!(!send(&mut engine, PreviewMessage::TextEncodingMenuToggled));
+    assert!(send(&mut engine, PreviewMessage::TextEncodingMenuToggled));
+    assert!(!send(
+        &mut engine,
+        PreviewMessage::TextEncodingMenuDismissed
+    ));
+
+    assert!(send(&mut engine, PreviewMessage::TextEncodingMenuToggled));
+    let task = engine.handle(PreviewMessage::TextPreviewEncodingSelected(
+        encoding_rs::GBK,
+    ));
+    drive(&mut engine, task.expect("engine message")).await;
+    assert_eq!(document(&engine).encoding(), encoding_rs::GBK);
+    assert!(!document(&engine).encoding_menu_open());
+}
+
 fn resident_memory_kib() -> u64 {
     std::fs::read_to_string("/proc/self/status")
         .ok()

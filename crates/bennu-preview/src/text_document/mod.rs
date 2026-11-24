@@ -278,6 +278,8 @@ pub struct TextPreviewDocument {
     read_error: Option<String>,
     highlight: HighlightState,
     find: TextFind,
+    /// 状态栏的编码菜单开着。换了编码就是一份新文档，菜单随之收起。
+    encoding_menu_open: bool,
 }
 
 struct IndexRun {
@@ -328,6 +330,7 @@ impl TextPreviewDocument {
             read_error: None,
             highlight,
             find: TextFind::default(),
+            encoding_menu_open: false,
         };
         document.replace_window(opened.batch.clone());
         let mut reads: Vec<TextRead> = document.start_counting().into_iter().collect();
@@ -349,6 +352,14 @@ impl TextPreviewDocument {
 
     pub fn encoding(&self) -> &'static encoding_rs::Encoding {
         self.decoding.encoding()
+    }
+
+    pub fn encoding_menu_open(&self) -> bool {
+        self.encoding_menu_open
+    }
+
+    pub(crate) fn set_encoding_menu_open(&mut self, open: bool) {
+        self.encoding_menu_open = open;
     }
 
     pub fn encoding_chosen(&self) -> bool {

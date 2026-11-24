@@ -65,6 +65,7 @@ pub(crate) enum ShortcutAction {
     TogglePreviewPanel,
     ToggleInfoPanel,
     ToggleTaskLogPanel,
+    ToggleFolderTreePanel,
     ToggleQuickActionsPanel,
     ToggleRightDockLock,
     ToggleTerminal,

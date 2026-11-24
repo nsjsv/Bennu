@@ -152,6 +152,8 @@ pub(crate) struct FileDragHitTestBounds {
     pub(crate) sidebar_favorites: Option<Rectangle>,
     /// 侧栏 LocalSend 的几行（入口、下面的收藏设备）：落点 + 那一行。
     pub(crate) local_send: Vec<(super::FileDropTarget, Rectangle)>,
+    /// 文件夹树面板的行：文件夹 + 那一行。
+    pub(crate) folder_tree_directories: Vec<(PathBuf, Rectangle)>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +214,7 @@ pub(crate) struct FileDropHitTestBounds {
     pub(crate) sidebar_directories: Vec<SidebarFileDragTargetBounds>,
     pub(crate) sidebar_favorites: Option<Rectangle>,
     pub(crate) local_send: Vec<(super::FileDropTarget, Rectangle)>,
+    pub(crate) folder_tree_directories: Vec<(PathBuf, Rectangle)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -44,6 +44,10 @@ pub(crate) enum FileDragHitTestMarker {
     SidebarLocalSend {
         target: FileDropTarget,
     },
+    /// 文件夹树面板里的一行。
+    FolderTreeDirectory {
+        directory: PathBuf,
+    },
 }
 
 pub(crate) enum FileDragHitTestBoundsRequest {
@@ -116,6 +120,7 @@ struct FileDragHitTestBoundsOperation {
     sidebar_directories: Vec<SidebarFileDragTargetBounds>,
     sidebar_favorites: Option<Rectangle>,
     local_send: Vec<(FileDropTarget, Rectangle)>,
+    folder_tree_directories: Vec<(PathBuf, Rectangle)>,
     /// 遍历中遇到的滚动可视区(surface 坐标),拖拽聚合判断用来区分
     /// "超出列表视口"与"超出窗口"。
     scrollable_viewports: Vec<Rectangle>,
@@ -136,6 +141,7 @@ impl FileDragHitTestBoundsOperation {
             sidebar_directories: Vec::new(),
             sidebar_favorites: None,
             local_send: Vec::new(),
+            folder_tree_directories: Vec::new(),
             scrollable_viewports: Vec::new(),
         }
     }
@@ -171,6 +177,7 @@ impl FileDragHitTestBoundsOperation {
             sidebar_directories: self.sidebar_directories.clone(),
             sidebar_favorites: self.sidebar_favorites,
             local_send: self.local_send.clone(),
+            folder_tree_directories: self.folder_tree_directories.clone(),
         }
     }
 }
@@ -266,6 +273,10 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
             }
             FileDragHitTestMarker::SidebarFavorites => {
                 self.sidebar_favorites = Some(bounds);
+            }
+            FileDragHitTestMarker::FolderTreeDirectory { directory } => {
+                self.folder_tree_directories
+                    .push((directory.clone(), bounds));
             }
             FileDragHitTestMarker::SidebarLocalSend { target } => {
                 self.local_send.push((target.clone(), bounds));

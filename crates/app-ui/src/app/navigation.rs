@@ -484,7 +484,16 @@ impl FileBrowser {
         )
     }
 
+    /// 目录监视报来的变化：文件夹树和各窗格各按自己的规则用。
     pub(super) fn reload_observed_directory(
+        &mut self,
+        change: file_core::DirectoryEntryChanges,
+    ) -> Task<Message> {
+        let folder_tree = self.accept_folder_tree_changes(&change);
+        Task::batch([folder_tree, self.reload_observed_directory_in_panes(change)])
+    }
+
+    fn reload_observed_directory_in_panes(
         &mut self,
         change: file_core::DirectoryEntryChanges,
     ) -> Task<Message> {

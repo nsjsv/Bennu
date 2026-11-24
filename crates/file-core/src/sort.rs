@@ -207,7 +207,7 @@ fn kind_rank(kind: FileKind) -> u8 {
 /// 名字按人读的顺序：不分大小写，连着的数字按数值比（`第2集` 在 `第10集` 前面）。这样比一样
 /// 的（只差大小写、数字前面的 0）再按原始字节定先后，任何一批名字排出来只有一种顺序。不是
 /// UTF-8 的字节当作替换字符比。
-fn compare_names(left: &OsStr, right: &OsStr) -> Ordering {
+pub fn compare_names(left: &OsStr, right: &OsStr) -> Ordering {
     let (left, right) = (left.as_encoded_bytes(), right.as_encoded_bytes());
     natural_order(left, right).then_with(|| left.cmp(right))
 }

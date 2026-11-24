@@ -559,6 +559,15 @@ pub(super) const ACTIONS: &[ActionSpec] = &[
         keys: &[],
     },
     ActionSpec {
+        action: ShortcutAction::ToggleFolderTreePanel,
+        config_key: "toggle_folder_tree_panel",
+        label: || tr!("Show or Hide Folders Panel"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[KeyPress::named(NamedKey::Function(7))],
+    },
+    ActionSpec {
         action: ShortcutAction::ToggleQuickActionsPanel,
         config_key: "toggle_quick_actions_panel",
         label: || tr!("Show or Hide Quick Actions Panel"),

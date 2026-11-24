@@ -122,7 +122,7 @@ pub use scan::{
     DirectoryScanBatch, FileError, ScanOptions, ScanWarning,
 };
 pub use sort::{
-    compare_entries, discovered_sort_is_ready, sort_discovered_entry_indices, sort_entries,
+    compare_entries, compare_names, discovered_sort_is_ready, sort_discovered_entry_indices, sort_entries,
     SortDirection, SortField,
 };
 pub use transfer_conflict::{

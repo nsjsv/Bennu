@@ -11,7 +11,9 @@ use tokio_util::sync::CancellationToken;
 
 use super::FileBrowser;
 use crate::info_panel::InfoField;
-use crate::model::{ContextMenuState, FilePropertiesSnapshot, Message, RightDockMenuState};
+use crate::model::{
+    ContextMenuState, DockMenuPanelSection, FilePropertiesSnapshot, Message, RightDockMenuState,
+};
 use crate::right_dock::DockPanel;
 use crate::selection_summary::PaneSelectionSummary;
 
@@ -160,7 +162,9 @@ impl FileBrowser {
                         .filter(|panel| layout.contains(*panel))
                         .collect(),
                     locked: layout.is_locked(),
-                    info_panel: Some(self.user_config.info_panel.clone()),
+                    panel_section: Some(DockMenuPanelSection::InfoFields(
+                        self.user_config.info_panel.clone(),
+                    )),
                 }));
             }
         }

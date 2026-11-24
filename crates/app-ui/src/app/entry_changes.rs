@@ -131,7 +131,7 @@ impl FileBrowser {
     }
 
     /// 需要监听的目录：每个可见窗格活动标签的当前目录与展开目录，加上图标展开
-    /// 的目录。扫描期间也监听——变化会排队等扫描落地，拆掉订阅只会丢事件。
+    /// 的目录和文件夹树展开的目录。扫描期间也监听——变化会排队等扫描落地，拆掉订阅只会丢事件。
     /// 回收站视图不走文件监听。
     pub(super) fn watched_directories(&self) -> HashSet<PathBuf> {
         let visible_tabs = self
@@ -148,6 +148,7 @@ impl FileBrowser {
                     .chain(tab.expanded_directories.keys().cloned())
             })
             .chain(self.icon_grid_expansion_watch_directories())
+            .chain(self.folder_tree_watched_directories())
             .collect()
     }
 

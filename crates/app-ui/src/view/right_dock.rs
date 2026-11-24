@@ -23,6 +23,7 @@ pub(crate) fn dock_panel_label(panel: DockPanel) -> String {
         DockPanel::Info => tr!("Info"),
         DockPanel::TaskLog => tr!("Tasks"),
         DockPanel::QuickActions => tr!("Quick Actions"),
+        DockPanel::FolderTree => tr!("Folders"),
     }
 }
 
@@ -104,6 +105,7 @@ fn panel_content(browser: &FileBrowser, panel: DockPanel) -> Element<'_, Message
         DockPanel::Info => super::info_panel::info_panel_content(browser),
         DockPanel::TaskLog => super::task_log_panel::task_log_panel(browser),
         DockPanel::QuickActions => super::quick_actions_panel::quick_actions_panel(browser),
+        DockPanel::FolderTree => super::folder_tree_panel::folder_tree_panel(browser),
     }
 }
 

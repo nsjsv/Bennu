@@ -56,6 +56,7 @@ pub(crate) struct UserPreferences {
     pub(crate) sidebar_width: f32,
     pub(crate) right_dock: RightDockLayout,
     pub(crate) info_panel: InfoPanelPreferences,
+    pub(crate) folder_tree_limit_to_home: bool,
     pub(crate) sidebar_favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub(crate) network_connections: Vec<SavedNetworkConnection>,
     pub(crate) terminal_emulator: TerminalEmulator,
@@ -117,6 +118,7 @@ impl UserPreferences {
             sidebar_width: normalize_sidebar_width(config.sidebar_width),
             right_dock: config.right_dock.clone(),
             info_panel: config.info_panel.clone(),
+            folder_tree_limit_to_home: config.folder_tree_limit_to_home,
             sidebar_favorites: config.sidebar_favorites.clone(),
             network_connections: config.network_connections.clone(),
             terminal_emulator: config.terminal_emulator,
@@ -177,6 +179,7 @@ impl UserPreferences {
         config.sidebar_width = self.sidebar_width;
         config.right_dock = self.right_dock.clone();
         config.info_panel = self.info_panel.clone();
+        config.folder_tree_limit_to_home = self.folder_tree_limit_to_home;
         config.sidebar_favorites = self.sidebar_favorites.clone();
         config.network_connections = self.network_connections.clone();
         config.terminal_emulator = self.terminal_emulator;
@@ -263,6 +266,7 @@ impl UserPreferences {
         stored.sidebar_width = f64::from(normalize_sidebar_width(self.sidebar_width));
         stored.right_dock = Some(right_dock_to_stored(&self.right_dock));
         stored.info_panel = Some(info_panel_to_stored(&self.info_panel));
+        stored.folder_tree_limit_to_home = Some(self.folder_tree_limit_to_home);
         stored.sidebar_favorites = self
             .sidebar_favorites
             .as_ref()
@@ -432,6 +436,9 @@ impl UserPreferences {
             sidebar_width: normalize_sidebar_width(stored.sidebar_width as f32),
             right_dock: right_dock_from_stored(&stored, &mut unrecognized),
             info_panel: info_panel_from_stored(&stored, &default_preferences, &mut unrecognized),
+            folder_tree_limit_to_home: stored
+                .folder_tree_limit_to_home
+                .unwrap_or(default_preferences.folder_tree_limit_to_home),
             sidebar_favorites: stored
                 .sidebar_favorites
                 .map(|favorites| bennu_sidebar::sidebar_favorites_from_stored(&favorites)),

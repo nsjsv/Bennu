@@ -313,6 +313,9 @@ impl FileBrowser {
             ShortcutAction::ToggleInfoPanel => {
                 self.toggle_dock_panel(crate::right_dock::DockPanel::Info)
             }
+            ShortcutAction::ToggleFolderTreePanel => {
+                self.toggle_dock_panel(crate::right_dock::DockPanel::FolderTree)
+            }
             ShortcutAction::ToggleQuickActionsPanel => {
                 self.toggle_dock_panel(crate::right_dock::DockPanel::QuickActions)
             }

@@ -49,6 +49,7 @@ mod formatting;
 mod icon_grid_geometry;
 mod icon_grid_layout;
 mod icon_grid_view;
+mod folder_tree;
 mod info_panel;
 mod input_blocking_space;
 mod keyed_rows;

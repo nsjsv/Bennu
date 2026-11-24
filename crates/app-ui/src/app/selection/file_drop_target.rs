@@ -50,6 +50,7 @@ pub(super) fn freeze_file_drop_hit_test_bounds(
         sidebar_directories: measured.sidebar_directories,
         sidebar_favorites: measured.sidebar_favorites,
         local_send: measured.local_send,
+        folder_tree_directories: measured.folder_tree_directories,
     }
 }
 
@@ -93,6 +94,14 @@ pub(super) fn resolve_file_drop_target(
         .find(|target| target.bounds.contains(position))
     {
         return Some(FileDropTarget::Directory(target.directory.clone()));
+    }
+    if let Some((directory, _)) = bounds
+        .folder_tree_directories
+        .iter()
+        .rev()
+        .find(|(_, row)| row.contains(position))
+    {
+        return Some(FileDropTarget::Directory(directory.clone()));
     }
 
     if let Some(target) = bounds
@@ -162,6 +171,27 @@ mod tests {
         assert_eq!(
             resolve_file_drop_target(&bounds, Point::new(20.0, 20.0), None),
             Some(FileDropTarget::Tab(tab_target))
+        );
+    }
+
+    #[test]
+    fn a_folder_tree_row_is_a_folder_drop_target_like_any_other() {
+        let row = |y: f32| Rectangle::new(Point::new(0.0, y), Size::new(200.0, 28.0));
+        let bounds = FileDropHitTestBounds {
+            folder_tree_directories: vec![
+                (PathBuf::from("/home/me/a"), row(0.0)),
+                (PathBuf::from("/home/me/b"), row(28.0)),
+            ],
+            ..FileDropHitTestBounds::default()
+        };
+
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 40.0), None),
+            Some(FileDropTarget::Directory(PathBuf::from("/home/me/b")))
+        );
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(20.0, 80.0), None),
+            None
         );
     }
 

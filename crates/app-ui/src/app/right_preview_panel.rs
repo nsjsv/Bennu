@@ -26,7 +26,8 @@ impl FileBrowser {
     pub(crate) fn sync_right_dock_panels(&mut self) -> Task<Message> {
         self.sync_quick_actions_panel();
         let info = self.sync_info_panel();
-        Task::batch([self.sync_preview_panel(), info])
+        let folder_tree = self.sync_folder_tree();
+        Task::batch([self.sync_preview_panel(), info, folder_tree])
     }
 
     /// 目录不进面板预览:文件夹树与侧栏视觉重复,目录目标预览区回空态;Space 独立窗口的

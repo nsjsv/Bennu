@@ -211,6 +211,8 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Show or Hide Preview Panel", "显示 / 隐藏预览面板"),
     ("Show or Hide Info Panel", "显示 / 隐藏信息面板"),
     ("Show or Hide Quick Actions Panel", "显示 / 隐藏快捷操作面板"),
+    ("Show or Hide Folders Panel", "显示 / 隐藏文件夹面板"),
+    ("Limit to Home Folder", "只限主目录"),
     ("Quick Actions", "快捷操作"),
     ("No quick actions for these items", "这些项目没有能用的快捷操作"),
     ("Lock or Unlock Right Panels", "锁定 / 解锁右侧面板"),

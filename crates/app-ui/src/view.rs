@@ -37,6 +37,7 @@ mod preview_settings;
 mod properties_window;
 mod rendering_settings;
 mod info_panel;
+mod folder_tree_panel;
 mod quick_actions_panel;
 mod task_log_panel;
 mod property_text;

@@ -20,11 +20,18 @@ pub(crate) enum DockPanel {
     TaskLog,
     /// 对选中项能用的转换、压缩、解压等和自定义动作，点一下就跑。
     QuickActions,
+    /// 只列文件夹的树，跟着当前目录展开。
+    FolderTree,
 }
 
 impl DockPanel {
-    pub(crate) const ALL: [Self; 4] =
-        [Self::Preview, Self::Info, Self::TaskLog, Self::QuickActions];
+    pub(crate) const ALL: [Self; 5] = [
+        Self::Preview,
+        Self::Info,
+        Self::TaskLog,
+        Self::QuickActions,
+        Self::FolderTree,
+    ];
 
     pub(crate) fn storage_name(self) -> &'static str {
         match self {
@@ -32,6 +39,7 @@ impl DockPanel {
             Self::Info => "info",
             Self::TaskLog => "task_log",
             Self::QuickActions => "quick_actions",
+            Self::FolderTree => "folder_tree",
         }
     }
 

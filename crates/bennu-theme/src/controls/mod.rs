@@ -11,6 +11,9 @@ mod escape;
 mod feedback;
 mod fields;
 mod hint;
+mod primary_selection;
+#[cfg(test)]
+mod primary_selection_tests;
 mod toggles;
 
 pub use buttons::{
@@ -24,7 +27,7 @@ pub use feedback::{
 };
 pub use fields::{
     dropdown, dropdown_menu_style, dropdown_style, inline_text_field, text_area, text_field,
-    text_field_style,
+    text_field_style, TextArea, TextField,
 };
 pub(crate) use hint::gated_tooltip;
 pub use hint::{tooltip, TOOLTIP_DELAY};

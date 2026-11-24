@@ -2,14 +2,14 @@
 //!
 //! 连接中输入框不可改、"添加"变"正在连接…"：结果要对上用户看到的那个地址。
 
-use iced::widget::{column, row, Space, TextInput};
+use iced::widget::{column, row, Space};
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::transfer::{AddressFormMessage, FavoriteAddressForm, TransferMessage};
 use crate::model::Message;
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::controls::normal_button;
-use bennu_theme::controls::text_field;
+use bennu_theme::controls::{text_field, TextField};
 use bennu_theme::typography::CAPTION_SIZE;
 use bennu_theme::ui_colors;
 
@@ -26,7 +26,7 @@ fn form_input<'a>(
     value: &'a str,
     editable: bool,
     on_input: fn(String) -> AddressFormMessage,
-) -> TextInput<'a, Message> {
+) -> TextField<'a, Message> {
     text_field(placeholder, value)
         .on_input_maybe(editable.then_some(move |value| form_message(on_input(value))))
         .on_submit_maybe(editable.then(|| form_message(AddressFormMessage::Submitted)))

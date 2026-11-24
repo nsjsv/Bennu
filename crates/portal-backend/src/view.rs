@@ -33,7 +33,7 @@ use crate::{Message, PickerDaemon};
 use bennu_preview::window_shell::{split_window, HeaderBar, SplitPane};
 use bennu_theme::controls::check_box;
 use bennu_theme::controls::dropdown;
-use bennu_theme::controls::text_field;
+use bennu_theme::controls::{text_field, TextField};
 use bennu_theme::controls::{normal_button, suggested_button};
 use bennu_theme::typography::{BODY_SIZE, BOLD, HEADING_SIZE};
 use iced::window;
@@ -334,7 +334,7 @@ fn entry_row(
 fn save_name_input(
     session: &PickerSession,
     emit: impl Fn(SessionMessage) -> SessionMessage + Clone + 'static,
-) -> Option<iced::widget::TextInput<'static, SessionMessage>> {
+) -> Option<TextField<'static, SessionMessage>> {
     match session.kind() {
         PickerKind::SaveFile { .. } => Some(
             text_field("文件名", session.name_input())

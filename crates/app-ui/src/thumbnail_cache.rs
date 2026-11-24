@@ -10,7 +10,8 @@ use thumbnails::{CachedThumbnail, ThumbnailKey, ThumbnailRequest, ThumbnailSourc
 use crate::model::LocationKey;
 
 pub(crate) const LIST_THUMBNAIL_EDGE: u32 = 96;
-pub(crate) const LIST_THUMBNAIL_SIZE: f32 = 42.0;
+/// 列表缩略图显示槽（不是解码边长）；列表行高由它推出，改它就是改行高。
+pub(crate) const LIST_THUMBNAIL_SIZE: f32 = 22.0;
 pub(crate) const COLUMN_THUMBNAIL_EDGE: u32 = 48;
 pub(crate) const COLUMN_THUMBNAIL_SIZE: f32 = 18.0;
 pub(crate) const TRANSFER_CONFLICT_THUMBNAIL_EDGE: u32 = 96;

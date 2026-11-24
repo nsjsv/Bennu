@@ -82,7 +82,7 @@ fn browser_with_a_and_z() -> crate::app::FileBrowser {
 }
 
 fn layout() -> ListRowLayout {
-    let mut layout = ListRowLayout::new(0, 40.0);
+    let mut layout = ListRowLayout::new(0, 40.0, 0.0);
     layout.add_segment(None, 0, 1.0);
     layout
 }

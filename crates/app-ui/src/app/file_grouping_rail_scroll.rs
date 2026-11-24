@@ -171,8 +171,8 @@ mod tests {
     #[test]
     fn rail_target_message_scrolls_list_and_writes_back_viewport_state() {
         let (mut browser, _, pane_id) = grouped_list_browser();
-        // 行流:[组头A(32), a(46), 组头Z(32), z(46)],内容 156 + 表头 32;
-        // 视口高 100 时可支撑的最大偏移 = 188 - 100 = 88。
+        // 行流:[组头A(32), a(行高), 组头Z(32), z(行高)],内容 (32 + 行高) * 2 + 表头 32;
+        // 视口高 100 时可支撑的最大偏移 = 内容 - 100。
         browser.pane_mut().list_viewport = Some(ColumnViewport {
             offset_y: 0.0,
             height: 100.0,
@@ -189,7 +189,7 @@ mod tests {
             LIST_HEADER_HEIGHT
         );
 
-        // 组Z顶点 78,目标 78 + 32 = 110,夹到内容尾部 88。
+        // 组Z顶点 32 + 行高,目标再加表头留量 32,超出最大偏移,夹到内容尾部。
         drop(browser.update(Message::FileGroupingRailTargetSelected {
             pane: pane_id,
             group_index: 1,

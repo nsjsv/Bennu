@@ -17,6 +17,7 @@ use super::root_grouping::{split_directories_first, RootGrouping};
 use super::{transfer_sort_for_expanded, transfer_sort_for_root};
 use crate::app::panes::BrowserPaneView;
 use crate::app::FileBrowser;
+use crate::list_view::list_snippet_line_height;
 use crate::model::{DirectoryEntrySnapshot, ExpandedDirectory};
 use crate::transfer_placeholders::{
     hash_transfer_placeholders, merge_entries_with_placeholders,
@@ -86,7 +87,11 @@ impl<'a> ListRowSources<'a> {
             grouping: RootGrouping::for_pane_root(browser, pane.location),
             expanded: pane.expanded_directories,
             placeholders,
-            heights: ListEntryHeights::at(pane.location, row_height),
+            heights: ListEntryHeights::at(
+                pane.location,
+                row_height,
+                list_snippet_line_height(browser.user_config().list_view_density),
+            ),
             entry_metadata_revision: browser.entry_metadata_revision,
         }
     }
@@ -146,7 +151,11 @@ impl<'a> ListRowSources<'a> {
     }
 
     fn build(&self, fingerprint: u64) -> ListRowLayout {
-        let mut layout = ListRowLayout::new(fingerprint, self.heights.row_height());
+        let mut layout = ListRowLayout::new(
+            fingerprint,
+            self.heights.row_height(),
+            self.heights.snippet_line_height(),
+        );
         let root = layout.add_segment(None, 0, 1.0);
         let merged = merge_entries_with_placeholders(
             self.root,

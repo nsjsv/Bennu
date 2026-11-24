@@ -9,6 +9,7 @@ use iced::{Element, Length};
 
 use super::{list_column_width, ListGeometry};
 use crate::app::panes::BrowserPaneView;
+use crate::config::ViewDensityLevel;
 use crate::file_entry_view::FileEntryVisualState;
 use crate::model::{FileEntryContentModifier, Message, SearchHitDetail};
 use crate::search_result_text::{emphasized_spans, location_text};
@@ -20,12 +21,13 @@ use bennu_theme::typography::CAPTION_SIZE;
 
 /// 摘要比名字淡一些，选中、悬停时跟着行的文字颜色走。
 const SNIPPET_TEXT_ALPHA: f32 = 0.72;
-/// 摘要行与行高的比例：默认档行高 46 时摘要行 18。
-const SNIPPET_LINE_TO_ROW_RATIO: f32 = 18.0 / 46.0;
+/// 默认档的摘要行高。它跟摘要字号（`CAPTION_SIZE`）走，不跟行高走：行高贴着缩略图槽，
+/// 行再矮，摘要也得放得下一行字。
+const SNIPPET_LINE_HEIGHT: f32 = 18.0;
 
 /// 搜索结果名字下面那行摘要的高度，随档位缩放；行流的几何与渲染共用。
-pub(crate) fn list_snippet_line_height(row_height: f32) -> f32 {
-    (row_height * SNIPPET_LINE_TO_ROW_RATIO).round()
+pub(crate) fn list_snippet_line_height(level: ViewDensityLevel) -> f32 {
+    (SNIPPET_LINE_HEIGHT * level.scale()).round()
 }
 
 fn search_detail<'a>(
@@ -112,11 +114,31 @@ pub(super) fn location_cell<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::list_snippet_line_height;
+    use super::{list_snippet_line_height, ListGeometry};
+    use crate::config::{
+        ViewDensityLevel, ICON_GRID_SIZE_STEP, MAX_ICON_GRID_SIZE, MIN_ICON_GRID_SIZE,
+    };
+    use bennu_theme::typography::CAPTION_SIZE;
 
     #[test]
-    fn snippet_line_scales_with_row_height() {
-        assert_eq!(list_snippet_line_height(46.0), 18.0);
-        assert_eq!(list_snippet_line_height(69.0), 27.0);
+    fn snippet_line_scales_with_density_not_with_the_row() {
+        let default_row = ListGeometry::for_level(ViewDensityLevel::DEFAULT).row_height;
+        assert_eq!(list_snippet_line_height(ViewDensityLevel::DEFAULT), 18.0);
+        // 摘要行不随行高等比缩：默认行高下按行高比例推会只剩 11。
+        assert!(list_snippet_line_height(ViewDensityLevel::DEFAULT) > default_row / 2.0);
+        assert_eq!(
+            list_snippet_line_height(ViewDensityLevel::from_index(4)),
+            24.0
+        );
+    }
+
+    #[test]
+    fn snippet_line_holds_its_text_at_every_density() {
+        for size in (MIN_ICON_GRID_SIZE..=MAX_ICON_GRID_SIZE).step_by(ICON_GRID_SIZE_STEP as usize)
+        {
+            let level = ViewDensityLevel::from_icon_grid_size(size);
+            let text_size = (CAPTION_SIZE * level.scale()).round();
+            assert!(list_snippet_line_height(level) >= text_size);
+        }
     }
 }

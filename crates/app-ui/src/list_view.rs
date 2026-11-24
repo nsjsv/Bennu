@@ -24,6 +24,7 @@ use crate::model::{
     BrowserPaneId, DirectoryLoadingPlaceholderEntry, FilePropertiesPermissions, ListColumnConfig,
     ListColumnKind, Message, ScrollbarRegion,
 };
+use crate::thumbnail_cache::LIST_THUMBNAIL_SIZE;
 use crate::view::{pane_blank_area, rename_field, rename_input_id};
 use crate::virtual_range::{both_quiet, covered_offsets};
 use bennu_preview::panel_text::readable_text;
@@ -46,7 +47,9 @@ const LIST_CONTENT_PADDING: iced::Padding = iced::Padding {
     bottom: 4.0,
     left: 6.0,
 };
-pub(crate) const LIST_ROW_HEIGHT: f32 = 46.0;
+/// 行高贴着缩略图槽推出：缩略图不会撑出行，默认档也保持紧凑；上下各留这么多空隙。
+const LIST_ROW_VERTICAL_INSET: f32 = 3.0;
+pub(crate) const LIST_ROW_HEIGHT: f32 = LIST_THUMBNAIL_SIZE + 2.0 * LIST_ROW_VERTICAL_INSET;
 pub(crate) const LIST_OVERSCAN_ROWS: usize = 16;
 /// 分组标题行的 chrome 高度:与表头总高同族(24 单元 + 8 内边距),
 /// 属面板 chrome 不随密度缩放;行流构建与渲染共用本常量保证同口径。
@@ -834,12 +837,15 @@ fn list_name_cell<'a>(
     let indent = Space::new().width(Length::Fixed(depth as f32 * geometry.indent_width));
     let toggle = list_directory_toggle(pane, geometry, entry);
     let name: Element<'a, Message> = if pane.renaming == Some(entry.path()) {
+        // 输入框默认字号加内边距比最矮档的行还高，会被行裁掉；字号与内边距跟着档位走。
         rename_field(
             inline_text_field(&tr!("File name"), pane.rename_input)
                 .id(rename_input_id())
                 .on_input(Message::RenameInputChanged)
                 .on_submit(Message::RenameSelected)
                 .style(entry_text_input_style(modifier))
+                .padding([2, 4])
+                .size(geometry.text_size)
                 .width(Length::Fill),
             pane.rename_hint,
             browser.active_language(),
@@ -996,6 +1002,7 @@ mod directory_status_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{ICON_GRID_SIZE_STEP, MAX_ICON_GRID_SIZE, MIN_ICON_GRID_SIZE};
     use file_core::{DirectoryEntry, EntryMetadata, FileKind};
     use std::path::PathBuf;
 
@@ -1078,6 +1085,23 @@ mod tests {
 
         let rows = list_initial_rows(900.0, default_level);
         assert!(rows as f32 * LIST_ROW_HEIGHT >= 900.0 - LIST_HEADER_HEIGHT);
+    }
+
+    #[test]
+    fn list_row_hugs_the_thumbnail_slot_at_every_density() {
+        assert_eq!(LIST_ROW_HEIGHT, 28.0);
+        assert_eq!(
+            ListGeometry::for_level(crate::config::ViewDensityLevel::DEFAULT).row_height,
+            28.0
+        );
+
+        // 两者各自取整后，缩略图槽仍不能超出行。
+        for size in (MIN_ICON_GRID_SIZE..=MAX_ICON_GRID_SIZE).step_by(ICON_GRID_SIZE_STEP as usize)
+        {
+            let geometry =
+                ListGeometry::for_level(crate::config::ViewDensityLevel::from_icon_grid_size(size));
+            assert!(geometry.row_height >= geometry.icon_density.thumbnail_size());
+        }
     }
 
     #[test]

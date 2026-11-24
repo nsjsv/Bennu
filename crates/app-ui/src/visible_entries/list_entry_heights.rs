@@ -7,23 +7,25 @@ use file_core::DirectoryEntry;
 use crate::model::{BrowserLocation, SearchWorkspaceState};
 
 /// 列表条目行的高度。文件夹里每行等高；搜索结果里有正文摘要的行多一行摘要。行流和各处
-/// 视口范围（缩略图、文件夹摘要、元数据调度）都从这里取，行高只有一个来源。
+/// 视口范围（缩略图、文件夹摘要、元数据调度）都从这里取，行高只有一个来源。摘要行高与行高
+/// 各自独立（都只由档位定），所以两个高度都由调用方给。
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ListEntryHeights<'a> {
     row_height: f32,
-    snippets: Option<(&'a SearchWorkspaceState, f32)>,
+    snippet_line_height: f32,
+    search: Option<&'a SearchWorkspaceState>,
 }
 
 impl<'a> ListEntryHeights<'a> {
-    pub(crate) fn at(location: &'a BrowserLocation, row_height: f32) -> Self {
+    pub(crate) fn at(
+        location: &'a BrowserLocation,
+        row_height: f32,
+        snippet_line_height: f32,
+    ) -> Self {
         Self {
             row_height,
-            snippets: location.search().map(|search| {
-                (
-                    search,
-                    crate::list_view::list_snippet_line_height(row_height),
-                )
-            }),
+            snippet_line_height,
+            search: location.search(),
         }
     }
 
@@ -31,27 +33,32 @@ impl<'a> ListEntryHeights<'a> {
         self.row_height
     }
 
+    pub(crate) fn snippet_line_height(&self) -> f32 {
+        self.snippet_line_height
+    }
+
     /// 条目名字下面那行摘要的高度；没有摘要为 0。
     pub(crate) fn snippet_height(&self, entry: &DirectoryEntry) -> f32 {
-        match self.snippets {
-            Some((search, height))
+        match self.search {
+            Some(search)
                 if search
                     .detail(entry.path())
                     .is_some_and(|detail| detail.snippet.is_some()) =>
             {
-                height
+                self.snippet_line_height
             }
             _ => 0.0,
         }
     }
 }
 
-/// 排好的行流按它判断行高变没变：行高，搜索里再加摘要表的版本号。
+/// 排好的行流按它判断行高变没变：行高、摘要行高，搜索里再加摘要表的版本号。
 impl Hash for ListEntryHeights<'_> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.row_height.to_bits().hash(state);
-        self.snippets
-            .map(|(search, height)| (search.details_revision(), height.to_bits()))
+        self.snippet_line_height.to_bits().hash(state);
+        self.search
+            .map(SearchWorkspaceState::details_revision)
             .hash(state);
     }
 }
@@ -116,8 +123,10 @@ mod tests {
                 finished: true,
             },
         );
-        let heights = ListEntryHeights::at(&tab.location, 46.0);
-        let snippet = crate::list_view::list_snippet_line_height(46.0);
+        let row = crate::list_view::LIST_ROW_HEIGHT;
+        let snippet =
+            crate::list_view::list_snippet_line_height(crate::config::ViewDensityLevel::DEFAULT);
+        let heights = ListEntryHeights::at(&tab.location, row, snippet);
         assert_eq!(heights.snippet_height(&tab.entries[0]), snippet);
         assert_eq!(heights.snippet_height(&tab.entries[1]), 0.0);
 
@@ -125,11 +134,11 @@ mod tests {
         let range = crate::transfer_placeholder_view::list_row_layout(
             &browser,
             browser.pane_view(browser.active_pane_id()).unwrap(),
-            46.0,
+            row,
         )
-        .range_for_viewport(0.0, 46.0 + snippet, 10.0, 0);
+        .range_for_viewport(0.0, row + snippet, 10.0, 0);
         assert_eq!(range.start, 1);
-        assert_eq!(range.before_height, 46.0 + snippet);
-        assert_eq!(range.after_height, 46.0);
+        assert_eq!(range.before_height, row + snippet);
+        assert_eq!(range.after_height, row);
     }
 }

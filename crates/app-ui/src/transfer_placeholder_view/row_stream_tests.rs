@@ -39,7 +39,7 @@ fn browser_with_a_and_z() -> FileBrowser {
 }
 
 fn layout() -> ListRowLayout {
-    let mut layout = ListRowLayout::new(0, 40.0);
+    let mut layout = ListRowLayout::new(0, 40.0, 0.0);
     layout.add_segment(None, 0, 1.0);
     layout
 }
@@ -62,7 +62,7 @@ fn vertical_bounds_count_placeholder_rows_above_the_target() {
 
 #[test]
 fn content_height_counts_placeholder_and_animated_rows() {
-    let mut rows = ListRowLayout::new(0, 40.0);
+    let mut rows = ListRowLayout::new(0, 40.0, 0.0);
     let half_open = rows.add_segment(None, 0, 0.5);
     rows.push_entry(half_open, 0, 0.0, None);
     rows.push_placeholder(placeholder("incoming.txt"));
@@ -103,7 +103,7 @@ fn path_at_point_hits_entry_rows_and_skips_chrome_rows() {
 fn viewport_range_keeps_collapsed_rows_inside_the_window() {
     // 折叠到 0 高的行落在窗口里照样排出来(动画中的行要有控件状态);
     // 窗口之外的行不排,上下空白补齐总高。
-    let mut rows = ListRowLayout::new(0, 40.0);
+    let mut rows = ListRowLayout::new(0, 40.0, 0.0);
     let open = rows.add_segment(None, 0, 1.0);
     let collapsed = rows.add_segment(Some(PathBuf::from("/d/dir")), 1, 0.0);
     rows.push_entry(open, 0, 0.0, None); // 0..40

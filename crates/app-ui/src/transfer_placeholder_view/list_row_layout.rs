@@ -89,6 +89,7 @@ struct ListGroupHeader {
 pub(crate) struct ListRowLayout {
     fingerprint: u64,
     row_height: f32,
+    snippet_line_height: f32,
     slots: Vec<ListRowSlot>,
     /// 每行底边离第一行顶的距离，按行序逐行相加（与原来逐行累加的结果一致）。
     bottoms: Vec<f32>,
@@ -101,10 +102,11 @@ pub(crate) struct ListRowLayout {
 }
 
 impl ListRowLayout {
-    pub(super) fn new(fingerprint: u64, row_height: f32) -> Self {
+    pub(super) fn new(fingerprint: u64, row_height: f32, snippet_line_height: f32) -> Self {
         Self {
             fingerprint,
             row_height,
+            snippet_line_height,
             slots: Vec::new(),
             bottoms: Vec::new(),
             segments: Vec::new(),
@@ -248,8 +250,12 @@ impl ListRowLayout {
                         .ok()
                         .map(|found| &self.decorations[found].1),
                     stripe_index,
-                    snippet_height: ListEntryHeights::at(pane.location, self.row_height)
-                        .snippet_height(entry),
+                    snippet_height: ListEntryHeights::at(
+                        pane.location,
+                        self.row_height,
+                        self.snippet_line_height,
+                    )
+                    .snippet_height(entry),
                 }
             }
             ListRowSlot::Placeholder { placeholder } => ListTransferRow::Placeholder {

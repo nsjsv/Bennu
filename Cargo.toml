@@ -68,6 +68,24 @@ wl-clipboard-rs = "0.9.3"
 [profile.dev]
 debug = "line-tables-only"
 
+# 依赖库的完整调试信息占 debug 产物大头，每次重编都要整份重写到盘上；
+# 要单步进依赖库时临时用 `--config 'profile.dev.package."*".debug=true'` 打开。
+[profile.dev.package."*"]
+debug = false
+
+# 本地上手试功能用（`cargo build --profile fast -p app-ui`，产物在 target/fast）：依赖库全速优化、
+# 只在第一次编；自己的代码轻优化、增量编译、不做 LTO，改一处几十秒出包。测性能、发版用 release。
+# 从 dev 派生而不是 release：构建脚本对 release 一族套链接顺序表，每次链接多花半分多钟。
+[profile.fast]
+inherits = "dev"
+opt-level = 1
+debug = false
+debug-assertions = false
+overflow-checks = false
+
+[profile.fast.package."*"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = "fat"

@@ -110,7 +110,7 @@ pub(super) fn handle_event(
     match event {
         Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
             if let Some(position) = cursor.position_in(text_bounds) {
-                let position = Point::new(position.x + state.scroll_x, position.y);
+                let position = Point::new(position.x + state.drawn_scroll_x(), position.y);
                 let click = selection::press(state, document, position);
                 state.last_click = Some(click);
                 // 双击选词、三击选段：选区已定，写主选区。
@@ -278,7 +278,7 @@ fn drag_selection(
         0.0
     };
     state.drag_pointer = Point::new(
-        relative.x.clamp(0.0, text_bounds.width) + state.scroll_x,
+        relative.x.clamp(0.0, text_bounds.width) + state.drawn_scroll_x(),
         relative.y.clamp(0.0, (text_bounds.height - 1.0).max(0.0)),
     );
     let moved = selection::drag(state, document, state.drag_pointer);
@@ -334,14 +334,14 @@ fn tick(
     EventOutcome::redraw()
 }
 
-/// 滚轮：一格一格的进惯性，在每帧的 tick 里推进；触控板给的像素跟着手指滚。
+/// 滚轮：一格一格的进惯性，在每帧的 tick 里推进；触控板给的像素跟着手指滚。查看器不换行时两个
+/// 方向都能滚，横向没有可滚的宽度（换行、没有超宽行）时横向分量在几何那一层被夹成零。
 fn wheel_scroll(
     state: &mut TextPreviewViewerState,
     document: &TextPreviewDocument,
     delta: mouse::ScrollDelta,
 ) {
-    let Some(wheel) =
-        wheel_delta_for_axis(SmoothScrollAxis::Vertical, state.modifiers.shift(), delta)
+    let Some(wheel) = wheel_delta_for_axis(SmoothScrollAxis::Both, state.modifiers.shift(), delta)
     else {
         return;
     };
@@ -434,7 +434,10 @@ fn open_context_menu(
     cursor: mouse::Cursor,
     bounds: Rectangle,
 ) {
-    let point = Point::new(position_in_text.x + state.scroll_x, position_in_text.y);
+    let point = Point::new(
+        position_in_text.x + state.drawn_scroll_x(),
+        position_in_text.y,
+    );
     // 点在选区外：光标移到点击处（清掉选区），菜单里「复制」随之置灰。
     if let Some(position) = selection::hit_test(state, document, point) {
         if !selection::selection_contains(state, position) {

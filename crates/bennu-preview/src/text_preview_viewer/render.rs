@@ -29,7 +29,7 @@ pub(super) fn draw_selection_ranges(
     let origin = text_bounds.position();
     for quad in selection::selection_quads(state, document, visible) {
         let bounds = Rectangle {
-            x: quad.x + origin.x - state.scroll_x,
+            x: quad.x + origin.x - state.drawn_scroll_x(),
             y: quad.y + origin.y,
             ..quad
         };
@@ -67,7 +67,7 @@ pub(super) fn draw_visible_rows(
         renderer.fill_paragraph(
             &row.paragraph,
             Point::new(
-                text_bounds.x - state.scroll_x,
+                text_bounds.x - state.drawn_scroll_x(),
                 text_bounds.y + entry.visible_y,
             ),
             color,

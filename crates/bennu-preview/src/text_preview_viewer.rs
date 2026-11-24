@@ -165,6 +165,11 @@ impl TextPreviewViewerState {
         (self.content_width - Padding::new(TEXT_PREVIEW_VIEWER_PADDING).x()).max(0.0)
     }
 
+    /// 画出来和点选用的横向位置：触控板拉过左右边缘时整体挪开画，弹回时逐渐归零。
+    fn drawn_scroll_x(&self) -> f32 {
+        self.scroll_x + self.touch.displacement().x
+    }
+
     fn max_scroll_x(&self) -> f32 {
         if self.view().wrap {
             0.0

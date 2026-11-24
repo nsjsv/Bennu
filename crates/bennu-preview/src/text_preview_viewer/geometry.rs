@@ -136,8 +136,8 @@ pub(super) fn scroll_viewer_by(
 }
 
 /// 触控板滚动作用在查看器上。竖向只有文件头、文件尾是边：窗口外还没读进来的行不算，滚不动
-/// 就停在那里等读。横向不越界：横向位置在绘制、点选、查找高亮里各处直接用，越界只在
-/// [`visible_rows`] 这一处给竖向加上。
+/// 就停在那里等读。横向的边是 0 和已排版行的最大宽度；没有可滚的宽度（换行、没有超宽行）时
+/// 不越界。越界的位移竖向由 [`visible_rows`]、横向由 `drawn_scroll_x` 加上，绘制和点选共用。
 pub(super) struct TouchTarget<'a> {
     pub(super) state: &'a mut TextPreviewViewerState,
     pub(super) document: &'a TextPreviewDocument,
@@ -149,7 +149,13 @@ impl ScrollTarget for TouchTarget<'_> {
             Orientation::Horizontal => {
                 let before = self.state.scroll_x;
                 scroll_viewer_horizontally(self.state, delta);
-                (self.state.scroll_x - before, 0.0)
+                let scrolled = self.state.scroll_x - before;
+                let beyond = if self.state.max_scroll_x() > 0.0 {
+                    delta - scrolled
+                } else {
+                    0.0
+                };
+                (scrolled, beyond)
             }
             Orientation::Vertical => {
                 let scrolled = scroll_viewer_by(self.state, self.document, delta);

@@ -871,3 +871,6 @@ fn the_document_wants_the_range_only_when_it_may_act_on_it() {
 
 #[path = "touch_tests.rs"]
 mod touch_tests;
+
+#[path = "horizontal_tests.rs"]
+mod horizontal_tests;

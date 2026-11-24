@@ -75,7 +75,7 @@ pub(super) fn draw_match_marks(
         };
         for mark in &retained.marks {
             let bounds = Rectangle {
-                x: mark.bounds.x + text_bounds.x - state.scroll_x,
+                x: mark.bounds.x + text_bounds.x - state.drawn_scroll_x(),
                 y: mark.bounds.y + text_bounds.y + entry.visible_y,
                 ..mark.bounds
             };

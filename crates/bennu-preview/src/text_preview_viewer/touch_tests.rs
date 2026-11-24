@@ -9,7 +9,7 @@ fn pixels(y: f32) -> Event {
 }
 
 /// 按 60 Hz 推进到不再要重画为止。
-fn settle(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
+pub(super) fn settle(state: &mut TextPreviewViewerState, document: &TextPreviewDocument) {
     let mut clipboard = RecordingClipboard::default();
     let start = Instant::now();
     for frame in 1..2_000 {

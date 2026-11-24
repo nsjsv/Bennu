@@ -1,5 +1,5 @@
 use crate::app::actions::ActionRuns;
-use iced::widget::{button, column, container, row, scrollable, svg, Svg};
+use iced::widget::{button, column, container, row, scrollable, svg, Column, Svg};
 use iced::{Alignment, Element, Length};
 
 use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
@@ -90,28 +90,14 @@ pub(crate) fn operation_queue_panel<'a>(
         .width(Length::Fill)]
     .spacing(8)
     .align_y(Alignment::Center);
-    if queue.has_terminal_tasks() || transfers.has_terminal() {
-        header = header.push(task_control_button(
-            tr!("Clear Finished"),
-            Message::FileOperationClearFinishedRequested,
-        ));
+    if let Some(clear) = clear_finished_button(queue, transfers) {
+        header = header.push(clear);
     }
-    let rows = panel_rows(queue, transfers);
-    let header = header.push(readable_text(tr!("%1 tasks", rows.len())));
-
-    let mut tasks = column![].spacing(6);
-    if rows.is_empty() {
-        tasks = tasks.push(empty_queue_row());
-    } else {
-        for row in rows {
-            tasks = tasks.push(match row {
-                PanelRow::File(task) => {
-                    operation_task_row(task, action_runs.label_for(task.id), animation_frame)
-                }
-                PanelRow::Transfer(task) => transfer_task_row(transfers, task, animation_frame),
-            });
-        }
-    }
+    let header = header.push(readable_text(tr!(
+        "%1 tasks",
+        panel_rows(queue, transfers).len()
+    )));
+    let tasks = operation_task_list(queue, transfers, action_runs, animation_frame);
 
     let scroll_region = ScrollbarRegion::OperationQueue;
     let smooth = smooth_scroll(&scroll_region);
@@ -130,6 +116,42 @@ pub(crate) fn operation_queue_panel<'a>(
         .width(Length::Fixed(OPERATION_QUEUE_PANEL_WIDTH))
         .style(context_menu_style)
         .into()
+}
+
+/// 有做完的任务时「清除已完成」；右下角弹出的列表和停靠区的任务面板共用。
+pub(crate) fn clear_finished_button(
+    queue: &FileOperationQueue,
+    transfers: &TransferTasks,
+) -> Option<Element<'static, Message>> {
+    (queue.has_terminal_tasks() || transfers.has_terminal()).then(|| {
+        task_control_button(
+            tr!("Clear Finished"),
+            Message::FileOperationClearFinishedRequested,
+        )
+    })
+}
+
+/// 任务一行一个，最新的在上面；右下角弹出的列表和停靠区的任务面板共用。
+pub(crate) fn operation_task_list<'a>(
+    queue: &'a FileOperationQueue,
+    transfers: &'a TransferTasks,
+    action_runs: &'a ActionRuns,
+    animation_frame: u8,
+) -> Column<'a, Message> {
+    let rows = panel_rows(queue, transfers);
+    let mut tasks = column![].spacing(6);
+    if rows.is_empty() {
+        return tasks.push(empty_queue_row());
+    }
+    for row in rows {
+        tasks = tasks.push(match row {
+            PanelRow::File(task) => {
+                operation_task_row(task, action_runs.label_for(task.id), animation_frame)
+            }
+            PanelRow::Transfer(task) => transfer_task_row(transfers, task, animation_frame),
+        });
+    }
+    tasks
 }
 
 fn operation_queue_display_tasks(

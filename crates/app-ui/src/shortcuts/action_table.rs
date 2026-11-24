@@ -550,6 +550,15 @@ pub(super) const ACTIONS: &[ActionSpec] = &[
         keys: &[KeyPress::named(NamedKey::Function(11))],
     },
     ActionSpec {
+        action: ShortcutAction::ToggleTaskLogPanel,
+        config_key: "toggle_task_log_panel",
+        label: || tr!("Show or Hide Tasks Panel"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[],
+    },
+    ActionSpec {
         action: ShortcutAction::ToggleRightDockLock,
         config_key: "toggle_right_dock_lock",
         label: || tr!("Lock or Unlock Right Panels"),

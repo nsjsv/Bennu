@@ -101,6 +101,58 @@ pub(crate) enum FileOperationHistoryItem {
     },
 }
 
+impl FileOperationHistoryItem {
+    /// 任务记录面板里的一句话：做了什么、对谁（一项写名字，多项写个数）、到哪。
+    pub(crate) fn summary(&self) -> String {
+        match self {
+            Self::Rename { from, to } => tr!("Rename %1 to %2", file_name(from), file_name(to)),
+            Self::BatchRename { renames } => tr!("Batch Rename %1", items(renames.len())),
+            Self::CreateDirectory { path } => tr!("New Folder %1", file_name(path)),
+            Self::CreateDirectories { created, .. } => tr!("New Folders %1", items(created.len())),
+            Self::CreateEmptyFile { path } => tr!("New File %1", file_name(path)),
+            Self::Trash { original_paths, .. } => {
+                tr!("Move to Trash %1", named_or_counted(original_paths))
+            }
+            Self::Appeared { paths, .. } => tr!("Created %1", named_or_counted(paths)),
+            Self::Copy { transfers } => transfer_summary(tr!("Copy"), transfers),
+            Self::Move { transfers } => transfer_summary(tr!("Move"), transfers),
+            Self::GatheredIntoNewFolder { directory, .. } => {
+                tr!("New Folder with Selection %1", file_name(directory))
+            }
+        }
+    }
+}
+
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn items(count: usize) -> String {
+    tr!("%1 items", count)
+}
+
+fn named_or_counted(paths: &[PathBuf]) -> String {
+    match paths {
+        [path] => file_name(path),
+        paths => items(paths.len()),
+    }
+}
+
+/// 「复制 3 项到 下载」：去处是第一项的目标所在的文件夹。
+fn transfer_summary(verb: String, transfers: &[CompletedTransfer]) -> String {
+    let what = match transfers {
+        [transfer] => file_name(&transfer.source),
+        transfers => items(transfers.len()),
+    };
+    match transfers.first().and_then(|transfer| transfer.target.parent()) {
+        Some(destination) => tr!("%1 %2 to %3", verb, what, file_name(destination)),
+        None => tr!("%1 %2", verb, what),
+    }
+}
+
 /// 一条撤销记录，项按执行的顺序排。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct HistoryEntry {
@@ -168,6 +220,21 @@ impl FileOperationHistory {
             self.redo_stack.clear();
         }
         push_entry(&mut self.undo_stack, items);
+    }
+
+    /// 能撤销的记录，最新的在前，每条一句话（一个动作的多步写第一步和一共几步）。
+    pub(crate) fn undo_summaries(&self) -> Vec<String> {
+        self.undo_stack
+            .iter()
+            .rev()
+            .filter_map(|entry| {
+                let first = entry.items.first()?.summary();
+                Some(match entry.items.len() {
+                    1 => first,
+                    steps => tr!("%1 and %2 more steps", first, steps - 1),
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn is_replaying(&self, task_id: u64) -> bool {

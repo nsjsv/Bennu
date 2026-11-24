@@ -477,6 +477,7 @@ impl FileBrowser {
             Message::SidebarResizeStarted => self.start_sidebar_resize_drag(),
             Message::RightDock(message) => self.handle_right_dock_message(message),
             Message::InfoPanel(message) => self.handle_info_panel_message(message),
+            Message::UndoFileOperations(count) => self.undo_file_operations(count),
             Message::SplitResizeStarted => self.start_split_resize(self.cursor_or_origin()),
             Message::TerminalPanel(message) => self.handle_terminal_panel_message(message),
             Message::CursorMoved { window, position } => {

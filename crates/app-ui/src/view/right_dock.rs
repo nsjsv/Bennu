@@ -21,6 +21,7 @@ pub(crate) fn dock_panel_label(panel: DockPanel) -> String {
     match panel {
         DockPanel::Preview => tr!("Preview"),
         DockPanel::Info => tr!("Info"),
+        DockPanel::TaskLog => tr!("Tasks"),
     }
 }
 
@@ -100,6 +101,7 @@ fn panel_content(browser: &FileBrowser, panel: DockPanel) -> Element<'_, Message
     match panel {
         DockPanel::Preview => browser.right_preview_panel_content(),
         DockPanel::Info => super::info_panel::info_panel_content(browser),
+        DockPanel::TaskLog => super::task_log_panel::task_log_panel(browser),
     }
 }
 

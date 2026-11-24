@@ -639,3 +639,61 @@ fn ungathering_that_removes_the_new_folder_has_no_warning() {
         .completion_warning(bennu_localization::UiLanguage::English)
         .is_none());
 }
+
+#[test]
+fn the_task_panel_lists_what_can_be_undone_newest_first_in_words() {
+    let mut history = FileOperationHistory::new();
+    history.undo_stack.push(entry(FileOperationHistoryItem::Copy {
+        transfers: vec![
+            transfer("/home/a.txt", "/home/Downloads/a.txt"),
+            transfer("/home/b.txt", "/home/Downloads/b.txt"),
+        ],
+    }));
+    history.undo_stack.push(HistoryEntry {
+        items: vec![
+            FileOperationHistoryItem::Rename {
+                from: PathBuf::from("/home/old.txt"),
+                to: PathBuf::from("/home/new.txt"),
+            },
+            FileOperationHistoryItem::CreateDirectory {
+                path: PathBuf::from("/home/made"),
+            },
+        ],
+    });
+
+    // 跟当前界面语言无关：期望值用同一套文案拼。
+    let rename = tr!("Rename %1 to %2", "old.txt", "new.txt");
+    let copy = tr!("%1 %2 to %3", tr!("Copy"), tr!("%1 items", 2), "Downloads");
+    assert_eq!(
+        history.undo_summaries(),
+        vec![tr!("%1 and %2 more steps", rename, 1), copy]
+    );
+}
+
+#[test]
+fn undoing_to_an_older_entry_queues_one_undo_per_entry_in_order() {
+    let mut history = FileOperationHistory::new();
+    for name in ["first", "second", "third"] {
+        history.undo_stack.push(entry(FileOperationHistoryItem::CreateDirectory {
+            path: PathBuf::from(format!("/home/{name}")),
+        }));
+    }
+    let mut queue = FakeQueue::default();
+
+    // 「撤回到这里」点在第二条上 = 撤两条：第一条开始重放，第二条排队。
+    request(&mut history, &mut queue, HistoryDirection::Undo);
+    request(&mut history, &mut queue, HistoryDirection::Undo);
+    assert_eq!(queue.operations.len(), 1);
+    let (task_id, _) = queue.last();
+    end_replay(
+        &mut history,
+        &mut queue,
+        task_id,
+        TaskEnd::Completed(&FileOperationOutcome::Trash {
+            entries: Vec::new(),
+            untrashable: Vec::new(),
+        }),
+    );
+
+    assert_eq!(queue.operations.len(), 2, "the queued undo starts next");
+}

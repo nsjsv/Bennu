@@ -313,6 +313,9 @@ impl FileBrowser {
             ShortcutAction::ToggleInfoPanel => {
                 self.toggle_dock_panel(crate::right_dock::DockPanel::Info)
             }
+            ShortcutAction::ToggleTaskLogPanel => {
+                self.toggle_dock_panel(crate::right_dock::DockPanel::TaskLog)
+            }
             ShortcutAction::ToggleRightDockLock => self.toggle_right_dock_lock(),
             ShortcutAction::ToggleTerminal => self.toggle_terminal_via_shortcut(),
             ShortcutAction::TerminalNewTab => self.add_terminal_tab(),

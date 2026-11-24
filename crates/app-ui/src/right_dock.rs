@@ -16,15 +16,18 @@ const PORTION_SCALE: f32 = 1000.0;
 pub(crate) enum DockPanel {
     Preview,
     Info,
+    /// 正在跑的任务和做过的操作（能按顺序撤回）。
+    TaskLog,
 }
 
 impl DockPanel {
-    pub(crate) const ALL: [Self; 2] = [Self::Preview, Self::Info];
+    pub(crate) const ALL: [Self; 3] = [Self::Preview, Self::Info, Self::TaskLog];
 
     pub(crate) fn storage_name(self) -> &'static str {
         match self {
             Self::Preview => "preview",
             Self::Info => "info",
+            Self::TaskLog => "task_log",
         }
     }
 

@@ -245,3 +245,14 @@ fn a_saved_layout_is_what_a_new_window_starts_with() {
     assert!(browser.right_dock.layout().is_visible());
     assert_eq!(browser.right_dock.layout().width(), 500.0);
 }
+
+#[test]
+fn showing_the_tasks_panel_closes_the_floating_task_list() {
+    let mut browser = browser_with_dock();
+    browser.operation_queue.open_panel();
+
+    drop(browser.toggle_dock_panel(DockPanel::TaskLog));
+
+    assert!(browser.right_dock.layout().shows(DockPanel::TaskLog));
+    assert!(!browser.operation_queue.is_panel_open());
+}

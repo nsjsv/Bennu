@@ -476,6 +476,8 @@ pub(crate) enum Message {
     SmartFolderRemoved(String),
     SidebarResizeStarted,
     RightDock(crate::app::right_dock::RightDockMessage),
+    /// 任务面板里点了「撤销」「撤回到这里」：按顺序撤这么多条。
+    UndoFileOperations(usize),
     InfoPanel(crate::app::info_panel::InfoPanelMessage),
     SplitResizeStarted,
     CursorMoved {

@@ -50,6 +50,17 @@ impl FileBrowser {
         self.replay_history(HistoryDirection::Undo)
     }
 
+    /// 任务面板里「撤回到这里」：连着撤 `count` 条（同按 `count` 次 Ctrl+Z；重放期间多按的
+    /// 本来就排队），只能按顺序撤。
+    pub(super) fn undo_file_operations(&mut self, count: usize) -> Task<Message> {
+        Task::batch((0..count).map(|_| self.replay_history(HistoryDirection::Undo)))
+    }
+
+    /// 任务面板列的「做过的操作」：就是 Ctrl+Z 那一份撤销历史，最新的在前。
+    pub(crate) fn undo_summaries(&self) -> Vec<String> {
+        self.operation_history.undo_summaries()
+    }
+
     pub(super) fn redo_file_operation(&mut self) -> Task<Message> {
         self.replay_history(HistoryDirection::Redo)
     }

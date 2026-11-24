@@ -37,6 +37,7 @@ mod preview_settings;
 mod properties_window;
 mod rendering_settings;
 mod info_panel;
+mod task_log_panel;
 mod property_text;
 mod right_dock;
 mod search_filter_bar;
@@ -535,11 +536,18 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
         });
     }
 
+    // 任务面板显示着时进度在面板里看得到，右下角的圆钮多余。
+    let task_log_shown = browser
+        .right_dock
+        .layout()
+        .shows(crate::right_dock::DockPanel::TaskLog);
     if let Some(indicator) = operation_queue_indicator(
         &browser.operation_queue,
         &browser.transfer_tasks,
         browser.operation_progress_animation_frame,
-    ) {
+    )
+    .filter(|_| !task_log_shown)
+    {
         // 平时在侧栏右下角；侧栏藏起来时放到内容区左下角、底栏（或展开的终端）上面，
         // 不压住底栏的统计和终端按钮。
         let placement = if browser.sidebar_visible() {

@@ -156,6 +156,10 @@ impl FileBrowser {
 
     /// 布局改完：写盘；栏的宽度、显示与否会改窗格区宽度，视口跟着收。
     fn right_dock_changed(&mut self) -> Task<Message> {
+        // 任务面板显示出来就收起右下角弹出的任务列表：两处一样的东西不同时开着。
+        if self.right_dock.layout().shows(DockPanel::TaskLog) {
+            self.operation_queue.close_panel();
+        }
         self.user_config.right_dock = self.right_dock.layout().clone();
         Task::batch([
             self.persist_user_preferences_command(),

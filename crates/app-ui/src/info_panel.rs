@@ -1,4 +1,4 @@
-//! 信息面板显示哪些字段、跟不跟鼠标悬停：用户在面板右键菜单里选，存盘。
+//! 信息面板显示哪些字段：用户在面板右键菜单里选，存盘。
 
 /// 信息面板里的一行（详细信息是一整组）。顺序就是面板里的顺序。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -66,8 +66,6 @@ impl InfoField {
 pub(crate) struct InfoPanelPreferences {
     /// 用户关掉的字段，按 [`InfoField::ALL`] 的顺序。
     hidden_fields: Vec<InfoField>,
-    /// 指针停在某个条目上时临时显示它；默认关，面板只跟选中项。
-    pub(crate) follow_hover: bool,
 }
 
 impl Default for InfoPanelPreferences {
@@ -79,23 +77,18 @@ impl Default for InfoPanelPreferences {
                 InfoField::Accessed,
                 InfoField::StatusChanged,
             ],
-            follow_hover: false,
         }
     }
 }
 
 impl InfoPanelPreferences {
-    pub(crate) fn new(
-        hidden_fields: impl IntoIterator<Item = InfoField>,
-        follow_hover: bool,
-    ) -> Self {
+    pub(crate) fn new(hidden_fields: impl IntoIterator<Item = InfoField>) -> Self {
         let hidden: Vec<InfoField> = hidden_fields.into_iter().collect();
         Self {
             hidden_fields: InfoField::ALL
                 .into_iter()
                 .filter(|field| hidden.contains(field))
                 .collect(),
-            follow_hover,
         }
     }
 
@@ -115,9 +108,9 @@ impl InfoPanelPreferences {
             .filter(|hidden| *hidden != field)
             .collect::<Vec<_>>();
         *self = if self.shows(field) {
-            Self::new(hidden.into_iter().chain([field]), self.follow_hover)
+            Self::new(hidden.into_iter().chain([field]))
         } else {
-            Self::new(hidden, self.follow_hover)
+            Self::new(hidden)
         };
     }
 }
@@ -142,7 +135,7 @@ mod tests {
     #[test]
     fn hidden_fields_keep_the_panel_order_and_storage_names_roundtrip() {
         let preferences =
-            InfoPanelPreferences::new([InfoField::Owner, InfoField::Type, InfoField::Owner], false);
+            InfoPanelPreferences::new([InfoField::Owner, InfoField::Type, InfoField::Owner]);
         assert_eq!(
             preferences.hidden_fields(),
             &[InfoField::Type, InfoField::Owner]

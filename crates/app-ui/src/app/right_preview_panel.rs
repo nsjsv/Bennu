@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use file_core::FileKind;
 use iced::{Element, Task};
 
@@ -18,16 +20,18 @@ const MIN_PANEL_CONTENT_HEIGHT: f32 = 160.0;
 pub(crate) use bennu_preview::engine::PreviewLoadSurface;
 
 impl FileBrowser {
-    /// 单点收敛:预览面板显示着 ⇒ preview 状态与目标(活动窗格 `selected`,即最后点选的
-    /// 单焦点项)一致；信息面板显示着 ⇒ 信息快照对应目标。唯一调用点是
+    /// 单点收敛:预览面板显示着 ⇒ preview 状态与目标(停稳的悬停项,没有则活动窗格 `selected`,
+    /// 即最后点选的单焦点项)一致；信息面板显示着 ⇒ 信息快照对应目标。悬停先于两个面板
+    /// 同步,两边读同一个 [`FileBrowser::dock_item`]。唯一调用点是
     /// [`FileBrowser::update`] 主入口末尾,覆盖点击/键盘/删除/改名/tab 切换/窗格切换/
     /// 目录导航,以及启动偏好加载(同样经由消息处理抵达)。面板没显示(栏隐藏、关掉、
     /// 或藏在同格别的标签后面)时什么都不读。
     pub(crate) fn sync_right_dock_panels(&mut self) -> Task<Message> {
+        let hover = self.sync_dock_hover();
         self.sync_quick_actions_panel();
         let info = self.sync_info_panel();
         let folder_tree = self.sync_folder_tree();
-        Task::batch([self.sync_preview_panel(), info, folder_tree])
+        Task::batch([hover, self.sync_preview_panel(), info, folder_tree])
     }
 
     /// 目录不进面板预览:文件夹树与侧栏视觉重复,目录目标预览区回空态;Space 独立窗口的
@@ -36,7 +40,7 @@ impl FileBrowser {
         if !self.right_dock.layout().shows(DockPanel::Preview) {
             return Task::none();
         }
-        let Some(path) = self.tab().selected.clone() else {
+        let Some(path) = self.dock_item().map(Path::to_path_buf) else {
             // 目标为空:清掉内容显示空态。clear_preview 自带固定守卫,
             // pin 住的独立窗口预览不会被此处误清。
             if self.preview_engine.preview.is_some() {

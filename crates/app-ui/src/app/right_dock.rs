@@ -4,7 +4,7 @@
 use iced::{Point, Rectangle, Size, Task};
 
 use super::FileBrowser;
-use crate::model::{ContextMenuState, Message, RightDockMenuState};
+use crate::model::{ContextMenuState, DockMenuPanelSection, Message, RightDockMenuState};
 use crate::right_dock::{DockPanel, DropTarget};
 
 /// 左缘拖宽带的宽度。
@@ -121,22 +121,31 @@ impl FileBrowser {
                 return self.right_dock_changed();
             }
             RightDockMessage::MenuRequested => {
-                let layout = self.right_dock.layout();
-                self.context_menu = Some(ContextMenuState::RightDock(RightDockMenuState {
-                    position: self.cursor_or_origin(),
-                    open_panels: DockPanel::ALL
-                        .into_iter()
-                        .filter(|panel| layout.contains(*panel))
-                        .collect(),
-                    locked: layout.is_locked(),
-                    panel_section: None,
-                }));
+                self.context_menu = Some(self.right_dock_context_menu(None));
             }
         }
         // 拖动开始时别的指针手势让路，跟侧栏拖宽一样。
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
         Task::none()
+    }
+
+    /// 右键停靠区弹出的菜单；`panel_section` 是从某个面板里右键时多出的那一段。
+    pub(super) fn right_dock_context_menu(
+        &self,
+        panel_section: Option<DockMenuPanelSection>,
+    ) -> ContextMenuState {
+        let layout = self.right_dock.layout();
+        ContextMenuState::RightDock(RightDockMenuState {
+            position: self.cursor_or_origin(),
+            open_panels: DockPanel::ALL
+                .into_iter()
+                .filter(|panel| layout.contains(*panel))
+                .collect(),
+            locked: layout.is_locked(),
+            shows_hovered_item: self.user_config.dock_shows_hovered_item,
+            panel_section,
+        })
     }
 
     /// 快捷键、右键菜单：开或关一个面板（栏隐藏时打开它会把栏一起显示）。

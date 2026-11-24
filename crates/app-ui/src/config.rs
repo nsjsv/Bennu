@@ -354,6 +354,8 @@ pub(crate) struct UserConfig {
     pub(crate) info_panel: crate::info_panel::InfoPanelPreferences,
     /// 文件夹树在主目录里时从主目录开始（照 Dolphin）；关掉总从 `/` 开始。
     pub(crate) folder_tree_limit_to_home: bool,
+    /// 停靠区的信息、预览面板跟着指针停稳的条目；关掉（默认）时只跟选中项。
+    pub(crate) dock_shows_hovered_item: bool,
     pub(crate) sidebar_favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub(crate) network_connections: Vec<SavedNetworkConnection>,
     pub(crate) terminal_emulator: TerminalEmulator,
@@ -517,6 +519,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         right_dock: crate::right_dock::RightDockLayout::default(),
         info_panel: crate::info_panel::InfoPanelPreferences::default(),
         folder_tree_limit_to_home: true,
+        dock_shows_hovered_item: false,
         sidebar_favorites: None,
         network_connections: Vec::new(),
         terminal_emulator: DEFAULT_TERMINAL_EMULATOR,
@@ -582,6 +585,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         right_dock: crate::right_dock::RightDockLayout::default(),
         info_panel: crate::info_panel::InfoPanelPreferences::default(),
         folder_tree_limit_to_home: true,
+        dock_shows_hovered_item: false,
         sidebar_favorites: None,
         network_connections: Vec::new(),
         terminal_emulator: DEFAULT_TERMINAL_EMULATOR,

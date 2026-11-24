@@ -256,3 +256,32 @@ fn showing_the_tasks_panel_closes_the_floating_task_list() {
     assert!(browser.right_dock.layout().shows(DockPanel::TaskLog));
     assert!(!browser.operation_queue.is_panel_open());
 }
+
+#[test]
+fn the_menu_from_anywhere_in_the_dock_carries_the_hover_setting() {
+    use crate::app::dock_hover::DockHoverMessage;
+    use crate::app::folder_tree::FolderTreeMessage;
+    use crate::app::info_panel::InfoPanelMessage;
+
+    fn menu_shows_hovered_item(browser: &FileBrowser) -> bool {
+        match &browser.context_menu {
+            Some(ContextMenuState::RightDock(menu)) => menu.shows_hovered_item,
+            other => panic!("expected the dock menu, got {other:?}"),
+        }
+    }
+
+    let mut browser = browser_with_dock();
+    drop(browser.handle_right_dock_message(RightDockMessage::MenuRequested));
+    assert!(!menu_shows_hovered_item(&browser));
+
+    drop(browser.handle_dock_hover_message(DockHoverMessage::ShowHoveredItemToggled));
+    assert!(browser.context_menu.is_none(), "a click closes the menu");
+    assert!(browser.user_config.dock_shows_hovered_item);
+
+    drop(browser.handle_right_dock_message(RightDockMessage::MenuRequested));
+    assert!(menu_shows_hovered_item(&browser));
+    drop(browser.handle_info_panel_message(InfoPanelMessage::MenuRequested));
+    assert!(menu_shows_hovered_item(&browser));
+    drop(browser.handle_folder_tree_message(FolderTreeMessage::MenuRequested));
+    assert!(menu_shows_hovered_item(&browser));
+}

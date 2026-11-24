@@ -68,6 +68,7 @@ mod rendering_settings;
 mod revealed_path;
 #[cfg(test)]
 mod revealed_path_tests;
+pub(crate) mod dock_hover;
 pub(crate) mod folder_tree;
 pub(crate) mod info_panel;
 pub(crate) mod quick_actions_panel;
@@ -280,6 +281,7 @@ pub(crate) struct FileBrowser {
     pub(crate) right_dock: crate::right_dock::RightDock,
     right_dock_drag: Option<right_dock::RightDockDrag>,
     pub(crate) info_panel: info_panel::InfoPanelState,
+    dock_hover: dock_hover::DockHoverState,
     pub(crate) quick_actions: quick_actions_panel::QuickActionsPanel,
     /// 文件夹树面板显示着时才有。
     pub(crate) folder_tree: Option<crate::folder_tree::FolderTree>,
@@ -712,6 +714,7 @@ impl FileBrowser {
             right_dock: crate::right_dock::RightDock::new(user_config.right_dock.clone()),
             right_dock_drag: None,
             info_panel: info_panel::InfoPanelState::default(),
+            dock_hover: dock_hover::DockHoverState::default(),
             quick_actions: quick_actions_panel::QuickActionsPanel::default(),
             folder_tree: None,
             renaming: None,

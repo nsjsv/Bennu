@@ -82,7 +82,7 @@ pub(super) fn info_panel_from_stored(
         .filter_map(|name| InfoField::from_storage_name(name))
         .collect();
     unrecognized.note_dropped("info_panel", panel.hidden_fields.len(), hidden.len());
-    InfoPanelPreferences::new(hidden, panel.follow_hover)
+    InfoPanelPreferences::new(hidden)
 }
 
 pub(super) fn info_panel_to_stored(preferences: &InfoPanelPreferences) -> StoredInfoPanel {
@@ -92,6 +92,5 @@ pub(super) fn info_panel_to_stored(preferences: &InfoPanelPreferences) -> Stored
             .iter()
             .map(|field| field.storage_name().to_owned())
             .collect(),
-        follow_hover: preferences.follow_hover,
     }
 }

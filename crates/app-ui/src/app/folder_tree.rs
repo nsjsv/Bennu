@@ -8,10 +8,7 @@ use iced::Task;
 
 use super::FileBrowser;
 use crate::folder_tree::{tree_root, FolderNode, FolderTree, ListingRequest};
-use crate::model::{
-    ContextMenuState, DockMenuPanelSection, FileDropLayoutState, FileDropTarget, Message,
-    RightDockMenuState,
-};
+use crate::model::{DockMenuPanelSection, FileDropLayoutState, FileDropTarget, Message};
 use crate::right_dock::DockPanel;
 
 #[derive(Debug, Clone)]
@@ -66,18 +63,11 @@ impl FileBrowser {
                 }
             }
             FolderTreeMessage::MenuRequested => {
-                let layout = self.right_dock.layout();
-                self.context_menu = Some(ContextMenuState::RightDock(RightDockMenuState {
-                    position: self.cursor_or_origin(),
-                    open_panels: DockPanel::ALL
-                        .into_iter()
-                        .filter(|panel| layout.contains(*panel))
-                        .collect(),
-                    locked: layout.is_locked(),
-                    panel_section: Some(DockMenuPanelSection::FolderTree {
+                self.context_menu = Some(self.right_dock_context_menu(Some(
+                    DockMenuPanelSection::FolderTree {
                         limit_to_home: self.user_config.folder_tree_limit_to_home,
-                    }),
-                }));
+                    },
+                )));
             }
             FolderTreeMessage::LimitToHomeToggled => {
                 self.context_menu = None;

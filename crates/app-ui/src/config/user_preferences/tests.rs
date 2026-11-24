@@ -469,7 +469,7 @@ fn info_panel_fields_roundtrip_and_unknown_names_are_reported() {
     let default = default_user_config();
     let mut config = default.clone();
     config.info_panel =
-        crate::info_panel::InfoPanelPreferences::new([crate::info_panel::InfoField::Owner], true);
+        crate::info_panel::InfoPanelPreferences::new([crate::info_panel::InfoField::Owner]);
     let mut stored = config.user_preferences().to_stored();
     let restored = UserPreferences::from_stored(stored.clone(), &default);
     assert_eq!(restored.preferences.info_panel, config.info_panel);
@@ -484,4 +484,46 @@ fn info_panel_fields_roundtrip_and_unknown_names_are_reported() {
     let restored = UserPreferences::from_stored(stored, &default);
     assert_eq!(restored.preferences.info_panel, config.info_panel);
     assert_eq!(restored.unrecognized.into_keys(), vec!["info_panel"]);
+}
+
+#[test]
+fn the_dock_hover_setting_roundtrips_and_defaults_to_off() {
+    let default = default_user_config();
+    assert!(!default.dock_shows_hovered_item);
+
+    let mut config = default.clone();
+    config.dock_shows_hovered_item = true;
+    let interpreted = UserPreferences::from_stored(config.user_preferences().to_stored(), &default);
+    assert!(interpreted.preferences.dock_shows_hovered_item);
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+
+    let mut stored = default.user_preferences().to_stored();
+    stored.dock_shows_hovered_item = None;
+    let interpreted = UserPreferences::from_stored(stored, &default);
+    assert!(!interpreted.preferences.dock_shows_hovered_item);
+}
+
+/// 「显示鼠标悬停的项目」曾短暂存在信息面板的存盘里（没发过版）：现在属于停靠区，旧键直接忽略，
+/// 不报「认不出的设置」，下次保存时消失。
+#[test]
+fn an_info_panel_with_the_old_follow_hover_key_loads_cleanly() {
+    let default = default_user_config();
+    let mut payload = serde_json::to_value(default.user_preferences().to_stored()).unwrap();
+    payload["info_panel"] = serde_json::json!({
+        "hidden_fields": ["owner"],
+        "follow_hover": true,
+    });
+
+    let stored: StoredUserPreferences =
+        serde_json::from_value(payload).expect("payload with the old key parses");
+    let interpreted = UserPreferences::from_stored(stored, &default);
+
+    assert_eq!(
+        interpreted.preferences.info_panel,
+        crate::info_panel::InfoPanelPreferences::new([crate::info_panel::InfoField::Owner])
+    );
+    assert!(!interpreted.preferences.dock_shows_hovered_item);
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+    let saved = serde_json::to_string(&interpreted.preferences.to_stored()).unwrap();
+    assert!(!saved.contains("follow_hover"));
 }

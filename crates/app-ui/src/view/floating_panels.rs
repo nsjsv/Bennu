@@ -340,8 +340,9 @@ fn terminal_menu_panel(menu: &crate::model::TerminalMenuState) -> Element<'stati
         .into()
 }
 
-/// 停靠区菜单：每个面板一行（勾 = 在栏里，点了开关），再一行锁定。
+/// 停靠区菜单：每个面板一行（勾 = 在栏里，点了开关），再是锁定、显示鼠标悬停的项目。
 fn right_dock_menu_panel(menu: &RightDockMenuState) -> Element<'static, Message> {
+    use crate::app::dock_hover::DockHoverMessage;
     use crate::app::right_dock::RightDockMessage;
     let mut content = Column::new()
         .spacing(CONTEXT_MENU_ITEM_SPACING)
@@ -358,8 +359,13 @@ fn right_dock_menu_panel(menu: &RightDockMenuState) -> Element<'static, Message>
         tr!("Lock Panels"),
         Message::RightDock(RightDockMessage::LockToggled),
     ));
+    content = content.push(checked_menu_button(
+        menu.shows_hovered_item,
+        tr!("Show Hovered Items"),
+        Message::DockHover(DockHoverMessage::ShowHoveredItemToggled),
+    ));
     match &menu.panel_section {
-        // 在信息面板里右键：下面一段选显示哪些信息、跟不跟鼠标悬停。
+        // 在信息面板里右键：下面一段选显示哪些信息。
         Some(DockMenuPanelSection::InfoFields(info)) => {
             use crate::app::info_panel::InfoPanelMessage;
             content = content.push(iced::widget::rule::horizontal(1));
@@ -370,11 +376,6 @@ fn right_dock_menu_panel(menu: &RightDockMenuState) -> Element<'static, Message>
                     Message::InfoPanel(InfoPanelMessage::FieldToggled(field)),
                 ));
             }
-            content = content.push(checked_menu_button(
-                info.follow_hover,
-                tr!("Show Hovered Items"),
-                Message::InfoPanel(InfoPanelMessage::FollowHoverToggled),
-            ));
         }
         Some(DockMenuPanelSection::FolderTree { limit_to_home }) => {
             use crate::app::folder_tree::FolderTreeMessage;

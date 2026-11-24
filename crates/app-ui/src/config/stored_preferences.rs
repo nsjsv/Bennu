@@ -23,7 +23,6 @@ pub(crate) const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredInfoPanel {
     pub hidden_fields: Vec<String>,
-    pub follow_hover: bool,
 }
 
 /// 右侧停靠区：从上到下几格，每格的面板按存储名（`DockPanel::storage_name`）。
@@ -54,12 +53,15 @@ pub(crate) struct StoredUserPreferences {
     #[serde(default = "default_language_setting")]
     pub language_setting: String,
     pub sidebar_width: f64,
-    /// 信息面板关掉的字段、跟不跟悬停;None = 还没改过,用默认。
+    /// 信息面板关掉的字段;None = 还没改过,用默认。
     #[serde(default)]
     pub info_panel: Option<StoredInfoPanel>,
     /// 文件夹树只限主目录；None = 还没改过，用默认。
     #[serde(default)]
     pub folder_tree_limit_to_home: Option<bool>,
+    /// 停靠区面板跟不跟指针停稳的条目；None = 还没改过，用默认。
+    #[serde(default)]
+    pub dock_shows_hovered_item: Option<bool>,
     /// 右侧停靠区布局;None = 0.4.7 及以前的数据,由下面三个旧键换算。
     #[serde(default)]
     pub right_dock: Option<StoredRightDock>,
@@ -253,6 +255,7 @@ impl Default for StoredUserPreferences {
             sidebar_width: 180.0,
             info_panel: None,
             folder_tree_limit_to_home: None,
+            dock_shows_hovered_item: None,
             right_dock: None,
             right_preview_panel_open: false,
             right_preview_panel_width: None,

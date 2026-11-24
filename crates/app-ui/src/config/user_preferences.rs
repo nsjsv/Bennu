@@ -57,6 +57,7 @@ pub(crate) struct UserPreferences {
     pub(crate) right_dock: RightDockLayout,
     pub(crate) info_panel: InfoPanelPreferences,
     pub(crate) folder_tree_limit_to_home: bool,
+    pub(crate) dock_shows_hovered_item: bool,
     pub(crate) sidebar_favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub(crate) network_connections: Vec<SavedNetworkConnection>,
     pub(crate) terminal_emulator: TerminalEmulator,
@@ -120,6 +121,7 @@ impl UserPreferences {
             right_dock: config.right_dock.clone(),
             info_panel: config.info_panel.clone(),
             folder_tree_limit_to_home: config.folder_tree_limit_to_home,
+            dock_shows_hovered_item: config.dock_shows_hovered_item,
             sidebar_favorites: config.sidebar_favorites.clone(),
             network_connections: config.network_connections.clone(),
             terminal_emulator: config.terminal_emulator,
@@ -182,6 +184,7 @@ impl UserPreferences {
         config.right_dock = self.right_dock.clone();
         config.info_panel = self.info_panel.clone();
         config.folder_tree_limit_to_home = self.folder_tree_limit_to_home;
+        config.dock_shows_hovered_item = self.dock_shows_hovered_item;
         config.sidebar_favorites = self.sidebar_favorites.clone();
         config.network_connections = self.network_connections.clone();
         config.terminal_emulator = self.terminal_emulator;
@@ -270,6 +273,7 @@ impl UserPreferences {
         stored.right_dock = Some(right_dock_to_stored(&self.right_dock));
         stored.info_panel = Some(info_panel_to_stored(&self.info_panel));
         stored.folder_tree_limit_to_home = Some(self.folder_tree_limit_to_home);
+        stored.dock_shows_hovered_item = Some(self.dock_shows_hovered_item);
         stored.sidebar_favorites = self
             .sidebar_favorites
             .as_ref()
@@ -443,6 +447,9 @@ impl UserPreferences {
             folder_tree_limit_to_home: stored
                 .folder_tree_limit_to_home
                 .unwrap_or(default_preferences.folder_tree_limit_to_home),
+            dock_shows_hovered_item: stored
+                .dock_shows_hovered_item
+                .unwrap_or(default_preferences.dock_shows_hovered_item),
             sidebar_favorites: stored
                 .sidebar_favorites
                 .map(|favorites| bennu_sidebar::sidebar_favorites_from_stored(&favorites)),

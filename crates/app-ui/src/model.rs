@@ -480,6 +480,7 @@ pub(crate) enum Message {
     /// 任务面板里点了「撤销」「撤回到这里」：按顺序撤这么多条。
     UndoFileOperations(usize),
     InfoPanel(crate::app::info_panel::InfoPanelMessage),
+    DockHover(crate::app::dock_hover::DockHoverMessage),
     FolderTree(crate::app::folder_tree::FolderTreeMessage),
     SplitResizeStarted,
     CursorMoved {
@@ -958,6 +959,8 @@ pub(crate) struct RightDockMenuState {
     /// 打开菜单那一刻在栏里的面板和锁定状态（菜单点一下就关，不会过时）。
     pub(crate) open_panels: Vec<crate::right_dock::DockPanel>,
     pub(crate) locked: bool,
+    /// 「显示鼠标悬停的项目」现在开没开。
+    pub(crate) shows_hovered_item: bool,
     /// 从某个面板里右键时下面多出的那一段。
     pub(crate) panel_section: Option<DockMenuPanelSection>,
 }
@@ -965,7 +968,7 @@ pub(crate) struct RightDockMenuState {
 /// 停靠区菜单里属于某个面板的那一段，带着打开菜单那一刻的设置。
 #[derive(Debug, Clone)]
 pub(crate) enum DockMenuPanelSection {
-    /// 信息面板：显示哪些信息、跟不跟鼠标悬停。
+    /// 信息面板：显示哪些信息。
     InfoFields(crate::info_panel::InfoPanelPreferences),
     /// 文件夹树：只限主目录（当前目录在主目录外时照样从 `/` 开始）。
     FolderTree { limit_to_home: bool },

@@ -59,6 +59,8 @@ mod pointer_interactions;
 mod preferences_sync;
 mod preview_settings;
 pub(crate) mod preview_state;
+#[cfg(test)]
+mod preview_window_keys_tests;
 mod preview_window_view;
 mod properties;
 mod remote_mounts;

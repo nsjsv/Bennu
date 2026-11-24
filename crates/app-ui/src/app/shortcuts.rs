@@ -122,8 +122,12 @@ impl FileBrowser {
                 )
             }
         };
-        if action == ShortcutAction::Preview && status == event::Status::Captured {
-            return self.handle_captured_preview_shortcut();
+        // 预览窗自己的生命周期,不是文件内容快捷键:内容键在辅助窗口里被启用门挡掉,
+        // 若交给内容路由,没被控件捕获的 Space 会被静默丢弃。
+        if action == ShortcutAction::Preview
+            && self.preview_engine.preview_window == Some(self.focused_window)
+        {
+            return self.close_preview_window_from_its_keyboard();
         }
         // 文件区的键在辅助窗口里不起作用；属性窗口里的刷新键刷新的是属性。
         if action == ShortcutAction::Refresh && self.properties_window == Some(self.focused_window)

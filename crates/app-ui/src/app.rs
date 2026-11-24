@@ -419,6 +419,10 @@ pub(crate) struct FileBrowser {
     /// `None` = 还没有收到过任何指针事件。读取方需要"光标确实在某处"的事实时
     /// （hover 重算）必须判 `None`；只在指针手势里取起点的读取方经 [`Self::cursor_or_origin`]。
     pub(crate) cursor_position: bennu_theme::pointer_tracker::PointerPosition,
+    /// 真链接（终端里按着 Ctrl 悬停的链接）向窗口根部报到的信号，见 [`control_pointer`]。
+    ///
+    /// [`control_pointer`]: bennu_theme::control_pointer::control_pointer
+    pub(crate) link_pointer: bennu_theme::control_pointer::LinkPointer,
     /// 按住左键的那个窗口：按住期间该窗口的指针移动才作为消息进来（拖动、改大小、框选都要按住）。
     pointer_held_window: Option<window::Id>,
     pub(crate) main_window_width: f32,
@@ -818,6 +822,7 @@ impl FileBrowser {
             ),
             system_language: UiLanguage::English,
             cursor_position: bennu_theme::pointer_tracker::PointerPosition::default(),
+            link_pointer: bennu_theme::control_pointer::LinkPointer::default(),
             pointer_held_window: None,
             main_window_video_fullscreen: false,
             main_window_width: MAIN_WINDOW_INITIAL_WIDTH,
@@ -1134,10 +1139,15 @@ impl FileBrowser {
         }
         let shares_position =
             window == self.main_window || self.preview_engine.preview_window == Some(window);
-        bennu_theme::pointer_tracker::track_pointer(
+        let tracked = bennu_theme::pointer_tracker::track_pointer(
             content,
             shares_position.then(|| self.cursor_position.clone()),
             self.pointer_follow(window),
+        );
+        bennu_theme::control_pointer::control_pointer(
+            tracked,
+            self.user_config.control_pointer(),
+            self.link_pointer.clone(),
         )
     }
 

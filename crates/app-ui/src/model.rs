@@ -698,6 +698,7 @@ pub(crate) enum Message {
     ApplicationLogThresholdSelected(ApplicationLogLevel),
     ShowHiddenFilesToggled,
     ListDirectorySizeDisplayModeToggled,
+    HandPointerOnControlsToggled,
     VisibleColumnCountSelected(usize),
     ColumnWidthAdjustModeSelected(crate::config::ColumnWidthAdjustMode),
     NetworkListThumbnailDownloadsToggled,

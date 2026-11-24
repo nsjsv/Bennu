@@ -19,6 +19,11 @@ impl FileBrowser {
         self.persist_user_preferences_command()
     }
 
+    pub(super) fn toggle_hand_pointer_on_controls(&mut self) -> Task<Message> {
+        self.user_config.hand_pointer_on_controls = !self.user_config.hand_pointer_on_controls;
+        self.persist_user_preferences_command()
+    }
+
     pub(super) fn select_theme_mode(
         &mut self,
         theme_mode: bennu_theme::ThemeMode,
@@ -121,6 +126,26 @@ impl FileBrowser {
 
     pub(super) fn record_saved_app_config(&mut self, saved: config::AppConfig) {
         self.app_config_seen = saved;
+    }
+}
+
+#[cfg(test)]
+mod hand_pointer_tests {
+    use bennu_theme::control_pointer::ControlPointer;
+
+    use super::*;
+
+    #[test]
+    fn the_hand_pointer_message_flips_what_the_window_roots_show() {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        assert_eq!(browser.user_config.control_pointer(), ControlPointer::Arrow);
+
+        drop(browser.update(Message::HandPointerOnControlsToggled));
+        assert!(browser.user_config.hand_pointer_on_controls);
+        assert_eq!(browser.user_config.control_pointer(), ControlPointer::Hand);
+
+        drop(browser.update(Message::HandPointerOnControlsToggled));
+        assert_eq!(browser.user_config.control_pointer(), ControlPointer::Arrow);
     }
 }
 

@@ -20,6 +20,7 @@ pub mod address_bar;
 pub mod anchored_popup;
 pub mod animation;
 pub mod column_geometry;
+pub mod control_pointer;
 pub mod controls;
 pub mod font_families;
 pub mod icon_grid_geometry;

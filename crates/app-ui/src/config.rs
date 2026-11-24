@@ -142,6 +142,13 @@ impl UserConfig {
     pub(crate) fn icons_icon_edge(&self) -> u32 {
         self.icons_view_density.icon_grid_size()
     }
+
+    /// 窗口根部的指针政策只从这里读设置。
+    pub(crate) fn control_pointer(&self) -> bennu_theme::control_pointer::ControlPointer {
+        bennu_theme::control_pointer::ControlPointer::from_hand_setting(
+            self.hand_pointer_on_controls,
+        )
+    }
 }
 
 // 纯搬移：UiLanguage 枚举本体已下沉 bennu-localization（翻译表按它
@@ -373,6 +380,8 @@ pub(crate) struct UserConfig {
     pub(crate) last_search_scope: Option<LastSearchScope>,
     pub(crate) theme_mode: ThemeMode,
     pub(crate) color_scheme: ColorSchemePreset,
+    /// 可点的控件上显示手形指针；关掉时只有真链接显示手形。
+    pub(crate) hand_pointer_on_controls: bool,
     pub(crate) file_operation_verification: FileOperationVerification,
     pub(crate) browser_view_mode: BrowserViewMode,
     pub(crate) visible_column_count: usize,
@@ -526,6 +535,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
+        hand_pointer_on_controls: false,
         file_operation_verification: DEFAULT_FILE_OPERATION_VERIFICATION,
         browser_view_mode: BrowserViewMode::Columns,
         visible_column_count: DEFAULT_VISIBLE_COLUMN_COUNT,
@@ -590,6 +600,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         last_search_scope: None,
         theme_mode: ThemeMode::Automatic,
         color_scheme: ColorSchemePreset::Default,
+        hand_pointer_on_controls: false,
         file_operation_verification: DEFAULT_FILE_OPERATION_VERIFICATION,
         browser_view_mode: BrowserViewMode::Columns,
         visible_column_count: DEFAULT_VISIBLE_COLUMN_COUNT,

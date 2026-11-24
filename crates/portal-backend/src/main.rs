@@ -30,6 +30,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::picker_session::PickerLocation;
 use bennu_preview::engine::PointerInterest;
+use bennu_theme::control_pointer::{control_pointer, LinkPointer};
 use bennu_theme::pointer_tracker::{track_pointer, PointerFollow, PointerPosition};
 use iced::{keyboard, window, Element, Task};
 
@@ -553,7 +554,9 @@ fn view_picker(daemon: &PickerDaemon, window_id: window::Id) -> Element<'_, Mess
         // 拾取窗之外的未知窗口安全空白。
         return iced::widget::text("").into();
     };
-    track_pointer(content, Some(position), pointer_follow(daemon, window_id))
+    let tracked = track_pointer(content, Some(position), pointer_follow(daemon, window_id));
+    // 选择窗和预览窗里没有链接部件，不需要跨帧共用的链接信号。
+    control_pointer(tracked, daemon.look.control_pointer, LinkPointer::default())
 }
 
 /// 这个窗口的指针移动怎样作为消息进来。每条消息都会重建所有窗口，所以只在跟着指针走时才要：
@@ -673,6 +676,7 @@ pub(crate) fn test_daemon() -> PickerDaemon {
             theme: iced::Theme::Light,
             sidebar_style: bennu_theme::window_controls::SidebarStyle::Embedded,
             window_controls: bennu_theme::window_controls::WindowControlsConfig::default(),
+            control_pointer: bennu_theme::control_pointer::ControlPointer::default(),
         },
         system_mode: bennu_theme::AppearanceMode::Light,
         keyboard_modifiers: keyboard::Modifiers::default(),

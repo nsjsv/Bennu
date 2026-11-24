@@ -35,6 +35,7 @@ use super::session::TerminalSession;
 use super::view::{cell_width, CELL_HEIGHT, FONT_SIZE};
 use super::TerminalPanelMessage;
 use crate::model::Message;
+use bennu_theme::control_pointer::LinkPointer;
 
 /// 下划线、删除线的粗细；光标竖线、下划线形状的粗细。
 const STROKE_WIDTH: f32 = 1.0;
@@ -46,11 +47,13 @@ pub(super) fn terminal_grid<'a>(
     session: &'a TerminalSession,
     focused: bool,
     search: Option<&'a TerminalSearch>,
+    links: LinkPointer,
 ) -> Element<'a, Message> {
     Element::new(TerminalGrid {
         session,
         focused,
         search,
+        links,
     })
 }
 
@@ -59,6 +62,7 @@ struct TerminalGrid<'a> {
     focused: bool,
     /// 这个标签开着回看搜索时的匹配。
     search: Option<&'a TerminalSearch>,
+    links: LinkPointer,
 }
 
 /// 控件自己的状态：鼠标、输入法。
@@ -194,6 +198,7 @@ where
             return Interaction::None;
         }
         if tree.state.downcast_ref::<GridState>().ctrl_link.is_some() {
+            self.links.mark_hovered();
             return Interaction::Pointer;
         }
         if self

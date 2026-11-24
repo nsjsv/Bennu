@@ -309,6 +309,16 @@ fn appearance_settings_sections(browser: &FileBrowser) -> Vec<Element<'_, Messag
             ],
         ),
         settings_group(
+            tr!("Pointer"),
+            None,
+            vec![switch_row(
+                tr!("Hand Pointer Over Clickable Items"),
+                Some(RowNote::Hint(tr!("When off, only links show the hand"))),
+                browser.user_config().hand_pointer_on_controls,
+                Message::HandPointerOnControlsToggled,
+            )],
+        ),
+        settings_group(
             tr!("Rendering"),
             None,
             vec![rendering_gpu_preference_row(

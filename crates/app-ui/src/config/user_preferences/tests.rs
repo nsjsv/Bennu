@@ -257,6 +257,33 @@ fn legacy_icon_grid_size_is_read_but_never_written_back() {
 }
 
 #[test]
+fn hand_pointer_on_controls_is_off_for_old_settings_and_survives_a_round_trip_when_on() {
+    let default = default_user_config();
+    assert!(!default.hand_pointer_on_controls);
+
+    // 旧版本写下的设置里没有这个键。
+    let mut old = serde_json::to_value(default.user_preferences().to_stored())
+        .expect("serialize stored preferences");
+    old.as_object_mut()
+        .expect("preferences object")
+        .remove("hand_pointer_on_controls")
+        .expect("the key is written");
+    let stored: StoredUserPreferences = serde_json::from_value(old).expect("old preferences parse");
+    let loaded = UserPreferences::from_stored(stored, &default).preferences;
+    assert!(!loaded.hand_pointer_on_controls);
+
+    let mut config = default.clone();
+    config.hand_pointer_on_controls = true;
+    let stored = UserPreferences::from_user_config(&config).to_stored();
+    assert_eq!(stored.hand_pointer_on_controls, Some(true));
+    let interpreted = UserPreferences::from_stored(stored, &default);
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+    let mut reloaded = default.clone();
+    interpreted.preferences.apply_to_user_config(&mut reloaded);
+    assert!(reloaded.hand_pointer_on_controls);
+}
+
+#[test]
 fn transfer_receive_switch_and_port_roundtrip() {
     let mut config = default_user_config();
     config.transfer_receive_enabled = false;

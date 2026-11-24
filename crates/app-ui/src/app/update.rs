@@ -890,6 +890,7 @@ impl FileBrowser {
             Message::NetworkListThumbnailDownloadsToggled => {
                 self.toggle_network_list_thumbnail_downloads()
             }
+            Message::HandPointerOnControlsToggled => self.toggle_hand_pointer_on_controls(),
             Message::SearchContentIndexingToggled => self.toggle_search_content_indexing(),
             Message::PreviewSizeLimitInputChanged(kind_index, value) => {
                 self.update_preview_size_limit_input(kind_index, value)

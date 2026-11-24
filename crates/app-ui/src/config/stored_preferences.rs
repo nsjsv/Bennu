@@ -140,6 +140,9 @@ pub(crate) struct StoredUserPreferences {
     pub theme_mode: String,
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
+    /// 可点的控件上显示手形指针；None = 还没改过，用默认（关）。
+    #[serde(default)]
+    pub hand_pointer_on_controls: Option<bool>,
     #[serde(default = "default_launch_window_policy")]
     pub launch_window_policy: String,
     /// 多栏视图栏宽的调整方式;缺省 = 每栏独立(旧数据行为)。
@@ -286,6 +289,7 @@ impl Default for StoredUserPreferences {
             last_search_scope: None,
             theme_mode: default_theme_mode(),
             color_scheme: default_color_scheme(),
+            hand_pointer_on_controls: None,
             launch_window_policy: default_launch_window_policy(),
             column_width_adjust_mode: default_column_width_adjust_mode(),
             context_menu_layouts: None,

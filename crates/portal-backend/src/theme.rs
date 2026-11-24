@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use bennu_state::UserSettingsStore;
+use bennu_theme::control_pointer::ControlPointer;
 use bennu_theme::window_controls::{
     SidebarStyle, WindowControlKind, WindowControlPlacement, WindowControlSide,
     WindowControlsConfig,
@@ -24,14 +25,16 @@ pub(crate) struct StoredAppearance {
     pub(crate) color_scheme: ColorSchemePreset,
     pub(crate) sidebar_style: SidebarStyle,
     pub(crate) window_controls: WindowControlsConfig,
+    pub(crate) control_pointer: ControlPointer,
 }
 
-/// 选择窗、预览窗画出来的样子：一次读设置得到的配色、侧栏样式和窗口按钮（放哪边、
-/// 藏哪个），和主程序的窗口一样。
+/// 选择窗、预览窗画出来的样子：一次读设置得到的配色、侧栏样式、窗口按钮（放哪边、
+/// 藏哪个）和可点控件的指针形状，和主程序的窗口一样。
 pub(crate) struct PickerLook {
     pub(crate) theme: Theme,
     pub(crate) sidebar_style: SidebarStyle,
     pub(crate) window_controls: WindowControlsConfig,
+    pub(crate) control_pointer: ControlPointer,
 }
 
 pub(crate) fn resolve_look(system_mode: AppearanceMode) -> PickerLook {
@@ -47,11 +50,13 @@ pub(crate) fn resolve_look(system_mode: AppearanceMode) -> PickerLook {
             theme,
             sidebar_style: appearance.sidebar_style,
             window_controls: appearance.window_controls,
+            control_pointer: appearance.control_pointer,
         },
         None => PickerLook {
             theme,
             sidebar_style: SidebarStyle::default(),
             window_controls: WindowControlsConfig::default(),
+            control_pointer: ControlPointer::default(),
         },
     }
 }
@@ -86,6 +91,9 @@ struct AppearanceSettings {
     sidebar_style: String,
     #[serde(default = "default_window_controls")]
     window_controls: Vec<StoredWindowControl>,
+    /// 主程序存的是 `Option<bool>`：没改过是 null，旧数据没有这个键。
+    #[serde(default)]
+    hand_pointer_on_controls: Option<bool>,
 }
 
 /// 主程序设置文档里一个窗口按钮的写法。
@@ -103,6 +111,7 @@ impl Default for AppearanceSettings {
             color_scheme: default_color_scheme(),
             sidebar_style: default_sidebar_style(),
             window_controls: default_window_controls(),
+            hand_pointer_on_controls: None,
         }
     }
 }
@@ -173,6 +182,9 @@ fn read_stored_appearance(db_path: &Path) -> Option<StoredAppearance> {
         // 侧栏样式读不懂不连累配色：主程序那边会提示并改回默认。
         sidebar_style: SidebarStyle::from_config_value(&stored.sidebar_style).unwrap_or_default(),
         window_controls: window_controls_from_stored(&stored.window_controls),
+        control_pointer: ControlPointer::from_hand_setting(
+            stored.hand_pointer_on_controls.unwrap_or_default(),
+        ),
     })
 }
 
@@ -269,6 +281,7 @@ mod tests {
             color_scheme,
             sidebar_style: SidebarStyle::Embedded,
             window_controls: WindowControlsConfig::default(),
+            control_pointer: ControlPointer::default(),
         }
     }
 
@@ -404,6 +417,44 @@ mod tests {
         // 旧设置没有这个键：和主程序默认一样。
         write(r#"{"theme_mode":"dark","color_scheme":"nord"}"#);
         assert_eq!(read().window_controls, WindowControlsConfig::default());
+    }
+
+    #[test]
+    fn the_chooser_follows_the_hand_pointer_setting_and_defaults_to_the_arrow() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = directory.path().join("state.sqlite");
+        UserSettingsStore::new(&database).expect("create store");
+        let pointer_for = |payload: &str| {
+            rusqlite::Connection::open(&database)
+                .unwrap()
+                .execute(
+                    "INSERT OR REPLACE INTO user_preferences (preference_key, payload_json, updated_at_ms)
+                     VALUES (?1, ?2, 1)",
+                    [bennu_state::USER_PREFERENCES_KEY, payload],
+                )
+                .unwrap();
+            read_stored_appearance(&database)
+                .expect("stored appearance")
+                .control_pointer
+        };
+
+        assert_eq!(
+            pointer_for(r#"{"hand_pointer_on_controls":true}"#),
+            ControlPointer::Hand
+        );
+        assert_eq!(
+            pointer_for(r#"{"hand_pointer_on_controls":false}"#),
+            ControlPointer::Arrow
+        );
+        // 主程序没改过时写 null；旧数据干脆没有这个键。
+        assert_eq!(
+            pointer_for(r#"{"hand_pointer_on_controls":null}"#),
+            ControlPointer::Arrow
+        );
+        assert_eq!(
+            pointer_for(r#"{"theme_mode":"dark"}"#),
+            ControlPointer::Arrow
+        );
     }
 
     #[test]

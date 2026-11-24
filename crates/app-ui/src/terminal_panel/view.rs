@@ -98,10 +98,10 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
                 .map(|(_, search)| search);
             let tab_strip_visible = browser.terminal_panel.tab_strip_visible();
             let grid: Element<'_, Message> = match session.disconnected() {
-                None => terminal_grid(session, focused, search),
+                None => terminal_grid(session, focused, search, browser.link_pointer.clone()),
                 // 保留已有输出,底部压一条"已断开"提示。
                 Some(reason) => stack![
-                    terminal_grid(session, focused, search),
+                    terminal_grid(session, focused, search, browser.link_pointer.clone()),
                     container(disconnected_notice(reason))
                         .width(Length::Fill)
                         .height(Length::Fill)

@@ -7,6 +7,7 @@
 //! （[`SessionEvents`]）、一个常驻订阅交给界面。
 
 pub(crate) mod emulator;
+mod dropped_paths;
 mod events;
 pub(crate) mod follow;
 mod grid;
@@ -409,10 +410,7 @@ impl FileBrowser {
                         .map(|(session, event)| self.accept_session_event(session, event)),
                 );
             }
-            TerminalPanelMessage::GridPressed => {
-                self.terminal_panel.focused = true;
-                self.terminal_panel.search = None;
-            }
+            TerminalPanelMessage::GridPressed => self.give_keyboard_to_terminal(),
             TerminalPanelMessage::PasteRequested => {
                 self.context_menu = None;
                 return iced::clipboard::read()
@@ -482,7 +480,7 @@ impl FileBrowser {
             }
             TerminalPanelMessage::PasteReceived(text) => {
                 if let (Some(text), Some(active_tab)) = (text, self.terminal_panel.active_tab()) {
-                    active_tab.session.paste(&text);
+                    active_tab.session.paste(text.as_bytes());
                 }
             }
         }
@@ -538,6 +536,12 @@ impl FileBrowser {
             active_tab.session.type_input(&bytes);
         }
         Some(Task::none())
+    }
+
+    /// 点了网格、往里拖了文件：键盘回到终端（搜索条开着时它占着键盘，一并关掉）。
+    fn give_keyboard_to_terminal(&mut self) {
+        self.terminal_panel.focused = true;
+        self.terminal_panel.search = None;
     }
 
     /// 键盘（连同输入法）此刻归终端：终端聚焦，而且没有地址栏、改名这类输入会话占着。

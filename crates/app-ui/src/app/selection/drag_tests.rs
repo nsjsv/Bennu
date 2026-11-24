@@ -206,6 +206,31 @@ fn drag_action_capsule_label_follows_target_and_intent() {
 }
 
 #[test]
+fn over_the_terminal_the_capsule_says_the_paths_get_typed_whatever_keys_are_held() {
+    let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
+    let directory = tempfile::tempdir().unwrap();
+    let source = directory.path().join("report.pdf");
+    std::fs::write(&source, b"data").unwrap();
+    browser.tab_mut().selected = Some(source.clone());
+    browser
+        .cursor_position
+        .set(Some(iced::Point::new(0.0, 0.0)));
+    drop(browser.start_file_drag(source, FileDragStationaryAction::SelectionOnly, Vec::new()));
+    drop(browser.update_file_drag(iced::Point::new(10.0, 0.0)));
+    drop(browser.handle_drop_target_hovered(directory.path().join("elsewhere")));
+
+    browser.file_drop_session.as_mut().unwrap().hovered_target = Some(FileDropTarget::Terminal(1));
+
+    for modifiers in [keyboard::Modifiers::empty(), keyboard::Modifiers::CTRL] {
+        browser.keyboard_modifiers = modifiers;
+        assert_eq!(
+            browser.file_drag_action_capsule_label(),
+            Some(tr!("Insert Paths"))
+        );
+    }
+}
+
+#[test]
 fn move_drag_with_fully_no_op_batch_does_nothing() {
     let (mut browser, _) = crate::app::FileBrowser::new(crate::config::default_user_config());
     let directory = tempfile::tempdir().unwrap();

@@ -164,6 +164,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
         "将文件复制到当前文件夹。",
     ),
     ("Copy to %1", "复制到%1"),
+    ("Insert Paths", "输入路径"),
     ("Create link to %1", "创建链接到%1"),
     ("Move to %1", "移动到%1"),
     ("%1 files", "%1 个文件"),

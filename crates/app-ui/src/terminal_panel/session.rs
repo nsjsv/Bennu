@@ -224,7 +224,7 @@ impl TerminalSession {
     }
 
     /// 粘贴：程序开了 bracketed paste 就包起来，多行文本不会被当成几条命令直接执行。
-    pub(crate) fn paste(&self, text: &str) {
+    pub(crate) fn paste(&self, text: &[u8]) {
         self.type_input(&super::input::paste_bytes(text, self.emulator.mode()));
     }
 
@@ -614,6 +614,8 @@ mod tests {
     #[test]
     fn a_shell_running_a_foreground_job_is_not_idle() {
         let folder = tempfile::tempdir().unwrap();
+        // 什么都没打出来的 shell（还在读 rc）不算在等输入。用一个从不打字的，不跟它起得多快赛跑。
+        let (silent, _silent_events) = spawn("/bin/sh", &["-c", "read x"], folder.path());
         let (waiting, _events) = spawn("/bin/sh", &["-c", "printf '$ '; read x"], folder.path());
         // `set -m`：作业控制打开，前台作业有自己的进程组，跟交互 shell 一样。
         let (busy, _busy_events) = spawn(
@@ -621,8 +623,6 @@ mod tests {
             &["-c", "set -m; printf '$ '; sleep 30"],
             folder.path(),
         );
-        // 刚起来、什么都还没打出来的 shell 不算在等输入。
-        assert!(!waiting.shell_is_idle());
 
         let deadline = Instant::now() + Duration::from_secs(20);
         while !waiting.shell_is_idle() && Instant::now() < deadline {
@@ -630,6 +630,7 @@ mod tests {
         }
         assert!(waiting.shell_is_idle());
         assert!(!busy.shell_is_idle());
+        assert!(!silent.shell_is_idle());
     }
 
     /// 写端已断（如 shell 那头关了伪终端）：每次写都失败，并记下被调用了几次。

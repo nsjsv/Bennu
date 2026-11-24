@@ -48,6 +48,10 @@ pub(crate) enum FileDragHitTestMarker {
     FolderTreeDirectory {
         directory: PathBuf,
     },
+    /// 终端网格（会话号）。
+    Terminal {
+        session: crate::terminal_panel::session::SessionId,
+    },
 }
 
 pub(crate) enum FileDragHitTestBoundsRequest {
@@ -121,6 +125,7 @@ struct FileDragHitTestBoundsOperation {
     sidebar_favorites: Option<Rectangle>,
     local_send: Vec<(FileDropTarget, Rectangle)>,
     folder_tree_directories: Vec<(PathBuf, Rectangle)>,
+    terminals: Vec<(crate::terminal_panel::session::SessionId, Rectangle)>,
     /// 遍历中遇到的滚动可视区(surface 坐标),拖拽聚合判断用来区分
     /// "超出列表视口"与"超出窗口"。
     scrollable_viewports: Vec<Rectangle>,
@@ -142,6 +147,7 @@ impl FileDragHitTestBoundsOperation {
             sidebar_favorites: None,
             local_send: Vec::new(),
             folder_tree_directories: Vec::new(),
+            terminals: Vec::new(),
             scrollable_viewports: Vec::new(),
         }
     }
@@ -178,6 +184,7 @@ impl FileDragHitTestBoundsOperation {
             sidebar_favorites: self.sidebar_favorites,
             local_send: self.local_send.clone(),
             folder_tree_directories: self.folder_tree_directories.clone(),
+            terminals: self.terminals.clone(),
         }
     }
 }
@@ -277,6 +284,9 @@ impl widget::Operation<Message> for FileDragHitTestBoundsOperation {
             FileDragHitTestMarker::FolderTreeDirectory { directory } => {
                 self.folder_tree_directories
                     .push((directory.clone(), bounds));
+            }
+            FileDragHitTestMarker::Terminal { session } => {
+                self.terminals.push((*session, bounds));
             }
             FileDragHitTestMarker::SidebarLocalSend { target } => {
                 self.local_send.push((target.clone(), bounds));

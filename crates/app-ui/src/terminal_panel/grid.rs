@@ -253,7 +253,7 @@ impl TerminalGrid<'_> {
                     mouse::Button::Left => self.start_selection(state, position, cell),
                     mouse::Button::Middle => {
                         if let Some(text) = clipboard.read(clipboard::Kind::Primary) {
-                            self.session.paste(&text);
+                            self.session.paste(text.as_bytes());
                         }
                     }
                     mouse::Button::Right => {

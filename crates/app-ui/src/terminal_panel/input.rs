@@ -173,15 +173,29 @@ pub(crate) fn scrollback_for_key(key: &Key) -> Option<Scroll> {
 
 /// 粘贴的字节。程序开了 bracketed paste：前后包上标记，文本里的 ESC 去掉——不然文本能自己
 /// 写出结束标记，后面的字就当命令执行了。没开：换行都换成回车，跟一行行按回车一样。
-pub(crate) fn paste_bytes(text: &str, mode: TermMode) -> Vec<u8> {
+/// 按字节收：拖进来的路径可以不是 UTF-8。
+pub(crate) fn paste_bytes(text: &[u8], mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::BRACKETED_PASTE) {
         let mut bytes = b"\x1b[200~".to_vec();
-        bytes.extend(text.bytes().filter(|byte| *byte != 0x1b));
+        bytes.extend(text.iter().filter(|byte| **byte != 0x1b));
         bytes.extend_from_slice(b"\x1b[201~");
-        bytes
-    } else {
-        text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
+        return bytes;
     }
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut rest = text;
+    while let Some((&byte, tail)) = rest.split_first() {
+        match byte {
+            b'\r' if tail.first() == Some(&b'\n') => {
+                bytes.push(b'\r');
+                rest = &tail[1..];
+                continue;
+            }
+            b'\n' => bytes.push(b'\r'),
+            byte => bytes.push(byte),
+        }
+        rest = tail;
+    }
+    bytes
 }
 
 /// 上报协议里的鼠标按钮。
@@ -406,14 +420,14 @@ mod tests {
 
     #[test]
     fn a_bracketed_paste_is_wrapped_and_cannot_end_itself_early() {
-        let bytes = paste_bytes("ls\n\x1b[201~rm -rf x\n", TermMode::BRACKETED_PASTE);
+        let bytes = paste_bytes(b"ls\n\x1b[201~rm -rf x\n", TermMode::BRACKETED_PASTE);
         assert_eq!(bytes, b"\x1b[200~ls\n[201~rm -rf x\n\x1b[201~".to_vec());
     }
 
     #[test]
     fn a_plain_paste_turns_line_breaks_into_returns() {
         assert_eq!(
-            paste_bytes("a\r\nb\nc", TermMode::empty()),
+            paste_bytes(b"a\r\nb\nc", TermMode::empty()),
             b"a\rb\rc".to_vec()
         );
     }

@@ -51,6 +51,7 @@ pub(super) fn freeze_file_drop_hit_test_bounds(
         sidebar_favorites: measured.sidebar_favorites,
         local_send: measured.local_send,
         folder_tree_directories: measured.folder_tree_directories,
+        terminals: measured.terminals,
     }
 }
 
@@ -73,6 +74,13 @@ pub(super) fn resolve_file_drop_target(
         .find(|(_, area)| area.contains(position))
     {
         return Some(target.clone());
+    }
+    if let Some((session, _)) = bounds
+        .terminals
+        .iter()
+        .find(|(_, grid)| grid.contains(position))
+    {
+        return Some(FileDropTarget::Terminal(*session));
     }
 
     if bookmark_source.is_some()
@@ -171,6 +179,31 @@ mod tests {
         assert_eq!(
             resolve_file_drop_target(&bounds, Point::new(20.0, 20.0), None),
             Some(FileDropTarget::Tab(tab_target))
+        );
+    }
+
+    #[test]
+    fn the_terminal_grid_is_a_drop_target_for_its_tab() {
+        let bounds = FileDropHitTestBounds {
+            terminals: vec![(
+                9,
+                Rectangle::new(Point::new(0.0, 500.0), Size::new(800.0, 200.0)),
+            )],
+            directory_targets: vec![crate::model::DirectoryFileDragTargetBounds {
+                pane_id: crate::model::BrowserPaneId(0),
+                directory: PathBuf::from("/content"),
+                bounds: Rectangle::new(Point::new(0.0, 0.0), Size::new(800.0, 500.0)),
+            }],
+            ..FileDropHitTestBounds::default()
+        };
+
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(100.0, 600.0), None),
+            Some(FileDropTarget::Terminal(9))
+        );
+        assert_eq!(
+            resolve_file_drop_target(&bounds, Point::new(100.0, 100.0), None),
+            Some(FileDropTarget::Directory(PathBuf::from("/content")))
         );
     }
 

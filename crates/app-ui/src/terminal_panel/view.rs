@@ -97,7 +97,7 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
                 .filter(|(owner, _)| *owner == session.id)
                 .map(|(_, search)| search);
             let tab_strip_visible = browser.terminal_panel.tab_strip_visible();
-            let terminal_canvas: Element<'_, Message> = match session.disconnected() {
+            let grid: Element<'_, Message> = match session.disconnected() {
                 None => terminal_grid(session, focused, search),
                 // 保留已有输出,底部压一条"已断开"提示。
                 Some(reason) => stack![
@@ -109,6 +109,13 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
                 ]
                 .into(),
             };
+            // 拖文件进来时按它认落点：松手就往这个标签打路径。
+            let terminal_canvas = crate::file_drag_hit_test_marker::track_file_drag_hit_test_marker(
+                grid,
+                crate::file_drag_hit_test_bounds::FileDragHitTestMarker::Terminal {
+                    session: session.id,
+                },
+            );
             // 单标签时标签条隐藏、画布吃满其高度,加号悬浮在画布右上角。
             // 搜索条那一层一直在（没开时是空的）：开关搜索不改控件树，网格的状态不会被重建。
             let search_layer: Element<'_, Message> = match search {

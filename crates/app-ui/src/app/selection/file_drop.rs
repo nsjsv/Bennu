@@ -243,7 +243,7 @@ impl FileBrowser {
         if let Some(session) = &mut self.file_drop_session {
             session.layout = FileDropLayoutState::Ready {
                 request,
-                hit_test_bounds,
+                hit_test_bounds: Box::new(hit_test_bounds),
             };
             session.scroll_refresh_in_flight = None;
         }
@@ -723,6 +723,13 @@ impl FileBrowser {
             }
             (FileDropOrigin::External, FileDropTarget::LocalSendDevice(fingerprint)) => {
                 self.send_paths_to_favorite(&fingerprint, paths)
+            }
+            // 拖进终端只是打路径：不动文件，按住修饰键也一样。
+            (FileDropOrigin::Internal(snapshot), FileDropTarget::Terminal(session)) => {
+                self.type_dropped_paths_into_terminal(session, &snapshot.sources)
+            }
+            (FileDropOrigin::External, FileDropTarget::Terminal(session)) => {
+                self.type_dropped_paths_into_terminal(session, &paths)
             }
             (FileDropOrigin::Internal(snapshot), FileDropTarget::SidebarBookmarkSlot(slot)) => {
                 snapshot.bookmark_source.map_or_else(Task::none, |source| {

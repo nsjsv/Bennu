@@ -557,6 +557,7 @@ impl FileBrowser {
                 }
             },
             FileDropTarget::SidebarBookmarkSlot(_) => None,
+            FileDropTarget::Terminal(_) => Some(tr!("Insert Paths")),
         }
     }
 
@@ -640,7 +641,8 @@ pub(super) fn resolve_file_drag_target(
             | FileDropTarget::LocalSend
             | FileDropTarget::LocalSendDevice(_)
             | FileDropTarget::SidebarBookmarkSlot(_)
-            | FileDropTarget::Tab(_),
+            | FileDropTarget::Tab(_)
+            | FileDropTarget::Terminal(_),
         ) => target,
         None => fallback_directory.map(FileDropTarget::Directory),
     }

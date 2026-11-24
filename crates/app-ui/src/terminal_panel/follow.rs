@@ -36,18 +36,34 @@ impl ShellQuoting {
 
     /// 让 shell 换到 `directory` 的那一行：前导空格不进历史（bash 的 ignorespace、zsh 的
     /// HIST_IGNORE_SPACE、fish 默认）；路径都是绝对路径，不会被当成选项，不用 `--`。
-    /// 按字节拼：目录名可以不是 UTF-8。
     fn cd_line(self, directory: &Path) -> Vec<u8> {
-        let mut line = b" cd '".to_vec();
-        for &byte in directory.as_os_str().as_bytes() {
+        let mut line = b" cd ".to_vec();
+        self.push_quoted(&mut line, directory);
+        line.push(b'\r');
+        line
+    }
+
+    /// 拖进终端的路径：各自加引号，后面各跟一个空格（接着打字不用自己补），不回车。
+    pub(crate) fn quoted_paths(self, paths: &[PathBuf]) -> Vec<u8> {
+        let mut text = Vec::new();
+        for path in paths {
+            self.push_quoted(&mut text, path);
+            text.push(b' ');
+        }
+        text
+    }
+
+    /// 按字节拼：路径可以不是 UTF-8。
+    fn push_quoted(self, text: &mut Vec<u8>, path: &Path) {
+        text.push(b'\'');
+        for &byte in path.as_os_str().as_bytes() {
             match (self, byte) {
-                (Self::Fish, b'\'' | b'\\') => line.extend_from_slice(&[b'\\', byte]),
-                (Self::Posix, b'\'') => line.extend_from_slice(b"'\\''"),
-                _ => line.push(byte),
+                (Self::Fish, b'\'' | b'\\') => text.extend_from_slice(&[b'\\', byte]),
+                (Self::Posix, b'\'') => text.extend_from_slice(b"'\\''"),
+                _ => text.push(byte),
             }
         }
-        line.extend_from_slice(b"'\r");
-        line
+        text.push(b'\'');
     }
 }
 

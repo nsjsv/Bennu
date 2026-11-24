@@ -55,6 +55,8 @@ pub(crate) enum FileDropTarget {
     LocalSendDevice(String),
     SidebarBookmarkSlot(SidebarBookmarkDropSlot),
     Tab(TabFileDropTarget),
+    /// 终端网格：往这个标签（会话号）打带引号的路径。不是复制也不是移动，按什么键都一样。
+    Terminal(crate::terminal_panel::session::SessionId),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,7 +78,8 @@ pub(crate) enum FileDropLayoutState {
     Pending(FileDropLayoutRequest),
     Ready {
         request: FileDropLayoutRequest,
-        hit_test_bounds: FileDropHitTestBounds,
+        /// 装箱：各种落点的列表加起来比 `Pending` 大得多，会话状态里不白占那么多。
+        hit_test_bounds: Box<FileDropHitTestBounds>,
     },
 }
 

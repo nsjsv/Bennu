@@ -64,6 +64,7 @@ pub(crate) use browser_panes::{
     IconGridExpansionSessionId, IconGridViewport, ListExpansionFollowSessionId, SplitAxis,
     SplitRegion,
 };
+pub(crate) use browser_panes::next_content_revision;
 mod path_migration;
 mod split_layout;
 pub(crate) use split_layout::{SPLIT_DIVIDER_WIDTH, SPLIT_PORTION_TOTAL};

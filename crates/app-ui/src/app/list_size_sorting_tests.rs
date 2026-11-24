@@ -70,7 +70,7 @@ fn recursive_size_sort_reorders_expanded_entries_and_inactive_pane() {
         test_entry(inactive_small.clone(), FileKind::Directory),
     ]
     .into();
-    inactive_tab.selected_paths = HashSet::new();
+    *inactive_tab.selected_paths = HashSet::new();
     browser.pane_layout = BrowserPaneLayout::Split {
         axis: SplitAxis::Horizontal,
         first: BrowserPaneId::PRIMARY,

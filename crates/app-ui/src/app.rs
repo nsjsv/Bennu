@@ -67,6 +67,7 @@ mod revealed_path;
 #[cfg(test)]
 mod revealed_path_tests;
 pub(crate) mod info_panel;
+pub(crate) mod quick_actions_panel;
 pub(crate) mod right_dock;
 pub(crate) mod right_preview_panel;
 mod runtime;
@@ -276,6 +277,7 @@ pub(crate) struct FileBrowser {
     pub(crate) right_dock: crate::right_dock::RightDock,
     right_dock_drag: Option<right_dock::RightDockDrag>,
     pub(crate) info_panel: info_panel::InfoPanelState,
+    pub(crate) quick_actions: quick_actions_panel::QuickActionsPanel,
     pub(crate) renaming: Option<PathBuf>,
     pending_created_entry_rename: Option<PathBuf>,
     pub(crate) pending_operation: Option<PendingOperation>,
@@ -701,6 +703,7 @@ impl FileBrowser {
             right_dock: crate::right_dock::RightDock::new(user_config.right_dock.clone()),
             right_dock_drag: None,
             info_panel: info_panel::InfoPanelState::default(),
+            quick_actions: quick_actions_panel::QuickActionsPanel::default(),
             renaming: None,
             pending_created_entry_rename: None,
             pending_operation: None,

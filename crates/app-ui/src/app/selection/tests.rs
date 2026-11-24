@@ -514,7 +514,7 @@ fn clicking_current_column_blank_clears_existing_selection() {
     ]
     .into();
     browser.tab_mut().selected = Some(second.clone());
-    browser.tab_mut().selected_paths = HashSet::from([first, second]);
+    *browser.tab_mut().selected_paths = HashSet::from([first, second]);
     browser.tab_mut().selection_anchor = Some(child_directory.clone());
 
     let command = browser.handle_column_blank_clicked(current_dir.clone());
@@ -541,7 +541,7 @@ fn clicking_child_column_blank_preserves_open_column_context() {
     ]
     .into();
     browser.tab_mut().selected = Some(second);
-    browser.tab_mut().selected_paths = HashSet::from([first]);
+    *browser.tab_mut().selected_paths = HashSet::from([first]);
     browser.address_editing = Some(PaneAddressEditingSession {
         pane_id: BrowserPaneId::PRIMARY,
         session: AddressEditingSession::new(AddressEditingSessionId(7), &current_dir),
@@ -589,7 +589,7 @@ fn clicking_column_placeholder_preserves_open_columns_and_selection() {
         vec![test_entry(child_directory.clone(), FileKind::Directory)].into();
     browser.tab_mut().deepest_open_column_directory = Some(child_directory.clone());
     browser.tab_mut().selected = Some(child_directory.clone());
-    browser.tab_mut().selected_paths = HashSet::from([child_directory.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([child_directory.clone()]);
     browser.tab_mut().selection_anchor = Some(child_directory.clone());
 
     let command = browser.handle_column_placeholder_pressed();
@@ -633,7 +633,7 @@ fn pressing_current_column_blank_clears_selection_before_release() {
     ]
     .into();
     browser.tab_mut().selected = Some(second.clone());
-    browser.tab_mut().selected_paths = HashSet::from([first, second]);
+    *browser.tab_mut().selected_paths = HashSet::from([first, second]);
     browser.tab_mut().selection_anchor = Some(child_directory.clone());
 
     let command = browser.start_column_blank_selection_marquee(current_dir.clone());
@@ -661,7 +661,7 @@ fn pressing_child_column_blank_preserves_open_column_before_release() {
     ]
     .into();
     browser.tab_mut().selected = Some(second);
-    browser.tab_mut().selected_paths = HashSet::from([first]);
+    *browser.tab_mut().selected_paths = HashSet::from([first]);
     browser.tab_mut().deepest_open_column_directory = Some(child_directory.clone());
 
     let command = browser.start_column_blank_selection_marquee(child_directory.clone());
@@ -699,7 +699,7 @@ fn dragging_child_column_blank_preserves_open_column_context() {
     ]
     .into();
     browser.tab_mut().selected = Some(second);
-    browser.tab_mut().selected_paths = HashSet::from([first]);
+    *browser.tab_mut().selected_paths = HashSet::from([first]);
     browser.tab_mut().deepest_open_column_directory = Some(child_directory.clone());
 
     let press_command = browser.start_column_blank_selection_marquee(child_directory.clone());
@@ -742,7 +742,7 @@ fn releasing_selected_item_without_drag_collapses_multi_selection() {
     ]
     .into();
     browser.tab_mut().selected = Some(first.clone());
-    browser.tab_mut().selected_paths = HashSet::from([first.clone(), second.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([first.clone(), second.clone()]);
 
     let press_command = browser.handle_column_entry_clicked(second.clone());
     drop(press_command);

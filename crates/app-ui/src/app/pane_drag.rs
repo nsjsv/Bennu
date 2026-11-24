@@ -624,7 +624,7 @@ mod tests {
         let mut browser = split_browser_for_test();
         let selected_path = PathBuf::from("/workspace/left/report.txt");
         browser.tab_mut().selected = Some(selected_path.clone());
-        browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
+        *browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
         browser.tab_mut().selection_anchor = Some(selected_path);
         browser.tab_mut().deepest_open_column_directory =
             Some(PathBuf::from("/workspace/left/src"));

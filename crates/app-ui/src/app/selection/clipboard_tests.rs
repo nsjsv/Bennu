@@ -49,7 +49,7 @@ fn browser_with_entries(paths: &[PathBuf]) -> FileBrowser {
         .map(|path| test_entry(path))
         .collect::<Vec<_>>()
         .into();
-    browser.tab_mut().selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
+    *browser.tab_mut().selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
     browser.tab_mut().selected = paths.first().cloned();
     browser
 }
@@ -140,7 +140,7 @@ fn new_clipboard_operation_replaces_cut_visual_membership() {
     let first = PathBuf::from("/workspace/first.txt");
     let second = PathBuf::from("/workspace/second.txt");
     let mut browser = browser_with_entries(&[first.clone(), second.clone()]);
-    browser.tab_mut().selected_paths = HashSet::from([first.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([first.clone()]);
     drop(browser.move_selected());
     assert_eq!(
         browser.file_entry_content_modifier(&first),
@@ -148,7 +148,7 @@ fn new_clipboard_operation_replaces_cut_visual_membership() {
     );
 
     browser.tab_mut().selected = Some(second.clone());
-    browser.tab_mut().selected_paths = HashSet::from([second.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([second.clone()]);
     drop(browser.move_selected());
     assert_eq!(
         browser.file_entry_content_modifier(&first),

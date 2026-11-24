@@ -15,7 +15,7 @@ fn browser() -> FileBrowser {
 
 fn select(browser: &mut FileBrowser, paths: &[&str]) {
     let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
-    browser.tab_mut().selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
+    *browser.tab_mut().selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
     browser.tab_mut().selected = paths.last().cloned();
 }
 

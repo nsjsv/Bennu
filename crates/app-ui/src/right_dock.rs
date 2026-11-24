@@ -18,16 +18,20 @@ pub(crate) enum DockPanel {
     Info,
     /// 正在跑的任务和做过的操作（能按顺序撤回）。
     TaskLog,
+    /// 对选中项能用的转换、压缩、解压等和自定义动作，点一下就跑。
+    QuickActions,
 }
 
 impl DockPanel {
-    pub(crate) const ALL: [Self; 3] = [Self::Preview, Self::Info, Self::TaskLog];
+    pub(crate) const ALL: [Self; 4] =
+        [Self::Preview, Self::Info, Self::TaskLog, Self::QuickActions];
 
     pub(crate) fn storage_name(self) -> &'static str {
         match self {
             Self::Preview => "preview",
             Self::Info => "info",
             Self::TaskLog => "task_log",
+            Self::QuickActions => "quick_actions",
         }
     }
 

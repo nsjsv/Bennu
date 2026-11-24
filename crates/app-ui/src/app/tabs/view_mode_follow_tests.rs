@@ -92,7 +92,7 @@ fn navigation_cancels_icons_to_list_follow_before_old_load_completes() {
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     ));
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target]);
+    *browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let request = list_request(&browser, &project);
 
@@ -158,7 +158,7 @@ fn nested_icon_selection() -> NestedIconSelection {
     ));
     browser.icon_grid_expansion = Some(expansion);
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
     NestedIconSelection {
         browser,
         root,
@@ -215,7 +215,7 @@ fn completed_path_migration_cancels_list_to_icons_follow() {
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     );
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target]);
+    *browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
     assert!(browser
         .icon_grid_expansion
@@ -269,7 +269,7 @@ fn stale_list_follow_session_cannot_write_into_restarted_same_path_and_generatio
     ));
     browser.icon_grid_expansion = Some(expansion);
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target]);
+    *browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let current_request = list_request(&browser, &project);
     assert_eq!(stale_request.path, current_request.path);
@@ -352,7 +352,7 @@ fn stale_nested_selection_does_not_start_list_to_icons_follow() {
         .expanded_directories
         .insert(project, loaded_directory(Vec::new()));
     browser.tab_mut().selected = Some(stale_target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([stale_target]);
+    *browser.tab_mut().selected_paths = HashSet::from([stale_target]);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
 
@@ -462,7 +462,7 @@ fn select_all_cancels_list_to_icons_follow() {
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     );
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target]);
+    *browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
     let request = {
         let state = browser

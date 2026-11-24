@@ -313,6 +313,9 @@ impl FileBrowser {
             ShortcutAction::ToggleInfoPanel => {
                 self.toggle_dock_panel(crate::right_dock::DockPanel::Info)
             }
+            ShortcutAction::ToggleQuickActionsPanel => {
+                self.toggle_dock_panel(crate::right_dock::DockPanel::QuickActions)
+            }
             ShortcutAction::ToggleTaskLogPanel => {
                 self.toggle_dock_panel(crate::right_dock::DockPanel::TaskLog)
             }
@@ -543,7 +546,7 @@ mod tests {
         browser.tab_mut().entries = vec![trash_entry.entry.clone()].into();
         browser.tab_mut().trash_entries = vec![trash_entry];
         browser.tab_mut().selected = Some(trash_path.clone());
-        browser.tab_mut().selected_paths = HashSet::from([trash_path]);
+        *browser.tab_mut().selected_paths = HashSet::from([trash_path]);
         (browser, expected_restore_entry)
     }
 
@@ -569,7 +572,7 @@ mod tests {
             BrowserLocation::Directory(PathBuf::from("/workspace"));
         ignored_browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         ignored_browser.tab_mut().selected = Some(selected_path.clone());
-        ignored_browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
+        *ignored_browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
 
         drop(ignored_browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
@@ -589,7 +592,7 @@ mod tests {
             BrowserLocation::Directory(PathBuf::from("/workspace"));
         captured_browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         captured_browser.tab_mut().selected = Some(selected_path.clone());
-        captured_browser.tab_mut().selected_paths = HashSet::from([selected_path]);
+        *captured_browser.tab_mut().selected_paths = HashSet::from([selected_path]);
 
         drop(captured_browser.handle_keyboard_key_pressed(
             keyboard::Key::Named(key::Named::Delete),
@@ -641,7 +644,7 @@ mod tests {
         browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
-        browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
+        *browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
         browser.destructive_action_confirmation = Some(
             crate::model::DestructiveActionConfirmation::DeletePermanently {
                 paths: vec![selected_path],
@@ -666,7 +669,7 @@ mod tests {
         browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
-        browser.tab_mut().selected_paths = HashSet::from([selected_path]);
+        *browser.tab_mut().selected_paths = HashSet::from([selected_path]);
         browser.file_drop_prompt = Some(crate::model::FileDropPrompt {
             paste_directory: PathBuf::from("/workspace"),
             paths: vec![PathBuf::from("/incoming/report.txt")],
@@ -690,7 +693,7 @@ mod tests {
         browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
-        browser.tab_mut().selected_paths = HashSet::from([selected_path]);
+        *browser.tab_mut().selected_paths = HashSet::from([selected_path]);
         browser.network_connection_editor =
             Some(crate::network_connections::NetworkConnectionEditorState::add());
 
@@ -731,7 +734,7 @@ mod tests {
         browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
         browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
         browser.tab_mut().selected = Some(selected_path.clone());
-        browser.tab_mut().selected_paths = HashSet::from([selected_path]);
+        *browser.tab_mut().selected_paths = HashSet::from([selected_path]);
         browser.file_drop_prompt = Some(crate::model::FileDropPrompt {
             paste_directory: PathBuf::from("/workspace"),
             paths: vec![PathBuf::from("/incoming/report.txt")],

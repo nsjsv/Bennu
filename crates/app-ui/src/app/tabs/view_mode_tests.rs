@@ -269,7 +269,7 @@ fn switching_from_list_to_columns_replaces_stale_column_history() {
     .into();
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().selected = Some(main_rs.clone());
-    browser.tab_mut().selected_paths = HashSet::from([main_rs.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([main_rs.clone()]);
     browser.tab_mut().deepest_open_column_directory = Some(stale.clone());
     browser.tab_mut().expanded_directories.insert(
         project.clone(),
@@ -334,7 +334,7 @@ fn list_to_icons_follows_only_the_selected_loaded_branch() {
         .expanded_directories
         .insert(stale.clone(), loaded_directory(Vec::new()));
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
 
@@ -402,7 +402,7 @@ fn list_to_icons_includes_the_selected_directory_when_it_is_expanded() {
         .expanded_directories
         .insert(project.clone(), loaded_directory(Vec::new()));
     browser.tab_mut().selected = Some(project.clone());
-    browser.tab_mut().selected_paths = HashSet::from([project.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([project.clone()]);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
 
@@ -447,7 +447,7 @@ fn user_selection_cancels_list_to_icons_follow_before_old_load_completes() {
         loaded_directory(vec![test_entry(target.clone(), FileKind::File)]),
     );
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target]);
+    *browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
     let request = icon_grid_request(&browser, &project);
 
@@ -511,7 +511,7 @@ fn icons_to_list_reloads_its_own_single_chain_before_restoring_selection() {
     ));
     browser.icon_grid_expansion = Some(expansion);
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([target.clone()]);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
 
@@ -606,7 +606,7 @@ fn user_right_click_selection_cancels_icons_to_list_follow_before_old_load_compl
     ));
     browser.icon_grid_expansion = Some(expansion);
     browser.tab_mut().selected = Some(target.clone());
-    browser.tab_mut().selected_paths = HashSet::from([target]);
+    *browser.tab_mut().selected_paths = HashSet::from([target]);
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
     let request = list_request(&browser, &project);
 
@@ -661,7 +661,7 @@ fn entering_icons_keeps_hierarchy_and_removes_hidden_selection() {
         loaded_directory(vec![test_entry(hidden_child.clone(), FileKind::File)]),
     );
     browser.tab_mut().selected = Some(hidden_child.clone());
-    browser.tab_mut().selected_paths = HashSet::from([hidden_child.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([hidden_child.clone()]);
     browser.tab_mut().selection_anchor = Some(hidden_child);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
@@ -696,7 +696,7 @@ fn icons_to_columns_rebuilds_chain_from_direct_selection() {
     .into();
     browser.tab_mut().choose_view_mode(BrowserViewMode::Icons);
     browser.tab_mut().selected = Some(project.clone());
-    browser.tab_mut().selected_paths = HashSet::from([project.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([project.clone()]);
     browser.tab_mut().deepest_open_column_directory = Some(stale.clone());
     browser
         .tab_mut()
@@ -760,7 +760,7 @@ fn icon_selection_without_focus_restores_direct_focus_before_columns() {
     browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     browser.tab_mut().selected = None;
-    browser.tab_mut().selected_paths = HashSet::from([project.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([project.clone()]);
     browser
         .tab_mut()
         .expanded_directories
@@ -782,7 +782,7 @@ fn activating_split_panes_preserves_each_pane_view_mode() {
     left_tab.choose_view_mode(BrowserViewMode::Icons);
     let mut right_tab = BrowserTab::directory(1, right_dir.clone());
     right_tab.choose_view_mode(BrowserViewMode::Columns);
-    right_tab.selected_paths = HashSet::new();
+    *right_tab.selected_paths = HashSet::new();
 
     let (mut browser, _) = FileBrowser::new(config::default_user_config());
     browser.pane_layout = BrowserPaneLayout::Split {
@@ -820,7 +820,7 @@ fn switching_from_columns_to_list_reveals_selected_entry_immediately() {
     browser.tab_mut().location = BrowserLocation::Directory(root.clone());
     browser.tab_mut().entries = vec![test_entry(notes.clone(), FileKind::File)].into();
     browser.tab_mut().selected = Some(notes.clone());
-    browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
     browser.tab_mut().choose_view_mode(BrowserViewMode::Columns);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::List));
@@ -837,7 +837,7 @@ fn switching_from_list_to_columns_reveals_selected_entry_immediately() {
     browser.tab_mut().location = BrowserLocation::Directory(root.clone());
     browser.tab_mut().entries = vec![test_entry(notes.clone(), FileKind::File)].into();
     browser.tab_mut().selected = Some(notes.clone());
-    browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Columns));
@@ -854,7 +854,7 @@ fn switching_from_list_to_icons_reveals_selected_entry_immediately() {
     browser.tab_mut().location = BrowserLocation::Directory(root.clone());
     browser.tab_mut().entries = vec![test_entry(notes.clone(), FileKind::File)].into();
     browser.tab_mut().selected = Some(notes.clone());
-    browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
 
     drop(browser.select_browser_view_mode(BrowserPaneId::PRIMARY, BrowserViewMode::Icons));
@@ -872,7 +872,7 @@ fn switching_with_loading_directory_parks_pending_reveal() {
     browser.tab_mut().location = BrowserLocation::Directory(root.clone());
     browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
     browser.tab_mut().selected = Some(notes.clone());
-    browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([notes.clone()]);
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     let mut loading = loaded_directory(vec![]);
     loading.status = ExpandedDirectoryStatus::Loading;
@@ -906,7 +906,7 @@ fn pending_selection_reveal_discarded_when_selection_changes() {
     browser.tab_mut().location = BrowserLocation::Directory(root);
     browser.tab_mut().entries = vec![test_entry(project.clone(), FileKind::Directory)].into();
     browser.tab_mut().selected = Some(notes.clone());
-    browser.tab_mut().selected_paths = HashSet::from([notes]);
+    *browser.tab_mut().selected_paths = HashSet::from([notes]);
     browser.tab_mut().choose_view_mode(BrowserViewMode::List);
     let mut loading = loaded_directory(vec![]);
     loading.status = ExpandedDirectoryStatus::Loading;

@@ -559,6 +559,15 @@ pub(super) const ACTIONS: &[ActionSpec] = &[
         keys: &[],
     },
     ActionSpec {
+        action: ShortcutAction::ToggleQuickActionsPanel,
+        config_key: "toggle_quick_actions_panel",
+        label: || tr!("Show or Hide Quick Actions Panel"),
+        group: G::Panels,
+        scope: Browser,
+        context: App,
+        keys: &[],
+    },
+    ActionSpec {
         action: ShortcutAction::ToggleRightDockLock,
         config_key: "toggle_right_dock_lock",
         label: || tr!("Lock or Unlock Right Panels"),

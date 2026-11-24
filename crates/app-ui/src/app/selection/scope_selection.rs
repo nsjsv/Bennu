@@ -35,7 +35,7 @@ impl FileBrowser {
     fn select_scope_paths(&mut self, paths: Vec<PathBuf>) -> Task<Message> {
         self.cancel_expansion_follow_plans();
         let tab = self.tab_mut();
-        tab.selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
+        *tab.selected_paths = paths.iter().cloned().collect::<HashSet<_>>();
         tab.selection_anchor = paths.first().cloned();
         if let Some(path) = paths.first().cloned() {
             self.focus_path(path);

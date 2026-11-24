@@ -55,7 +55,7 @@ impl BrowserTabSession {
     pub(crate) fn to_browser_tab(&self) -> BrowserTab {
         let mut tab = BrowserTab::at(self.id, self.location.clone());
         tab.selected = self.selected.clone();
-        tab.selected_paths = self.selected_paths.clone();
+        *tab.selected_paths = self.selected_paths.clone();
         tab.selection_anchor = self.selected.clone();
         tab.deepest_open_column_directory = self.deepest_open_column_directory.clone();
         // 恢复出来的栏链是用户上次开着的路：途经隐藏目录时上一级栏里也得列出它。
@@ -159,7 +159,7 @@ pub(crate) fn tab_session_from_live(tab: &BrowserTab) -> BrowserTabSession {
             id: tab.id,
             location: location.clone(),
             selected: tab.selected.clone(),
-            selected_paths: tab.selected_paths.clone(),
+            selected_paths: HashSet::clone(&tab.selected_paths),
             deepest_open_column_directory: tab.deepest_open_column_directory.clone(),
             expanded_directories: tab.expanded_directories.keys().cloned().collect(),
             view_mode,

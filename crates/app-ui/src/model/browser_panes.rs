@@ -33,6 +33,8 @@ pub(crate) use load_requests::{
 
 mod entry_snapshot;
 pub(crate) use entry_snapshot::{next_content_revision, DirectoryEntrySnapshot};
+mod selected_paths;
+pub(crate) use selected_paths::SelectedPaths;
 
 pub(crate) fn empty_directory_entry_snapshot() -> DirectoryEntrySnapshot {
     DirectoryEntrySnapshot::default()
@@ -425,7 +427,7 @@ pub(crate) struct BrowserTab {
     pub(crate) directory_discovery: Option<DirectoryDiscovery>,
     pub(crate) trash_entries: Vec<TrashEntry>,
     pub(crate) selected: Option<PathBuf>,
-    pub(crate) selected_paths: HashSet<PathBuf>,
+    pub(crate) selected_paths: SelectedPaths,
     pub(crate) selection_anchor: Option<PathBuf>,
     pub(crate) deepest_open_column_directory: Option<PathBuf>,
     /// 用户点名要去的路径（地址栏、定位找到的文件），见 `ScanOptions::revealed_path`。
@@ -523,7 +525,7 @@ impl BrowserTab {
             directory_discovery: None,
             trash_entries: Vec::new(),
             selected: None,
-            selected_paths: HashSet::new(),
+            selected_paths: SelectedPaths::default(),
             selection_anchor: None,
             deepest_open_column_directory: None,
             revealed_path: None,

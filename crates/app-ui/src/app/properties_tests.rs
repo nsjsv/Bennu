@@ -32,7 +32,7 @@ fn application_multi_selection_opens_the_shared_target_set_loader() {
     ]
     .into();
     browser.tab_mut().selected = Some(first.clone());
-    browser.tab_mut().selected_paths =
+    *browser.tab_mut().selected_paths =
         std::collections::HashSet::from([first.clone(), second.clone()]);
 
     let _command = browser.open_selected_file_properties();

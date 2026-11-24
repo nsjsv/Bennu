@@ -192,7 +192,7 @@ fn control_marquee_in_upper_column_preserves_open_descendant_columns() {
     ]);
     browser.tab_mut().deepest_open_column_directory = Some(source_directory.clone());
     browser.tab_mut().selected = Some(preserved.clone());
-    browser.tab_mut().selected_paths = HashSet::from([preserved.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([preserved.clone()]);
     browser.keyboard_modifiers = keyboard::Modifiers::CTRL;
 
     drop(browser.start_column_blank_selection_marquee(project));

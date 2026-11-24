@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config::UiLanguage;
+use crate::model::next_content_revision;
 use file_core::mime::MimeDatabase;
 
 use super::action_file::parse_action_file;
@@ -84,6 +85,8 @@ pub(crate) struct ActionLibrary {
     problems: Vec<ActionFileProblem>,
     /// 读取时拿到的类型库，菜单匹配用它，界面线程上不再碰系统库的文件。
     types: Arc<MimeDatabase>,
+    /// 每读一次换一个号：跟着动作走的面板（快捷操作）按它判断动作变没变。
+    revision: u64,
 }
 
 impl fmt::Debug for ActionLibrary {
@@ -112,6 +115,10 @@ pub(crate) struct ApplicableActions {
 }
 
 impl ActionLibrary {
+    pub(crate) fn revision(&self) -> u64 {
+        self.revision
+    }
+
     /// 第一次读完之前：没有动作。
     pub(crate) fn empty() -> Self {
         Self {
@@ -120,6 +127,7 @@ impl ActionLibrary {
             service_menus: Vec::new(),
             problems: Vec::new(),
             types: Arc::new(MimeDatabase::load(Vec::new())),
+            revision: next_content_revision(),
         }
     }
 
@@ -131,12 +139,14 @@ impl ActionLibrary {
             service_menus: Vec::new(),
             problems: Vec::new(),
             types: MimeDatabase::system(),
+            revision: next_content_revision(),
         }
     }
 
     #[cfg(test)]
     pub(crate) fn with_service_menus(mut self, service_menus: Vec<ServiceMenuAction>) -> Self {
         self.service_menus = service_menus.into_iter().map(Arc::new).collect();
+        self.revision = next_content_revision();
         self
     }
 
@@ -161,6 +171,7 @@ impl ActionLibrary {
             service_menus: Vec::new(),
             problems: Vec::new(),
             types: MimeDatabase::system(),
+            revision: next_content_revision(),
         };
         let folder_problem = |reason: String| ActionFileProblem {
             file: folder.to_path_buf(),

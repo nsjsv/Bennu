@@ -4,15 +4,13 @@ use std::time::Instant;
 use file_core::{is_supported_archive_path, EntryNameKind, FileKind};
 use iced::Task;
 
-use super::actions::ActionSubject;
 use super::panes::BrowserPaneView;
 use super::{FileBrowser, DOUBLE_CLICK_THRESHOLD};
 
 use crate::model::{
-    file_grouping_entry_visible, pane_entry, BrowserLocation, BrowserPaneId, BrowserViewMode,
-    ContextMenuState, FileContextMenuExpansion, FileContextMenuState, FileDeleteAction,
-    FileDragSpringSource, FileDragStationaryAction, FileDropTarget, FileMenuPlace,
-    FileMenuTargetKind, LastActivationClick, Message,
+    pane_entry, BrowserLocation, BrowserPaneId, BrowserViewMode, ContextMenuState,
+    FileContextMenuExpansion, FileContextMenuState, FileDeleteAction, FileDragSpringSource,
+    FileDragStationaryAction, FileDropTarget, LastActivationClick, Message,
 };
 use crate::selection_summary::{summarize_entries, PaneSelectionSummary};
 
@@ -36,6 +34,7 @@ mod keyboard_movement;
 pub(in crate::app) use keyboard_movement::letter_input_deadline;
 mod keyboard_navigation;
 mod marquee;
+mod menu_state;
 mod media_next;
 mod scope_selection;
 #[cfg(test)]
@@ -432,34 +431,14 @@ impl FileBrowser {
         let expansion_command = self.prepare_icon_grid_entry_interaction(&path);
         let rename_command = self.commit_rename_if_active();
         self.select_context_menu_target(path.clone());
-        let delete_action = self.file_delete_action_for_selection();
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
-        let target_kind = self.file_menu_target_kind(&path);
-        let can_batch_rename = self.batch_rename_available_for_selection();
-        let can_create_symlink = self.selection_all_paths_local();
         if self.tab().location == BrowserLocation::Trash {
             self.open_trash_context_menu(Some(path), position);
         } else {
-            self.open_file_area_menu(FileContextMenuState {
-                place: self.file_menu_place(),
-                target: Some(path.clone()),
-                target_kind,
-                paste_directory: self.entry_parent_directory(&path),
-                can_batch_rename,
-                can_create_symlink,
-                delete_action,
-                position,
-                expansion: FileContextMenuExpansion::None,
-                // 分组方式入口只属于空白菜单,条目菜单一律不带。
-                grouping_entry_visible: false,
-                // 解压菜单的消费数据:选中集合里的归档与「是否在包内」。
-                selection_archives: self.archive_selection_paths(),
-                inside_archive: self.current_directory_is_inside_archive(),
-                keyboard_highlight: None,
-                actions: self.applicable_actions(&ActionSubject::Selection),
-            });
+            let menu = self.entry_menu_state(path, position);
+            self.open_file_area_menu(menu);
         }
         Task::batch([
             expansion_command,
@@ -500,45 +479,9 @@ impl FileBrowser {
         self.preview_engine.clear_preview();
         self.drag_selection_anchor = None;
         self.selection_marquee = None;
-        {
-            let actions = self.applicable_actions(&ActionSubject::Folder(directory.clone()));
-            self.open_file_area_menu(FileContextMenuState {
-                place: FileMenuPlace::Folder,
-                target: None,
-                target_kind: FileMenuTargetKind::File,
-                paste_directory: directory,
-                can_batch_rename: false,
-                can_create_symlink: false,
-                delete_action: FileDeleteAction::MoveToTrash,
-                position,
-                expansion: FileContextMenuExpansion::None,
-                // 按打开菜单那一刻的视图模式定死入口可见性,后续视图
-                // 切换不会让已打开的菜单中途长出入口。
-                grouping_entry_visible: file_grouping_entry_visible(self.tab().view_mode()),
-                selection_archives: Vec::new(),
-                inside_archive: self.current_directory_is_inside_archive(),
-                keyboard_highlight: None,
-                actions,
-            });
-        }
+        let menu = self.blank_menu_state(directory, position);
+        self.open_file_area_menu(menu);
         Task::batch([expansion_command, rename_command])
-    }
-
-    fn file_menu_target_kind(&self, path: &Path) -> FileMenuTargetKind {
-        if self.entry_kind(path) != Some(FileKind::Directory) {
-            FileMenuTargetKind::File
-        } else if self.sidebar_favorite_exists(path) {
-            FileMenuTargetKind::FavoriteFolder
-        } else {
-            FileMenuTargetKind::Folder
-        }
-    }
-
-    fn file_menu_place(&self) -> FileMenuPlace {
-        match self.tab().location {
-            BrowserLocation::Search(_) => FileMenuPlace::SearchResults,
-            BrowserLocation::Directory(_) | BrowserLocation::Trash => FileMenuPlace::Folder,
-        }
     }
 
     /// 与 view 层 entry/blank 面板选择同一谓词,配置后无可见面板时菜单不进入状态。

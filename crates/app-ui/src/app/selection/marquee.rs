@@ -60,7 +60,7 @@ impl FileBrowser {
         self.drag_selection_anchor = None;
         self.cancel_file_drag_interaction();
         let preserve_existing = self.keyboard_modifiers.control();
-        let base_selection = self.tab().selected_paths.clone();
+        let base_selection = HashSet::clone(&self.tab().selected_paths);
         if matches!(&source, SelectionMarqueeSource::PaneBlank) && !preserve_existing {
             self.set_deepest_open_column_directory(None);
         }
@@ -205,7 +205,7 @@ impl FileBrowser {
             }
         }
 
-        self.tab_mut().selected_paths = next_selection;
+        *self.tab_mut().selected_paths = next_selection;
         let selected = self.last_visible_selected_path();
         self.tab_mut().selected = selected.clone();
         if let Some(selected) = selected {

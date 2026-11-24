@@ -24,6 +24,7 @@ impl FileBrowser {
     /// 目录导航,以及启动偏好加载(同样经由消息处理抵达)。面板没显示(栏隐藏、关掉、
     /// 或藏在同格别的标签后面)时什么都不读。
     pub(crate) fn sync_right_dock_panels(&mut self) -> Task<Message> {
+        self.sync_quick_actions_panel();
         let info = self.sync_info_panel();
         Task::batch([self.sync_preview_panel(), info])
     }
@@ -353,7 +354,7 @@ mod tests {
         let second = PathBuf::from("/workspace/b.txt");
         let mut browser = panel_open_browser();
         browser.tab_mut().entries = vec![test_file_entry(&first), test_file_entry(&second)].into();
-        browser.tab_mut().selected_paths = HashSet::from([first.clone(), second.clone()]);
+        *browser.tab_mut().selected_paths = HashSet::from([first.clone(), second.clone()]);
         browser.tab_mut().selected = Some(second.clone());
 
         drop(browser.sync_right_dock_panels());

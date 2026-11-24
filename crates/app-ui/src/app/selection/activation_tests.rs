@@ -810,7 +810,7 @@ fn clicking_child_column_blank_keeps_select_all_focused_on_that_column() {
     );
     browser.tab_mut().deepest_open_column_directory = Some(source.clone());
     browser.tab_mut().selected = Some(source.clone());
-    browser.tab_mut().selected_paths = HashSet::from([source.clone()]);
+    *browser.tab_mut().selected_paths = HashSet::from([source.clone()]);
     browser.cursor_paste_directory = Some(source.clone());
 
     drop(browser.start_column_blank_selection_marquee(source.clone()));

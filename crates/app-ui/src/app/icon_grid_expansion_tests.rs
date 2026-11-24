@@ -433,7 +433,7 @@ fn batch_rename_resolves_selected_entries_from_icon_grid_expansion() {
     );
     finish_open_animation(&mut browser);
     browser.tab_mut().selected = Some(second.clone());
-    browser.tab_mut().selected_paths = HashSet::from([first, second]);
+    *browser.tab_mut().selected_paths = HashSet::from([first, second]);
 
     drop(browser.handle_batch_rename_message(BatchRenameMessage::OpenSelected));
 

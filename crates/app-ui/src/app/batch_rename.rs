@@ -163,7 +163,7 @@ mod tests {
             file_entry(second_path.clone()),
         ]
         .into();
-        browser.tab_mut().selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
+        *browser.tab_mut().selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
 
         drop(browser.handle_batch_rename_message(BatchRenameMessage::OpenSelected));
 
@@ -189,7 +189,7 @@ mod tests {
             file_entry(second_path.clone()),
         ]
         .into();
-        browser.tab_mut().selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
+        *browser.tab_mut().selected_paths = HashSet::from([first_path.clone(), second_path.clone()]);
 
         drop(browser.handle_batch_rename_message(BatchRenameMessage::OpenSelected));
         assert!(browser.batch_rename.is_some());

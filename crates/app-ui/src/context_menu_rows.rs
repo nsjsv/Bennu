@@ -161,6 +161,42 @@ pub(crate) fn file_context_menu_rows(
     rows
 }
 
+/// 快捷操作面板的行：菜单里把选中的文件变成别的东西的那几项（解压、压缩、转换、校验、批量
+/// 改名）和「动作」那一块。从同一份菜单结构里挑，设置里关掉的、这批文件用不了的，面板里也没有。
+pub(crate) fn quick_action_rows(
+    menu: &FileContextMenuState,
+    context_menus: &ContextMenuPreferences,
+) -> Vec<MenuRow> {
+    let is_quick_action = |item: &FileAreaMenuItem| {
+        matches!(
+            item,
+            FileAreaMenuItem::SmartExtractHere
+                | FileAreaMenuItem::ExtractToArchiveFolder
+                | FileAreaMenuItem::CreateArchive
+                | FileAreaMenuItem::ConvertFormat
+                | FileAreaMenuItem::FileChecksum
+                | FileAreaMenuItem::BatchRename
+        )
+    };
+    let mut rows = Vec::new();
+    for entry in menu_entries(menu, context_menus) {
+        match entry {
+            FileEntryMenuEntry::Item(FileAreaMenuItem::Actions) => rows.extend(action_rows(menu)),
+            FileEntryMenuEntry::Item(item) if is_quick_action(&item) => {
+                rows.extend(item_row(item, menu, false, false));
+            }
+            FileEntryMenuEntry::Item(_) => {}
+            FileEntryMenuEntry::Group { members, .. } => rows.extend(
+                members
+                    .into_iter()
+                    .filter(is_quick_action)
+                    .filter_map(member_row),
+            ),
+        }
+    }
+    rows
+}
+
 /// 配置后的结构列表;空白菜单没有组成员,只有「New...」组行。
 fn menu_entries(
     menu: &FileContextMenuState,

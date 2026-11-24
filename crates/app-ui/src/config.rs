@@ -43,7 +43,7 @@ mod stored_preferences;
 mod unrecognized_settings;
 pub(crate) use stored_preferences::{
     StoredContextMenuItemEntry, StoredContextMenuLayout, StoredContextMenuLayouts,
-    StoredFavoriteTransferDevice, StoredLastSearchScope, StoredListViewColumn,
+    StoredDockGroup, StoredFavoriteTransferDevice, StoredRightDock, StoredLastSearchScope, StoredListViewColumn,
     StoredShortcutOverride, StoredUserPreferences, StoredWindowControlPlacement,
     COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN, COLUMN_WIDTH_ADJUST_MODE_UNIFORM,
     LAUNCH_WINDOW_POLICY_MERGE_INTO_EXISTING, LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW,
@@ -72,9 +72,9 @@ pub(crate) use bennu_sidebar::{
     normalize_sidebar_width, SidebarFavoriteConfig, DEFAULT_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH,
     MIN_SIDEBAR_WIDTH,
 };
-pub(crate) const DEFAULT_RIGHT_PREVIEW_PANEL_WIDTH: f32 = 320.0;
-pub(crate) const MIN_RIGHT_PREVIEW_PANEL_WIDTH: f32 = 200.0;
-pub(crate) const MAX_RIGHT_PREVIEW_PANEL_WIDTH: f32 = 640.0;
+pub(crate) const DEFAULT_RIGHT_DOCK_WIDTH: f32 = 320.0;
+pub(crate) const MIN_RIGHT_DOCK_WIDTH: f32 = 200.0;
+pub(crate) const MAX_RIGHT_DOCK_WIDTH: f32 = 640.0;
 pub(crate) const DEFAULT_RIGHT_PREVIEW_PREVIEW_RATIO: f32 = 0.7;
 pub(crate) const MIN_RIGHT_PREVIEW_PREVIEW_RATIO: f32 = 0.25;
 pub(crate) const MAX_RIGHT_PREVIEW_PREVIEW_RATIO: f32 = 1.0;
@@ -343,9 +343,7 @@ pub(crate) struct UserConfig {
     pub(crate) show_hidden_files: bool,
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
-    pub(crate) right_preview_panel_open: bool,
-    pub(crate) right_preview_panel_width: f32,
-    pub(crate) right_preview_preview_ratio: f32,
+    pub(crate) right_dock: crate::right_dock::RightDockLayout,
     pub(crate) sidebar_favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub(crate) network_connections: Vec<SavedNetworkConnection>,
     pub(crate) terminal_emulator: TerminalEmulator,
@@ -504,9 +502,7 @@ pub(crate) fn default_user_config() -> UserConfig {
         show_hidden_files: false,
         language_setting: UiLanguageSetting::System,
         sidebar_width: DEFAULT_SIDEBAR_WIDTH,
-        right_preview_panel_open: false,
-        right_preview_panel_width: DEFAULT_RIGHT_PREVIEW_PANEL_WIDTH,
-        right_preview_preview_ratio: DEFAULT_RIGHT_PREVIEW_PREVIEW_RATIO,
+        right_dock: crate::right_dock::RightDockLayout::default(),
         sidebar_favorites: None,
         network_connections: Vec::new(),
         terminal_emulator: DEFAULT_TERMINAL_EMULATOR,
@@ -568,9 +564,7 @@ pub(crate) fn ui_thread_startup_config() -> UserConfig {
         show_hidden_files: false,
         language_setting: UiLanguageSetting::System,
         sidebar_width: DEFAULT_SIDEBAR_WIDTH,
-        right_preview_panel_open: false,
-        right_preview_panel_width: DEFAULT_RIGHT_PREVIEW_PANEL_WIDTH,
-        right_preview_preview_ratio: DEFAULT_RIGHT_PREVIEW_PREVIEW_RATIO,
+        right_dock: crate::right_dock::RightDockLayout::default(),
         sidebar_favorites: None,
         network_connections: Vec::new(),
         terminal_emulator: DEFAULT_TERMINAL_EMULATOR,
@@ -628,11 +622,11 @@ pub(crate) fn normalize_column_width(width: f32) -> f32 {
     }
 }
 
-pub(crate) fn normalize_right_preview_panel_width(width: f32) -> f32 {
+pub(crate) fn normalize_right_dock_width(width: f32) -> f32 {
     if width.is_finite() {
-        width.clamp(MIN_RIGHT_PREVIEW_PANEL_WIDTH, MAX_RIGHT_PREVIEW_PANEL_WIDTH)
+        width.clamp(MIN_RIGHT_DOCK_WIDTH, MAX_RIGHT_DOCK_WIDTH)
     } else {
-        DEFAULT_RIGHT_PREVIEW_PANEL_WIDTH
+        DEFAULT_RIGHT_DOCK_WIDTH
     }
 }
 

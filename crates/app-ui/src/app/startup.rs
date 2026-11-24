@@ -143,13 +143,7 @@ impl FileBrowser {
         self.user_preferences_seen = user_config.user_preferences();
         self.app_config_seen = crate::config::AppConfig::from_user_config(&user_config);
         self.sidebar_width_when_shown = self.sidebar_width_for_window(user_config.sidebar_width);
-        self.right_preview_panel_open = user_config.right_preview_panel_open;
-        self.right_preview_panel_width = crate::config::normalize_right_preview_panel_width(
-            user_config.right_preview_panel_width,
-        );
-        self.right_preview_preview_ratio = crate::config::normalize_right_preview_preview_ratio(
-            user_config.right_preview_preview_ratio,
-        );
+        self.right_dock = crate::right_dock::RightDock::new(user_config.right_dock.clone());
         self.terminal_emulator = user_config.terminal_emulator;
         self.rendering_gpu_preference = user_config.rendering_gpu_preference;
         self.options.include_hidden = user_config.show_hidden_files;

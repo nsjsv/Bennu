@@ -274,8 +274,8 @@ mod tests {
         );
 
         // #2：面板与窗格同排，打开后多栏必须让出面板宽度，不能排到它底下。
-        browser.right_preview_panel_open = true;
-        let panel_width = browser.right_preview_panel_effective_width();
+        browser.right_dock.toggle_visible();
+        let panel_width = browser.right_dock_effective_width();
         assert!(panel_width > 0.0);
         assert_close(
             browser.column_browser_content_width(browser.active_pane_id()),

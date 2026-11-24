@@ -422,15 +422,10 @@ impl FileBrowser {
         self.follow_terminal_panel_directory();
     }
 
-    /// 窗格区实际宽度。右侧预览面板与窗格同排挤占宽度：网格列数、分屏、
-    /// 多栏都按这个宽度排，漏减面板会让最右侧内容排到面板底下被盖住（#2）。
+    /// 窗格区实际宽度。右侧停靠区与窗格同排挤占宽度：网格列数、分屏、
+    /// 多栏都按这个宽度排，漏减停靠区会让最右侧内容排到它底下被盖住（#2）。
     pub(super) fn split_content_width(&self) -> f32 {
-        let preview_panel_width = if self.right_preview_panel_open {
-            self.right_preview_panel_effective_width()
-        } else {
-            0.0
-        };
-        (self.main_content_width() - preview_panel_width).max(1.0)
+        (self.main_content_width() - self.right_dock_layout_width()).max(1.0)
     }
 }
 
@@ -551,8 +546,8 @@ mod tests {
         browser.sidebar_width_when_shown = 180.0;
         assert_eq!(browser.pane_content_width(), 1_020.0);
 
-        browser.right_preview_panel_open = true;
-        let panel_width = browser.right_preview_panel_effective_width();
+        browser.right_dock.toggle_visible();
+        let panel_width = browser.right_dock_effective_width();
         assert!(panel_width > 0.0);
         assert_eq!(browser.pane_content_width(), 1_020.0 - panel_width);
 

@@ -475,10 +475,8 @@ pub(crate) enum Message {
     SmartFolderRightClicked(String),
     SmartFolderRemoved(String),
     SidebarResizeStarted,
-    RightPreviewPanelResizeStarted,
-    RightPreviewPanelRatioResizeStarted,
+    RightDock(crate::app::right_dock::RightDockMessage),
     SplitResizeStarted,
-    ToggleRightPreviewPanel,
     CursorMoved {
         window: window::Id,
         position: Point,
@@ -935,6 +933,16 @@ pub(crate) enum ContextMenuState {
     SidebarDevice(SidebarDeviceContextMenuState),
     NetworkConnection(SidebarNetworkConnectionContextMenuState),
     SmartFolder(SmartFolderContextMenuState),
+    RightDock(RightDockMenuState),
+}
+
+/// 右键停靠区（标题栏、标签条、面板里没有自己右键菜单的地方）弹出的菜单：开关各面板、锁定。
+#[derive(Debug, Clone)]
+pub(crate) struct RightDockMenuState {
+    pub(crate) position: Point,
+    /// 打开菜单那一刻在栏里的面板和锁定状态（菜单点一下就关，不会过时）。
+    pub(crate) open_panels: Vec<crate::right_dock::DockPanel>,
+    pub(crate) locked: bool,
 }
 
 impl ContextMenuState {
@@ -947,6 +955,7 @@ impl ContextMenuState {
             Self::SidebarDevice(menu) => menu.position,
             Self::NetworkConnection(menu) => menu.position,
             Self::SmartFolder(menu) => menu.position,
+            Self::RightDock(menu) => menu.position,
         }
     }
 
@@ -958,7 +967,7 @@ impl ContextMenuState {
             Self::SidebarBookmark(_) => None,
             Self::SidebarDevice(_) => None,
             Self::NetworkConnection(_) => None,
-            Self::SmartFolder(_) => None,
+            Self::SmartFolder(_) | Self::RightDock(_) => None,
         }
     }
 }

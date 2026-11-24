@@ -194,7 +194,7 @@ impl FileBrowser {
             return Task::none();
         }
         // 空格驱动的加载会话面向独立窗口:异步回流时窗口尺寸/聚焦动作
-        // 全部照旧;面板发起的会话经 sync_right_preview_panel 另行标注。
+        // 全部照旧;面板发起的会话经 sync_right_dock_panels 另行标注。
         self.preview_engine.preview_load_surface = PreviewLoadSurface::StandaloneWindow;
         // 内部“先关后开”会复位固定状态；切换预览内容时必须保留用户设定的固定。
         let pinned = self.preview_engine.preview_window_pinned;

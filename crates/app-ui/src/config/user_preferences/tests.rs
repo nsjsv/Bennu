@@ -104,37 +104,69 @@ fn theme_selection_roundtrips_through_stored_preferences() {
 }
 
 #[test]
-fn right_preview_panel_roundtrips_and_missing_width_falls_back() {
+fn the_right_dock_roundtrips() {
     let default = default_user_config();
     let mut config = default.clone();
-    config.right_preview_panel_open = true;
-    config.right_preview_panel_width = 480.0;
-    config.right_preview_preview_ratio = 0.8;
+    let (layout, _) = crate::right_dock::RightDockLayout::from_parts(
+        true,
+        480.0,
+        false,
+        [(vec!["info", "preview"], 1, 600), (vec![], 0, 1)],
+    );
+    config.right_dock = layout;
 
     let stored = config.user_preferences().to_stored();
-    assert_eq!(stored.right_preview_panel_open, true);
-    assert_eq!(stored.right_preview_panel_width, Some(480.0));
-    // f32 比例升 f64 存储,只保留精度容差内相等。
-    assert!((stored.right_preview_preview_ratio.unwrap() - 0.8).abs() < 1e-6);
-    let restored = UserPreferences::from_stored(stored, &default).preferences;
-    assert!(restored.right_preview_panel_open);
-    assert_eq!(restored.right_preview_panel_width, 480.0);
-    assert_eq!(restored.right_preview_preview_ratio, 0.8);
+    let interpreted = UserPreferences::from_stored(stored, &default);
 
-    // 旧版本数据缺宽度字段:回退默认宽度,开关回退关闭。
+    assert_eq!(interpreted.preferences.right_dock, config.right_dock);
+    assert!(interpreted.unrecognized.into_keys().is_empty());
+}
+
+#[test]
+fn the_old_right_panel_becomes_the_same_layout() {
+    let default = default_user_config();
     let mut legacy = StoredUserPreferences::default();
-    legacy.right_preview_panel_width = None;
-    legacy.right_preview_preview_ratio = None;
+    legacy.right_preview_panel_open = true;
+    legacy.right_preview_panel_width = Some(480.0);
+    legacy.right_preview_preview_ratio = Some(0.8);
+
     let restored = UserPreferences::from_stored(legacy, &default).preferences;
-    assert!(!restored.right_preview_panel_open);
+
     assert_eq!(
-        restored.right_preview_panel_width,
-        default.right_preview_panel_width
+        restored.right_dock,
+        crate::right_dock::RightDockLayout::from_previous_panel(true, 480.0, 0.8)
     );
+    // 更早的数据连宽度都没有：默认宽度、默认比例、不显示。
+    let restored =
+        UserPreferences::from_stored(StoredUserPreferences::default(), &default).preferences;
     assert_eq!(
-        restored.right_preview_preview_ratio,
-        default.right_preview_preview_ratio
+        restored.right_dock,
+        crate::right_dock::RightDockLayout::default()
     );
+}
+
+#[test]
+fn a_panel_this_version_does_not_know_is_dropped_and_reported() {
+    let default = default_user_config();
+    let mut stored = default.user_preferences().to_stored();
+    stored.right_dock = Some(crate::config::StoredRightDock {
+        visible: true,
+        width: 320.0,
+        locked: true,
+        groups: vec![crate::config::StoredDockGroup {
+            panels: vec!["preview".into(), "from-a-newer-version".into()],
+            active: 0,
+            portion: 1000,
+        }],
+    });
+
+    let interpreted = UserPreferences::from_stored(stored, &default);
+
+    assert!(interpreted
+        .preferences
+        .right_dock
+        .contains(crate::right_dock::DockPanel::Preview));
+    assert_eq!(interpreted.unrecognized.into_keys(), vec!["right_dock"]);
 }
 
 #[test]

@@ -14,8 +14,7 @@ impl FileBrowser {
         self.sidebar_bookmark_drag = None;
         self.sidebar_bookmark_drop_slot = None;
         self.sidebar_resize_drag = None;
-        self.right_preview_panel_resize_drag = None;
-        self.right_preview_ratio_resize_drag = None;
+        self.right_dock_drag = None;
         self.column_resize_drag = None;
         self.list_column_resize_drag = None;
         self.list_column_reorder_drag = None;
@@ -37,7 +36,7 @@ impl FileBrowser {
             self.finish_context_menu_settings_drag(),
             self.finish_sidebar_bookmark_drag(),
             self.finish_sidebar_resize_drag_command(),
-            self.finish_right_preview_panel_drag_commands(),
+            self.finish_right_dock_drag(),
             self.finish_column_resize_drag_command(),
             self.finish_sqlite_tables_resize_drag(),
             self.finish_list_column_resize_drag_command(),
@@ -125,8 +124,7 @@ impl FileBrowser {
         self.update_file_drag_edge_scroll(position);
         self.update_sidebar_bookmark_drag(position);
         self.update_sidebar_resize_drag(position);
-        self.update_right_preview_panel_resize_drag(position);
-        self.update_right_preview_panel_ratio_resize_drag(position);
+        self.update_right_dock_drag(position);
         self.update_column_resize_drag(position);
         self.update_list_column_resize_drag(position);
         self.update_split_resize(position);
@@ -150,7 +148,7 @@ impl FileBrowser {
     fn pane_boundary_drag_is_active(&self) -> bool {
         self.sidebar_resize_drag.is_some()
             || self.split_resize_drag.is_some()
-            || self.right_preview_panel_resize_drag.is_some()
+            || self.right_dock_width_drag_is_active()
             || self.terminal_panel.is_resizing()
     }
 }

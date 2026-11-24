@@ -37,7 +37,7 @@ impl FileBrowser {
         // 面板与 Space 预览共用引擎的 preview 槽,而 clear_preview 被 30 多个
         // 交互入口(拖拽起手、菜单、选择变化……)顺手调用,面板内容随时可能被
         // 清掉;不把槽拆开,就只能在出口重新对齐一次。面板关闭时是空操作。
-        let right_preview_panel_command = self.sync_right_preview_panel();
+        let right_preview_panel_command = self.sync_right_dock_panels();
         let fullscreen_command = self.sync_main_window_video_fullscreen();
         // 预览区域的大小由窗口、右侧面板宽度和分隔条、终端开关一起决定，改它的入口很多：
         // 在出口比一次，变了才让引擎重新看放大后要多少像素（超大图要补读露出来的块）。
@@ -346,7 +346,7 @@ impl FileBrowser {
                     pane_drag_finished,
                     self.finish_sidebar_bookmark_drag(),
                     self.finish_sidebar_resize_drag_command(),
-                    self.finish_right_preview_panel_drag_commands(),
+                    self.finish_right_dock_drag(),
                     self.finish_column_resize_drag_command(),
                     self.finish_list_column_resize_drag_command(),
                     self.finish_list_column_reorder_drag_command(),
@@ -426,7 +426,7 @@ impl FileBrowser {
                     pane_drag_finished,
                     self.finish_sidebar_bookmark_drag(),
                     self.finish_sidebar_resize_drag_command(),
-                    self.finish_right_preview_panel_drag_commands(),
+                    self.finish_right_dock_drag(),
                     self.finish_column_resize_drag_command(),
                     self.finish_list_column_resize_drag_command(),
                     self.finish_list_column_reorder_drag_command(),
@@ -475,11 +475,7 @@ impl FileBrowser {
             Message::SmartFolderRightClicked(query) => self.open_smart_folder_menu(query),
             Message::SmartFolderRemoved(query) => self.remove_smart_folder(&query),
             Message::SidebarResizeStarted => self.start_sidebar_resize_drag(),
-            Message::RightPreviewPanelResizeStarted => self.start_right_preview_panel_resize_drag(),
-            Message::RightPreviewPanelRatioResizeStarted => {
-                self.start_right_preview_panel_ratio_resize_drag()
-            }
-            Message::ToggleRightPreviewPanel => self.toggle_right_preview_panel(),
+            Message::RightDock(message) => self.handle_right_dock_message(message),
             Message::SplitResizeStarted => self.start_split_resize(self.cursor_or_origin()),
             Message::TerminalPanel(message) => self.handle_terminal_panel_message(message),
             Message::CursorMoved { window, position } => {

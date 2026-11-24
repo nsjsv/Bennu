@@ -59,6 +59,7 @@ mod operation_history;
 mod operation_queue_display;
 mod operation_queue_view;
 mod progress_ring;
+mod right_dock;
 mod runtime_logging;
 mod search_result_text;
 mod selection_marquee;

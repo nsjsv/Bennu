@@ -36,6 +36,7 @@ mod preview_panel;
 mod preview_settings;
 mod properties_window;
 mod rendering_settings;
+mod right_dock;
 mod right_preview_panel;
 mod search_filter_bar;
 mod search_panel;
@@ -129,7 +130,7 @@ use floating_panels::{
 use incoming_message_panel::incoming_message_panel;
 use incoming_transfer_panel::incoming_transfer_confirmation_panel;
 use rendering_settings::restart_notice_panel;
-use right_preview_panel::right_preview_panel;
+use right_dock::right_dock;
 use search_filter_bar::search_filter_bar;
 use search_panel::search_input_panel;
 use sidebar_panel::{sidebar_body, sidebar_settings_button};
@@ -234,8 +235,8 @@ pub(crate) fn view_browser(browser: &FileBrowser) -> Element<'_, Message> {
             .width(Length::Fill)
             .height(Length::Fill),
     );
-    if browser.right_preview_panel_open {
-        pane_row = pane_row.push(right_preview_panel(browser));
+    if browser.right_dock.layout().is_visible() {
+        pane_row = pane_row.push(right_dock(browser));
     }
     let content_body = iced::widget::column![
         pane_row.width(Length::Fill).height(Length::Fill),
@@ -721,7 +722,7 @@ fn pane_navigation_header<'a>(
                 .push(search_input_panel(browser))
                 .push(view_mode_button_group(pane))
                 .push(right_preview_panel_toggle_button(
-                    browser.right_preview_panel_open,
+                    browser.right_dock.layout().is_visible(),
                 ))
                 .width(Length::Fill),
         ),
@@ -736,7 +737,7 @@ fn pane_navigation_header<'a>(
                     .push(Space::new().width(Length::Fill))
                     .push(view_mode_button_group(pane))
                     .push(right_preview_panel_toggle_button(
-                        browser.right_preview_panel_open,
+                        browser.right_dock.layout().is_visible(),
                     ))
                     .width(Length::Fill),
             )

@@ -66,6 +66,7 @@ mod rendering_settings;
 mod revealed_path;
 #[cfg(test)]
 mod revealed_path_tests;
+pub(crate) mod right_dock;
 pub(crate) mod right_preview_panel;
 mod runtime;
 mod search;
@@ -224,9 +225,8 @@ pub(crate) struct FileBrowser {
     pub(crate) hovered_network_connection: Option<NetworkConnectionId>,
     cursor_paste_directory: Option<PathBuf>,
     /// 预览状态机聚合体（bennu-preview）：预览会话、窗口与媒体播放状态都在
-    /// 引擎里，宿主一律经本字段显式访问。仍留宿主的预览相关字段是
-    /// `right_preview_panel_*` 四个（见结构体后段，类型在 right_preview_panel
-    /// 视图模块）。
+    /// 引擎里，宿主一律经本字段显式访问。右侧停靠区的预览面板与 Space 预览共用它；
+    /// 停靠区本身是后面的 `right_dock`。
     pub(crate) preview_engine: bennu_preview::engine::PreviewEngine,
     next_directory_metadata_request_generation: u64,
     directory_metadata_in_flight: directory_metadata_in_flight::DirectoryMetadataInFlight,
@@ -271,12 +271,11 @@ pub(crate) struct FileBrowser {
     /// `sidebar_layout_width()`：侧栏隐藏时那里是 0。
     pub(crate) sidebar_width_when_shown: f32,
     sidebar_resize_drag: Option<SidebarResizeDrag>,
-    pub(crate) right_preview_panel_open: bool,
-    pub(crate) right_preview_panel_width: f32,
-    right_preview_panel_resize_drag: Option<right_preview_panel::RightPreviewPanelResizeDrag>,
-    pub(crate) right_preview_preview_ratio: f32,
-    pub(crate) right_preview_panel_info: Option<crate::model::RightPreviewPanelInfoSnapshot>,
-    right_preview_ratio_resize_drag: Option<right_preview_panel::RightPreviewPanelRatioDrag>,
+    /// 本窗口在用的右侧停靠区（`user_config.right_dock` 是存盘的那份）。
+    pub(crate) right_dock: crate::right_dock::RightDock,
+    right_dock_drag: Option<right_dock::RightDockDrag>,
+    /// 信息面板显示的元数据，按路径对上当前目标才显示。
+    pub(crate) info_panel_snapshot: Option<crate::model::RightPreviewPanelInfoSnapshot>,
     pub(crate) renaming: Option<PathBuf>,
     pending_created_entry_rename: Option<PathBuf>,
     pub(crate) pending_operation: Option<PendingOperation>,
@@ -699,16 +698,9 @@ impl FileBrowser {
             sidebar_bookmark_motion: HashMap::new(),
             sidebar_width_when_shown: user_config.sidebar_width,
             sidebar_resize_drag: None,
-            right_preview_panel_open: user_config.right_preview_panel_open,
-            right_preview_panel_width: config::normalize_right_preview_panel_width(
-                user_config.right_preview_panel_width,
-            ),
-            right_preview_panel_resize_drag: None,
-            right_preview_preview_ratio: config::normalize_right_preview_preview_ratio(
-                user_config.right_preview_preview_ratio,
-            ),
-            right_preview_panel_info: None,
-            right_preview_ratio_resize_drag: None,
+            right_dock: crate::right_dock::RightDock::new(user_config.right_dock.clone()),
+            right_dock_drag: None,
+            info_panel_snapshot: None,
             renaming: None,
             pending_created_entry_rename: None,
             pending_operation: None,

@@ -13,7 +13,8 @@ use crate::formatting::item_count_label;
 use crate::model::{
     ContextMenuPreferences, ContextMenuState, DestructiveActionConfirmation, FileDropPrompt,
     FilePropertiesMessage, ListColumnConfig, ListColumnKind, ListViewPreferences, Message,
-    ScrollbarRegion, SidebarBookmarkContextMenuState, TrashContextMenuState, TrashMenuItem,
+    RightDockMenuState, ScrollbarRegion, SidebarBookmarkContextMenuState, TrashContextMenuState,
+    TrashMenuItem,
 };
 use crate::open_with::OpenWithState;
 use crate::sidebar_devices::SidebarDeviceContextMenuState;
@@ -41,6 +42,7 @@ const OPEN_WITH_APPLICATION_LIST_HEIGHT: f32 = 240.0;
 const OPEN_WITH_PATH_MAX_CHARS: usize = 62;
 const OPEN_WITH_ERROR_MAX_CHARS: usize = 96;
 const LIST_COLUMN_MENU_WIDTH: f32 = 230.0;
+const RIGHT_DOCK_MENU_WIDTH: f32 = 190.0;
 const LIST_COLUMN_VISIBILITY_BUTTON_HEIGHT: f32 = 28.0;
 pub(super) fn error_notification_panel(error: &str, generation: u64) -> Element<'_, Message> {
     let message = format_middle_ellipsized_text(error, ERROR_NOTIFICATION_MAX_CHARS);
@@ -273,6 +275,10 @@ pub(super) fn context_menu_panel<'a>(
             root: network_connection_context_menu_panel(menu, context_menus),
             submenu: None,
         },
+        ContextMenuState::RightDock(menu) => ContextMenuPanels {
+            root: right_dock_menu_panel(menu),
+            submenu: None,
+        },
         ContextMenuState::SmartFolder(menu) => ContextMenuPanels {
             root: container(menu_button(
                 IconSymbol::Trash,
@@ -286,6 +292,51 @@ pub(super) fn context_menu_panel<'a>(
             submenu: None,
         },
     }
+}
+
+/// 停靠区菜单：每个面板一行（勾 = 在栏里，点了开关），再一行锁定。
+fn right_dock_menu_panel(menu: &RightDockMenuState) -> Element<'static, Message> {
+    use crate::app::right_dock::RightDockMessage;
+    let mut content = Column::new()
+        .spacing(CONTEXT_MENU_ITEM_SPACING)
+        .padding(CONTEXT_MENU_PADDING);
+    for panel in crate::right_dock::DockPanel::ALL {
+        content = content.push(checked_menu_button(
+            menu.open_panels.contains(&panel),
+            super::right_dock::dock_panel_label(panel),
+            Message::RightDock(RightDockMessage::PanelToggled(panel)),
+        ));
+    }
+    content = content.push(checked_menu_button(
+        menu.locked,
+        tr!("Lock Panels"),
+        Message::RightDock(RightDockMessage::LockToggled),
+    ));
+    container(content)
+        .width(Length::Fixed(RIGHT_DOCK_MENU_WIDTH))
+        .style(context_menu_style)
+        .into()
+}
+
+/// 前面一格放勾（没勾时留空），字对齐。
+fn checked_menu_button(checked: bool, label: String, message: Message) -> Button<'static, Message> {
+    let mark: Element<'static, Message> = if checked {
+        themed_icon(IconSymbol::Check, IconTone::Normal, MENU_ICON_SIZE).into()
+    } else {
+        iced::widget::Space::new()
+            .width(Length::Fixed(MENU_ICON_SIZE))
+            .into()
+    };
+    button(
+        row![mark, readable_text(label)]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
+    )
+    .on_press(message)
+    .width(Length::Fill)
+    .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+    .style(context_menu_item_button_style())
 }
 
 fn list_column_context_menu_panel<'a>(

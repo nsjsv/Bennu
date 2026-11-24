@@ -14,8 +14,8 @@ use super::{
     browser_view_mode_config_value, browser_view_mode_from_config_value, default_user_config,
     file_operation_verification_config_value, file_operation_verification_from_config_value,
     list_directory_size_display_mode_config_value,
-    list_directory_size_display_mode_from_config_value, normalize_right_preview_panel_width,
-    normalize_right_preview_preview_ratio, normalize_sidebar_width, normalize_visible_column_count,
+    list_directory_size_display_mode_from_config_value, normalize_sidebar_width,
+    normalize_visible_column_count,
     sort_direction_config_value, sort_direction_from_config_value, sort_field_config_value,
     sort_field_from_config_value, transfer_port_from, transfer_receive_pin_from,
     ColumnWidthAdjustMode, FavoriteTransferDevice, LaunchWindowPolicy, PreviewExtensionRules,
@@ -30,6 +30,7 @@ use crate::model::{
     WindowControlPlacement, WindowControlSide, WindowControlVisibility, WindowControlsConfig,
 };
 use crate::network_connections::SavedNetworkConnection;
+use crate::right_dock::RightDockLayout;
 use crate::shortcuts::ShortcutConfig;
 use bennu_preview::preview_config::{
     media_preview_volume_from_stored, media_preview_volume_percent,
@@ -52,9 +53,7 @@ pub(crate) struct UserPreferences {
     pub(crate) show_hidden_files: bool,
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
-    pub(crate) right_preview_panel_open: bool,
-    pub(crate) right_preview_panel_width: f32,
-    pub(crate) right_preview_preview_ratio: f32,
+    pub(crate) right_dock: RightDockLayout,
     pub(crate) sidebar_favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub(crate) network_connections: Vec<SavedNetworkConnection>,
     pub(crate) terminal_emulator: TerminalEmulator,
@@ -114,13 +113,7 @@ impl UserPreferences {
             show_hidden_files: config.show_hidden_files,
             language_setting: config.language_setting,
             sidebar_width: normalize_sidebar_width(config.sidebar_width),
-            right_preview_panel_open: config.right_preview_panel_open,
-            right_preview_panel_width: normalize_right_preview_panel_width(
-                config.right_preview_panel_width,
-            ),
-            right_preview_preview_ratio: normalize_right_preview_preview_ratio(
-                config.right_preview_preview_ratio,
-            ),
+            right_dock: config.right_dock.clone(),
             sidebar_favorites: config.sidebar_favorites.clone(),
             network_connections: config.network_connections.clone(),
             terminal_emulator: config.terminal_emulator,
@@ -179,9 +172,7 @@ impl UserPreferences {
         config.show_hidden_files = self.show_hidden_files;
         config.language_setting = self.language_setting;
         config.sidebar_width = self.sidebar_width;
-        config.right_preview_panel_open = self.right_preview_panel_open;
-        config.right_preview_panel_width = self.right_preview_panel_width;
-        config.right_preview_preview_ratio = self.right_preview_preview_ratio;
+        config.right_dock = self.right_dock.clone();
         config.sidebar_favorites = self.sidebar_favorites.clone();
         config.network_connections = self.network_connections.clone();
         config.terminal_emulator = self.terminal_emulator;
@@ -266,13 +257,7 @@ impl UserPreferences {
         stored.show_hidden_files = self.show_hidden_files;
         stored.language_setting = self.language_setting.config_value().to_owned();
         stored.sidebar_width = f64::from(normalize_sidebar_width(self.sidebar_width));
-        stored.right_preview_panel_open = self.right_preview_panel_open;
-        stored.right_preview_panel_width = Some(f64::from(normalize_right_preview_panel_width(
-            self.right_preview_panel_width,
-        )));
-        stored.right_preview_preview_ratio = Some(f64::from(
-            normalize_right_preview_preview_ratio(self.right_preview_preview_ratio),
-        ));
+        stored.right_dock = Some(right_dock_to_stored(&self.right_dock));
         stored.sidebar_favorites = self
             .sidebar_favorites
             .as_ref()
@@ -440,16 +425,7 @@ impl UserPreferences {
                 default_preferences.language_setting,
             ),
             sidebar_width: normalize_sidebar_width(stored.sidebar_width as f32),
-            right_preview_panel_open: stored.right_preview_panel_open,
-            // 宽度缺省/非法值都回退默认;非法存储值按“从未设置过”处理。
-            right_preview_panel_width: stored
-                .right_preview_panel_width
-                .map(|width| normalize_right_preview_panel_width(width as f32))
-                .unwrap_or(default_preferences.right_preview_panel_width),
-            right_preview_preview_ratio: stored
-                .right_preview_preview_ratio
-                .map(|ratio| normalize_right_preview_preview_ratio(ratio as f32))
-                .unwrap_or(default_preferences.right_preview_preview_ratio),
+            right_dock: right_dock_from_stored(&stored, &mut unrecognized),
             sidebar_favorites: stored
                 .sidebar_favorites
                 .map(|favorites| bennu_sidebar::sidebar_favorites_from_stored(&favorites)),
@@ -772,6 +748,8 @@ mod context_menu_storage;
 use context_menu_storage::{context_menu_preferences_from_stored, stored_context_menu_layouts};
 mod shortcut_storage;
 use shortcut_storage::{shortcut_config_from_stored, stored_shortcut_overrides};
+mod right_dock_storage;
+use right_dock_storage::{right_dock_from_stored, right_dock_to_stored};
 mod transfer_favorites;
 use transfer_favorites::{favorite_transfer_devices_from_stored, stored_favorite_transfer_devices};
 

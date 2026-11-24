@@ -306,7 +306,14 @@ impl FileBrowser {
                 Task::batch([self.commit_rename_if_active(), self.reload_visible_panes()])
             }
             ShortcutAction::Preview => self.request_preview(),
-            ShortcutAction::ToggleRightPreviewPanel => self.toggle_right_preview_panel(),
+            ShortcutAction::ToggleRightDock => self.toggle_right_dock(),
+            ShortcutAction::TogglePreviewPanel => {
+                self.toggle_dock_panel(crate::right_dock::DockPanel::Preview)
+            }
+            ShortcutAction::ToggleInfoPanel => {
+                self.toggle_dock_panel(crate::right_dock::DockPanel::Info)
+            }
+            ShortcutAction::ToggleRightDockLock => self.toggle_right_dock_lock(),
             ShortcutAction::ToggleTerminal => self.toggle_terminal_via_shortcut(),
             ShortcutAction::TerminalNewTab => self.add_terminal_tab(),
             ShortcutAction::TerminalCloseTab => self.close_active_terminal_tab_via_shortcut(),

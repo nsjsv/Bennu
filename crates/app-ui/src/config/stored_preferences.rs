@@ -19,6 +19,22 @@ pub(crate) const LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW: &str = "open_new_window";
 pub(crate) const COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN: &str = "per_column";
 pub(crate) const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
 
+/// 右侧停靠区：从上到下几格，每格的面板按存储名（`DockPanel::storage_name`）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredRightDock {
+    pub visible: bool,
+    pub width: f64,
+    pub locked: bool,
+    pub groups: Vec<StoredDockGroup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredDockGroup {
+    pub panels: Vec<String>,
+    pub active: u32,
+    pub portion: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredUserPreferences {
     pub network_list_thumbnail_downloads_enabled: bool,
@@ -31,14 +47,16 @@ pub(crate) struct StoredUserPreferences {
     #[serde(default = "default_language_setting")]
     pub language_setting: String,
     pub sidebar_width: f64,
-    /// 右侧停靠预览面板开关;缺省 = 关(旧数据无此字段)。
+    /// 右侧停靠区布局;None = 0.4.7 及以前的数据,由下面三个旧键换算。
     #[serde(default)]
+    pub right_dock: Option<StoredRightDock>,
+    /// 0.4.7 及以前的右侧面板（预览在上、信息在下）。只读：`right_dock` 缺失时换算成
+    /// 同样子的布局，写回时不再出现这三个键。
+    #[serde(default, skip_serializing)]
     pub right_preview_panel_open: bool,
-    /// 右侧停靠预览面板宽度;None = 旧数据,由 app 层回退默认宽度。
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub right_preview_panel_width: Option<f64>,
-    /// 面板内预览区高度占比;None = 旧数据,由 app 层回退默认比例。
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub right_preview_preview_ratio: Option<f64>,
     pub sidebar_favorites: Option<Vec<StoredSidebarFavorite>>,
     pub network_connections: Vec<StoredNetworkConnection>,
@@ -217,6 +235,7 @@ impl Default for StoredUserPreferences {
             show_hidden_files: false,
             language_setting: default_language_setting(),
             sidebar_width: 180.0,
+            right_dock: None,
             right_preview_panel_open: false,
             right_preview_panel_width: None,
             right_preview_preview_ratio: None,
@@ -515,42 +534,42 @@ mod tests {
     }
 
     #[test]
-    fn missing_right_preview_panel_fields_default_to_closed_and_unsized() {
-        // 回归:旧偏好数据没有面板字段,serde 缺省回退必须同时覆盖开关与宽度。
-        let stored = StoredUserPreferences::default();
-        let mut json = serde_json::to_value(&stored).expect("serialize preferences");
-        json.as_object_mut()
-            .expect("preferences serialize to an object")
-            .remove("right_preview_panel_open");
-        json.as_object_mut()
-            .expect("preferences serialize to an object")
-            .remove("right_preview_panel_width");
-        json.as_object_mut()
-            .expect("preferences serialize to an object")
-            .remove("right_preview_preview_ratio");
+    fn the_old_right_panel_keys_are_read_but_never_written_back() {
+        let mut json = serde_json::to_value(StoredUserPreferences::default()).unwrap();
+        let object = json.as_object_mut().unwrap();
+        assert!(!object.contains_key("right_preview_panel_open"));
+        object.remove("right_dock");
+        object.insert("right_preview_panel_open".into(), true.into());
+        object.insert("right_preview_panel_width".into(), 480.0.into());
+        object.insert("right_preview_preview_ratio".into(), 0.8.into());
 
-        let parsed: StoredUserPreferences =
-            serde_json::from_value(json).expect("deserialize preferences");
+        let parsed: StoredUserPreferences = serde_json::from_value(json).unwrap();
 
-        assert!(!parsed.right_preview_panel_open);
-        assert_eq!(parsed.right_preview_panel_width, None);
-        assert_eq!(parsed.right_preview_preview_ratio, None);
-    }
-
-    #[test]
-    fn right_preview_panel_fields_roundtrip() {
-        let stored = StoredUserPreferences {
-            right_preview_panel_open: true,
-            right_preview_panel_width: Some(480.0),
-            right_preview_preview_ratio: Some(0.8),
-            ..StoredUserPreferences::default()
-        };
-        let json = serde_json::to_value(&stored).expect("serialize preferences");
-        let parsed: StoredUserPreferences =
-            serde_json::from_value(json).expect("deserialize preferences");
-
+        assert_eq!(parsed.right_dock, None);
         assert!(parsed.right_preview_panel_open);
         assert_eq!(parsed.right_preview_panel_width, Some(480.0));
         assert_eq!(parsed.right_preview_preview_ratio, Some(0.8));
+        let written = serde_json::to_value(&parsed).unwrap();
+        assert!(written.get("right_preview_panel_width").is_none());
+    }
+
+    #[test]
+    fn the_right_dock_roundtrips() {
+        let stored = StoredUserPreferences {
+            right_dock: Some(StoredRightDock {
+                visible: true,
+                width: 400.0,
+                locked: false,
+                groups: vec![StoredDockGroup {
+                    panels: vec!["preview".into(), "info".into()],
+                    active: 1,
+                    portion: 1000,
+                }],
+            }),
+            ..StoredUserPreferences::default()
+        };
+        let json = serde_json::to_value(&stored).unwrap();
+        let parsed: StoredUserPreferences = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.right_dock, stored.right_dock);
     }
 }

@@ -67,7 +67,7 @@ pub(super) fn right_preview_panel_toggle_button(is_open: bool) -> Element<'stati
     toolbar_button_group(row![toolbar_segment_button(
         IconSymbol::PanelRight,
         tone,
-        Message::ToggleRightPreviewPanel,
+        Message::RightDock(crate::app::right_dock::RightDockMessage::VisibilityToggled),
         VIEW_MODE_ICON_SIZE,
     )])
 }

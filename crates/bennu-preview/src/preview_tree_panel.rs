@@ -1,6 +1,6 @@
 //! 树形预览面板：文件夹和压缩包。行高固定，只排看得见的行（上下多排几行余量），
 //! 上下用空白撑住滚动区高度，几万条也不卡；每行缩进、箭头、图标、名字、大小，够宽
-//! 再加修改时间；顶上一行总计。滚动接线（smooth-scroll 包装、scrollable id、视口回传）
+//! 再加修改时间；底下一行总计（像状态栏，列表滚到哪都在原处）。滚动接线（smooth-scroll 包装、scrollable id、视口回传）
 //! 经 ScrollRegionWiring 由宿主注入。
 
 use std::ops::Range;
@@ -44,7 +44,7 @@ const TREE_DATE_WIDTH: f32 = 112.0;
 /// 比这窄（右侧面板）不显示修改时间，留给名字。
 const TREE_DATE_MIN_PANEL_WIDTH: f32 = 520.0;
 
-/// 文件夹：顶上一行总计（全部层，边算边更新）；行上文件显示大小，子文件夹显示里面
+/// 文件夹：底下一行总计（全部层，边算边更新）；行上文件显示大小，子文件夹显示里面
 /// 总大小（算完前空着）；点箭头展开收起，点行选中，双击打开。键盘只在独立预览窗口
 /// 里接——右侧面板的方向键归主列表。
 pub(crate) fn folder_preview_panel<Message>(
@@ -76,8 +76,8 @@ where
         })
     };
     let panel: Element<'static, Message> = Column::new()
-        .push(summary_row(folder_summary_text(folder.summary())))
         .push(tree_scroller(listing, scroll))
+        .push(summary_row(folder_summary_text(folder.summary())))
         .spacing(6)
         .into();
     match surface {
@@ -162,7 +162,7 @@ where
         .into()
 }
 
-/// 压缩包：顶上一行总计；每个条目带大小（文件夹是里面加起来）和修改时间（够宽才显示）；
+/// 压缩包：底下一行总计；每个条目带大小（文件夹是里面加起来）和修改时间（够宽才显示）；
 /// 几万条也只排看得见的那些行，上下用空白顶住滚动区的高度。
 pub(crate) fn archive_preview_panel<Message>(
     entries: &[PreviewTreeEntry],
@@ -197,8 +197,8 @@ where
         archive_entry_row(entry, details)
     });
     Column::new()
-        .push(summary_row(archive_summary_text(summary)))
         .push(tree_scroller(listing, scroll))
+        .push(summary_row(archive_summary_text(summary)))
         .spacing(6)
 }
 

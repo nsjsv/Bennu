@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use file_core::{DirectoryEntry, EntryMetadata, FileKind};
+
 use super::*;
 use crate::actions::type_filter::TypeFilter;
 use crate::actions::{ActionDefinition, ActionId, ActionLibrary, ActionNotice, ActionStep};
@@ -87,6 +89,59 @@ fn the_panel_shows_what_the_right_click_menu_offers_for_the_selection() {
         assert_eq!(panel.contains(&extract), offers_extract, "{path:?}");
         assert!(panel.contains(&checksum), "{path:?}");
         assert!(panel.contains(&"for-anything".to_owned()), "{path:?}");
+    }
+}
+
+fn listed_entry(path: &Path, kind: FileKind) -> DirectoryEntry {
+    DirectoryEntry::new(
+        path.to_path_buf(),
+        kind,
+        EntryMetadata::default(),
+        false,
+        false,
+        false,
+    )
+}
+
+/// 转换对话框只收图片、视频、音频文件：选中里一个都没有就不给「转换格式」，
+/// 面板和右键菜单两边一样。
+#[test]
+fn convert_format_is_offered_only_when_the_selection_has_a_file_the_dialog_takes() {
+    let directory = tempfile::tempdir().unwrap();
+    let folder = directory.path().join("holiday");
+    // 名字像图片的文件夹：按名字会被当成图片，但对话框不收文件夹。
+    let album = directory.path().join("album.png");
+    let notes = directory.path().join("notes.txt");
+    let photo = directory.path().join("photo.jpg");
+    let clip = directory.path().join("clip.mp4");
+    let mut browser = browser_in(directory.path());
+    browser.tab_mut().entries = vec![
+        listed_entry(&folder, FileKind::Directory),
+        listed_entry(&album, FileKind::Directory),
+        listed_entry(&notes, FileKind::File),
+        listed_entry(&photo, FileKind::File),
+        listed_entry(&clip, FileKind::File),
+    ]
+    .into();
+    let convert = FileAreaMenuItem::ConvertFormat.label();
+
+    for (selection, offered) in [
+        (vec![&folder], false),
+        (vec![&album], false),
+        (vec![&notes], false),
+        (vec![&folder, &notes], false),
+        (vec![&photo], true),
+        (vec![&folder, &clip], true),
+        (vec![&notes, &photo], true),
+    ] {
+        browser.select_path(selection[0].clone());
+        for extra in &selection[1..] {
+            browser.tab_mut().selected_paths.insert((*extra).clone());
+        }
+        let panel = panel_labels(&mut browser);
+        let menu = right_click_labels(&mut browser, selection[0].clone());
+        assert_eq!(panel.contains(&convert), offered, "panel for {selection:?}");
+        assert_eq!(menu.contains(&convert), offered, "menu for {selection:?}");
     }
 }
 

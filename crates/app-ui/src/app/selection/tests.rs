@@ -861,7 +861,7 @@ fn symlink_menu_entry_gates_out_remote_mount_selection() {
     else {
         panic!("file context menu opens");
     };
-    assert!(!remote_menu.can_create_symlink);
+    assert!(!remote_menu.selection.can_create_symlink);
 
     // 本地选中不受影响。
     browser.tab_mut().selected_paths = std::iter::once(local_file.clone()).collect();
@@ -872,7 +872,7 @@ fn symlink_menu_entry_gates_out_remote_mount_selection() {
     else {
         panic!("file context menu opens");
     };
-    assert!(local_menu.can_create_symlink);
+    assert!(local_menu.selection.can_create_symlink);
 }
 
 #[test]

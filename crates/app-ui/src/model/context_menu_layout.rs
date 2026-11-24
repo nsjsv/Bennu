@@ -134,6 +134,17 @@ pub(crate) enum FileEntryMenuEntry {
     },
 }
 
+/// 选中的这一批能做哪些事：打开菜单时按选中集合算好，条目是否出现只读这一份，
+/// 渲染层不再各自去猜选中集合。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct SelectionMenuAvailability {
+    pub(crate) can_batch_rename: bool,
+    /// 选中项含远程挂载路径时为 false:gvfs 上的 symlink 不可靠,菜单隐藏「创建符号链接」。
+    pub(crate) can_create_symlink: bool,
+    /// 选中里至少有一个转换对话框会收的文件；没有的话对话框开不起来，菜单就不给这一项。
+    pub(crate) can_convert: bool,
+}
+
 /// 菜单布局的存储无关形态:8 页 × 有序 (id, visible)。由 config 层与 Stored 结构互转。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(crate) struct ContextMenuLayoutConfigValues {
@@ -239,16 +250,16 @@ impl ContextMenuPreferences {
         &self,
         place: FileMenuPlace,
         target_kind: FileMenuTargetKind,
-        can_batch_rename: bool,
-        can_create_symlink: bool,
+        selection: SelectionMenuAvailability,
     ) -> Vec<FileEntryMenuEntry> {
         let eligible = |entry: &ContextMenuEntry<FileAreaMenuItem>| {
             entry.visible
                 && match entry.item {
                     FileAreaMenuItem::FileChecksum => target_kind == FileMenuTargetKind::File,
                     FileAreaMenuItem::AddToFavorites => target_kind == FileMenuTargetKind::Folder,
-                    FileAreaMenuItem::BatchRename => can_batch_rename,
-                    FileAreaMenuItem::CreateSymlink => can_create_symlink,
+                    FileAreaMenuItem::BatchRename => selection.can_batch_rename,
+                    FileAreaMenuItem::CreateSymlink => selection.can_create_symlink,
+                    FileAreaMenuItem::ConvertFormat => selection.can_convert,
                     FileAreaMenuItem::OpenContainingFolder => place == FileMenuPlace::SearchResults,
                     FileAreaMenuItem::Paste
                     | FileAreaMenuItem::NewEntry

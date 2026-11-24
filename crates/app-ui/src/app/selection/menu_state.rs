@@ -8,7 +8,7 @@ use crate::app::actions::ActionSubject;
 use crate::app::FileBrowser;
 use crate::model::{
     file_grouping_entry_visible, BrowserLocation, FileContextMenuExpansion, FileContextMenuState,
-    FileDeleteAction, FileMenuPlace, FileMenuTargetKind,
+    FileDeleteAction, FileMenuPlace, FileMenuTargetKind, SelectionMenuAvailability,
 };
 
 impl FileBrowser {
@@ -24,8 +24,11 @@ impl FileBrowser {
             target_kind: self.file_menu_target_kind(&path),
             paste_directory: self.entry_parent_directory(&path),
             target: Some(path),
-            can_batch_rename: self.batch_rename_available_for_selection(),
-            can_create_symlink: self.selection_all_paths_local(),
+            selection: SelectionMenuAvailability {
+                can_batch_rename: self.batch_rename_available_for_selection(),
+                can_create_symlink: self.selection_all_paths_local(),
+                can_convert: self.selection_has_convertible_file(),
+            },
             delete_action: self.file_delete_action_for_selection(),
             position,
             expansion: FileContextMenuExpansion::None,
@@ -49,8 +52,7 @@ impl FileBrowser {
             place: FileMenuPlace::Folder,
             target: None,
             target_kind: FileMenuTargetKind::File,
-            can_batch_rename: false,
-            can_create_symlink: false,
+            selection: SelectionMenuAvailability::default(),
             delete_action: FileDeleteAction::MoveToTrash,
             position,
             expansion: FileContextMenuExpansion::None,

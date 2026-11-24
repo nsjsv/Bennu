@@ -230,12 +230,8 @@ fn menu_entries(
         .map(FileEntryMenuEntry::Item)
         .collect();
     }
-    let mut entries = context_menus.file_entry_menu_entries(
-        menu.place,
-        menu.target_kind,
-        menu.can_batch_rename,
-        menu.can_create_symlink,
-    );
+    let mut entries =
+        context_menus.file_entry_menu_entries(menu.place, menu.target_kind, menu.selection);
     if menu.selection_archives.is_empty() {
         // 解压两项只属于压缩包条目；其余归档无关选中不含它们。
         let is_extract = |item: &FileAreaMenuItem| {

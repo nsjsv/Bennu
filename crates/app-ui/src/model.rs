@@ -171,7 +171,8 @@ pub(crate) use context_menu_items::{FileAreaMenuItem, TrashMenuItem};
 pub(crate) use context_menu_layout::{
     ContextMenuLayoutConfigValues, ContextMenuPreferences, ContextMenuSettingsDragState,
     ContextMenuSettingsPage, ContextMenuSettingsPageStep, ContextMenuSettingsRow,
-    FileEntryMenuEntry, CONTEXT_MENU_SETTINGS_PAGES, CONTEXT_MENU_SETTINGS_ROW_PITCH,
+    FileEntryMenuEntry, SelectionMenuAvailability, CONTEXT_MENU_SETTINGS_PAGES,
+    CONTEXT_MENU_SETTINGS_ROW_PITCH,
 };
 mod application_logs;
 pub(crate) use application_logs::{
@@ -1046,9 +1047,7 @@ pub(crate) struct FileContextMenuState {
     pub(crate) target: Option<PathBuf>,
     pub(crate) target_kind: FileMenuTargetKind,
     pub(crate) paste_directory: PathBuf,
-    pub(crate) can_batch_rename: bool,
-    /// 选中项含远程挂载路径时为 false:gvfs 上的 symlink 不可靠,菜单隐藏「创建符号链接」。
-    pub(crate) can_create_symlink: bool,
+    pub(crate) selection: SelectionMenuAvailability,
     pub(crate) delete_action: FileDeleteAction,
     pub(crate) position: Point,
     pub(crate) expansion: FileContextMenuExpansion,

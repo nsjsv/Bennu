@@ -4,6 +4,12 @@ use bennu_theme::icons::IconSymbol;
 
 use super::*;
 
+const EVERYTHING_AVAILABLE: SelectionMenuAvailability = SelectionMenuAvailability {
+    can_batch_rename: true,
+    can_create_symlink: true,
+    can_convert: true,
+};
+
 #[test]
 fn defaults_match_existing_menu_structure() {
     let preferences = ContextMenuPreferences::defaults();
@@ -12,8 +18,7 @@ fn defaults_match_existing_menu_structure() {
         preferences.file_entry_menu_entries(
             FileMenuPlace::Folder,
             FileMenuTargetKind::File,
-            true,
-            true
+            EVERYTHING_AVAILABLE
         ),
         vec![
             FileEntryMenuEntry::Item(FileAreaMenuItem::Open),
@@ -84,7 +89,14 @@ fn runtime_eligibility_gates_members_and_degrades_groups() {
     // 目录:工具子菜单无文件校验。
     let tools_members = |target_kind: FileMenuTargetKind, can_create_symlink: bool| {
         preferences
-            .file_entry_menu_entries(FileMenuPlace::Folder, target_kind, true, can_create_symlink)
+            .file_entry_menu_entries(
+                FileMenuPlace::Folder,
+                target_kind,
+                SelectionMenuAvailability {
+                    can_create_symlink,
+                    ..EVERYTHING_AVAILABLE
+                },
+            )
             .iter()
             .find_map(|entry| match entry {
                 FileEntryMenuEntry::Group {
@@ -106,8 +118,10 @@ fn runtime_eligibility_gates_members_and_degrades_groups() {
     let entries = preferences.file_entry_menu_entries(
         FileMenuPlace::Folder,
         FileMenuTargetKind::File,
-        false,
-        true,
+        SelectionMenuAvailability {
+            can_batch_rename: false,
+            ..EVERYTHING_AVAILABLE
+        },
     );
     assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Rename)));
     assert!(!entries.iter().any(|entry| matches!(
@@ -117,6 +131,42 @@ fn runtime_eligibility_gates_members_and_degrades_groups() {
             ..
         }
     )));
+}
+
+/// 转换格式只看选中集合有没有对话框收的文件，不看菜单打在哪、打在什么目标上。
+#[test]
+fn convert_format_follows_the_selection_not_the_place_or_target() {
+    let preferences = ContextMenuPreferences::defaults();
+    let offered = |place, target_kind, can_convert| {
+        preferences
+            .file_entry_menu_entries(
+                place,
+                target_kind,
+                SelectionMenuAvailability {
+                    can_convert,
+                    ..EVERYTHING_AVAILABLE
+                },
+            )
+            .iter()
+            .any(|entry| match entry {
+                FileEntryMenuEntry::Group { members, .. } => {
+                    members.contains(&FileAreaMenuItem::ConvertFormat)
+                }
+                FileEntryMenuEntry::Item(item) => *item == FileAreaMenuItem::ConvertFormat,
+            })
+    };
+    for place in [FileMenuPlace::Folder, FileMenuPlace::SearchResults] {
+        for target_kind in [FileMenuTargetKind::File, FileMenuTargetKind::Folder] {
+            assert!(
+                offered(place, target_kind, true),
+                "{place:?} {target_kind:?}"
+            );
+            assert!(
+                !offered(place, target_kind, false),
+                "{place:?} {target_kind:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -144,8 +194,10 @@ fn new_entry_position_tracks_visibility() {
     let entries = preferences.file_entry_menu_entries(
         FileMenuPlace::Folder,
         FileMenuTargetKind::File,
-        false,
-        true,
+        SelectionMenuAvailability {
+            can_batch_rename: false,
+            ..EVERYTHING_AVAILABLE
+        },
     );
     let new_entry_index = entries
         .iter()
@@ -176,8 +228,7 @@ fn hidden_group_anchor_hides_the_whole_group() {
     let entries = preferences.file_entry_menu_entries(
         FileMenuPlace::Folder,
         FileMenuTargetKind::File,
-        true,
-        true,
+        EVERYTHING_AVAILABLE,
     );
     assert!(!entries.iter().any(|entry| matches!(
         entry,
@@ -212,8 +263,7 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     let entries = preferences.file_entry_menu_entries(
         FileMenuPlace::Folder,
         FileMenuTargetKind::File,
-        true,
-        true,
+        EVERYTHING_AVAILABLE,
     );
     assert!(entries.contains(&FileEntryMenuEntry::Item(FileAreaMenuItem::Copy)));
     // 工具组成员全部隐藏 → 纯触发器整行省略。
@@ -228,8 +278,7 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     let entries = preferences.file_entry_menu_entries(
         FileMenuPlace::Folder,
         FileMenuTargetKind::File,
-        true,
-        true,
+        EVERYTHING_AVAILABLE,
     );
     assert!(!entries.iter().any(|entry| matches!(
         entry,
@@ -243,8 +292,7 @@ fn empty_member_lists_degrade_or_omit_group_rows() {
     let entries = preferences.file_entry_menu_entries(
         FileMenuPlace::Folder,
         FileMenuTargetKind::File,
-        true,
-        true,
+        EVERYTHING_AVAILABLE,
     );
     assert!(entries.iter().any(|entry| matches!(
         entry,
@@ -490,7 +538,7 @@ fn add_to_favorites_is_offered_only_for_folders_not_yet_in_favorites() {
     let preferences = ContextMenuPreferences::defaults();
     let top_level_items = |target_kind| {
         preferences
-            .file_entry_menu_entries(FileMenuPlace::Folder, target_kind, true, true)
+            .file_entry_menu_entries(FileMenuPlace::Folder, target_kind, EVERYTHING_AVAILABLE)
             .into_iter()
             .map(|entry| match entry {
                 FileEntryMenuEntry::Item(item) => item,

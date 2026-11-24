@@ -75,8 +75,9 @@ pub struct WheelScrollDelta {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SmoothScrollAxis {
     Vertical,
-    /// 两个方向都能滚（不换行的文本）：触控板、小红点、倾斜滚轮的横向分量滚横向，竖向分量
-    /// 滚竖向，斜着划两个方向一起动；shift+竖向滚轮转成横向。
+    /// 两个方向都能滚（不换行的文本、放大后的分页文档、数据网格）：触控板、小红点、倾斜滚轮的
+    /// 横向分量滚横向，竖向分量滚竖向，斜着划两个方向一起动；shift+竖向滚轮转成横向。
+    /// 区域用了两向滚动条（`Direction::Both`）就必须选它：竖向轴会丢掉横向分量。
     Both,
     Horizontal,
     HorizontalFromPrimaryWheel,

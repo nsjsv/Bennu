@@ -23,10 +23,10 @@ use bennu_preview::text_preview::TextPreviewDocument;
 use bennu_preview::text_preview_viewer::text_preview_viewer;
 use bennu_preview::window_shell::{single_window, HeaderBar};
 use bennu_theme::controls::{segmented_choice_row, SegmentedChoice};
-use bennu_theme::smooth_scroll::{smooth_scroll, SmoothScroll, SmoothScrollAxis};
+use bennu_theme::smooth_scroll::{smooth_scroll, SmoothScroll};
 
 use super::window_frame::window_shell;
-use crate::preview_scroll::{preview_scroll_id, PreviewScrollRegion};
+use crate::preview_scroll::{preview_scroll_axis, preview_scroll_id, PreviewScrollRegion};
 use crate::{Message, PickerDaemon};
 
 /// 预览窗视图入口：面板放进共享外壳。
@@ -94,14 +94,14 @@ pub(crate) fn preview_window_view(
     )
 }
 
-/// 预览七区全为竖向滚动（主软件 preview 区域同轴）。
-fn preview_smooth_scroll<'a>() -> SmoothScroll<'a, Message> {
-    smooth_scroll(SmoothScrollAxis::Vertical)
+/// 区域的惯性滚动，轴向与主软件 preview 区域同轴。
+fn preview_smooth_scroll<'a>(region: PreviewScrollRegion) -> SmoothScroll<'a, Message> {
+    smooth_scroll(preview_scroll_axis(region))
 }
 
 fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
-        smooth_scroll: preview_smooth_scroll(),
+        smooth_scroll: preview_smooth_scroll(PreviewScrollRegion::Directory),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Directory),
         // 和压缩包一样只排看得见的行：视口回给引擎。
         on_scroll: Some(Box::new(tree_viewport_message)),
@@ -110,7 +110,7 @@ fn directory_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
 
 fn archive_scroll_wiring() -> ScrollRegionWiring<'static, Message> {
     ScrollRegionWiring {
-        smooth_scroll: preview_smooth_scroll(),
+        smooth_scroll: preview_smooth_scroll(PreviewScrollRegion::Archive),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Archive),
         // 压缩包几万条只排看得见的行：视口回给引擎。
         on_scroll: Some(Box::new(tree_viewport_message)),
@@ -147,7 +147,7 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
         },
     };
     ScrollRegionWiring {
-        smooth_scroll: preview_smooth_scroll(),
+        smooth_scroll: preview_smooth_scroll(PreviewScrollRegion::Document),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Document),
         on_scroll: Some(Box::new(move |viewport| {
             Message::from(PreviewMessage::DocumentPreview(
@@ -166,7 +166,7 @@ fn document_scroll_wiring(preview: Option<&PreviewState>) -> ScrollRegionWiring<
 // Markdown 渲染体接线：整篇已经在内存里，不需要视口回传。
 fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
-        smooth_scroll: preview_smooth_scroll(),
+        smooth_scroll: preview_smooth_scroll(PreviewScrollRegion::Markdown),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::Markdown),
         on_scroll: None,
     }
@@ -174,7 +174,7 @@ fn markdown_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
 
 fn sqlite_tables_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
-        smooth_scroll: preview_smooth_scroll(),
+        smooth_scroll: preview_smooth_scroll(PreviewScrollRegion::SqliteTables),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::SqliteTables),
         on_scroll: None,
     }
@@ -182,7 +182,7 @@ fn sqlite_tables_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
 
 fn sqlite_data_scroll_wiring<'a>() -> ScrollRegionWiring<'a, Message> {
     ScrollRegionWiring {
-        smooth_scroll: preview_smooth_scroll(),
+        smooth_scroll: preview_smooth_scroll(PreviewScrollRegion::SqliteData),
         scrollable_id: preview_scroll_id(PreviewScrollRegion::SqliteData),
         on_scroll: None,
     }

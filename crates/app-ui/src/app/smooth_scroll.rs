@@ -116,6 +116,11 @@ fn smooth_scroll_axis(region: &ScrollbarRegion) -> SmoothScrollAxis {
         // 多栏单列是竖向滚动区：shift 横滚的目标是外层整排列排
         // (ColumnBrowser)，本区在 shift 下不认领滚轮，让事件冒泡。
         ScrollbarRegion::Column { .. } => SmoothScrollAxis::VerticalIgnoringShift,
+        // 分页文档（放大后超宽）、SQLite 数据网格和文本查看器两个方向都能滚：用竖向轴会
+        // 丢掉触控板、小红点的横向分量。文本查看器自己推进滚轮，这里只表明它是两向区。
+        ScrollbarRegion::PreviewDocument
+        | ScrollbarRegion::PreviewSqliteData
+        | ScrollbarRegion::TextPreview => SmoothScrollAxis::Both,
         _ => SmoothScrollAxis::Vertical,
     }
 }
@@ -224,6 +229,88 @@ mod tests {
                 mode: WheelScrollMode::MosAnimated,
             })
         );
+    }
+
+    /// 两向区（放大后超宽的分页文档、SQLite 数据网格）保留触控板、小红点的横向分量；斜着划
+    /// 两个方向一起动，纯横划也由它们认领（否则落回 iced 自带的滚动，没有惯性）。
+    #[test]
+    fn two_way_preview_regions_keep_the_sideways_part_of_a_touchpad_swipe() {
+        for region in [
+            ScrollbarRegion::PreviewDocument,
+            ScrollbarRegion::PreviewSqliteData,
+        ] {
+            let diagonal = wheel_delta_for_region(
+                &region,
+                false,
+                mouse::ScrollDelta::Pixels { x: -6.0, y: -4.0 },
+            );
+            assert_eq!(
+                diagonal,
+                Some(WheelScrollDelta {
+                    delta: SmoothScrollDelta { x: 6.0, y: 4.0 },
+                    mode: WheelScrollMode::Direct,
+                })
+            );
+            let tilt = wheel_delta_for_region(
+                &region,
+                false,
+                mouse::ScrollDelta::Lines { x: 1.0, y: 0.0 },
+            );
+            assert_eq!(
+                tilt,
+                Some(WheelScrollDelta {
+                    delta: SmoothScrollDelta {
+                        x: -MOS_SCROLL_STEP,
+                        y: 0.0,
+                    },
+                    mode: WheelScrollMode::MosAnimated,
+                })
+            );
+            // shift+竖向滚轮仍转成横向。
+            let shifted = wheel_delta_for_region(
+                &region,
+                true,
+                mouse::ScrollDelta::Lines { x: 0.0, y: -2.0 },
+            );
+            assert_eq!(
+                shifted.map(|wheel| wheel.delta),
+                Some(SmoothScrollDelta {
+                    x: MOS_SCROLL_STEP * 2.0,
+                    y: 0.0,
+                })
+            );
+        }
+    }
+
+    /// 竖向区只取竖向分量、不认领纯横向，行为和以前一样。
+    #[test]
+    fn vertical_regions_still_drop_the_sideways_part() {
+        for region in [
+            ScrollbarRegion::PaneList(BrowserPaneId::PRIMARY),
+            ScrollbarRegion::PreviewDirectory,
+            ScrollbarRegion::PreviewArchive,
+            ScrollbarRegion::MarkdownPreview,
+            ScrollbarRegion::PreviewSqliteTables,
+        ] {
+            let diagonal = wheel_delta_for_region(
+                &region,
+                false,
+                mouse::ScrollDelta::Pixels { x: -6.0, y: -4.0 },
+            );
+            assert_eq!(
+                diagonal,
+                Some(WheelScrollDelta {
+                    delta: SmoothScrollDelta { x: 0.0, y: 4.0 },
+                    mode: WheelScrollMode::Direct,
+                })
+            );
+            let sideways = wheel_delta_for_region(
+                &region,
+                false,
+                mouse::ScrollDelta::Pixels { x: -6.0, y: 0.0 },
+            );
+            assert_eq!(sideways, None);
+        }
     }
 
     #[test]

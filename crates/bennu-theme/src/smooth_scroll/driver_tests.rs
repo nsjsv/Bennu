@@ -22,11 +22,35 @@ impl Harness {
     fn new(modifiers: keyboard::Modifiers) -> Self {
         let scroll = smooth_scroll(SmoothScrollAxis::Vertical).on_ctrl_wheel(|_| CTRL_WHEEL);
         let content = Space::new().width(Length::Fill).height(2_000.0);
-        let mut element = scroll.drive(
+        let element = scroll.drive(
             scrollable(scroll.capture(content))
                 .id(widget::Id::new("list"))
                 .height(100.0),
         );
+        Self::laid_out(element, modifiers)
+    }
+
+    /// 两个方向都能滚的区域（内容 300 × 2000，视口 100 × 100，横向最多滚 200）。
+    fn two_way(modifiers: keyboard::Modifiers) -> Self {
+        let scroll = smooth_scroll(SmoothScrollAxis::Both);
+        let content = Space::new().width(300.0).height(2_000.0);
+        let element = scroll.drive(
+            scrollable(scroll.capture(content))
+                .id(widget::Id::new("grid"))
+                .direction(scrollable::Direction::Both {
+                    vertical: scrollable::Scrollbar::default(),
+                    horizontal: scrollable::Scrollbar::default(),
+                })
+                .width(100.0)
+                .height(100.0),
+        );
+        Self::laid_out(element, modifiers)
+    }
+
+    fn laid_out(
+        mut element: Element<'static, u8, iced::Theme, ()>,
+        modifiers: keyboard::Modifiers,
+    ) -> Self {
         let mut tree = Tree::new(&element);
         let node = element.as_widget_mut().layout(
             &mut tree,
@@ -75,6 +99,13 @@ impl Harness {
         }));
     }
 
+    /// 触控板的一次斜向手指移动；负 `x`、负 `y` 往右、往下滚。
+    fn pixels_xy(&mut self, x: f32, y: f32) {
+        self.send(Event::Mouse(mouse::Event::WheelScrolled {
+            delta: mouse::ScrollDelta::Pixels { x, y },
+        }));
+    }
+
     fn lift(&mut self) -> window::RedrawRequest {
         self.send(Event::Mouse(mouse::Event::WheelScrolled {
             delta: mouse::ScrollDelta::Pixels { x: 0.0, y: 0.0 },
@@ -83,12 +114,15 @@ impl Harness {
     }
 
     fn displacement(&self) -> f32 {
+        self.displacement_vector().y
+    }
+
+    fn displacement_vector(&self) -> Vector {
         self.tree
             .state
             .downcast_ref::<DriverState>()
             .touch
             .displacement()
-            .y
     }
 
     /// 按 60 Hz 画到不再要重画为止。
@@ -110,6 +144,10 @@ impl Harness {
     }
 
     fn offset(&mut self) -> f32 {
+        self.offsets().y
+    }
+
+    fn offsets(&mut self) -> Vector {
         struct Read(Option<Vector>);
         impl Operation for Read {
             fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
@@ -133,7 +171,7 @@ impl Harness {
             &(),
             &mut read,
         );
-        read.0.expect("scrollable").y
+        read.0.expect("scrollable")
     }
 }
 
@@ -247,4 +285,79 @@ fn a_lift_without_a_gesture_does_nothing() {
     let mut harness = Harness::new(keyboard::Modifiers::empty());
     assert_eq!(harness.lift(), window::RedrawRequest::Wait);
     assert_eq!(harness.offset(), 0.0);
+}
+
+/// 两向区：触控板横划只动横向、斜划两个方向一起动；事件被认领，滚动区自己不再滚一遍
+/// （偏移恰好是手指移动的距离，不是两倍）。
+#[test]
+fn a_two_way_scroller_follows_sideways_and_diagonal_swipes_exactly_once() {
+    let mut harness = Harness::two_way(keyboard::Modifiers::empty());
+    // 斜划必须排在最前：横划没人认领时滚动区自己会滚一次，并接手之后一小段时间的全部滚轮，
+    // 后面的断言就分不出是谁滚的。
+    harness.pixels_xy(-20.0, -10.0);
+    assert_eq!(harness.offsets(), Vector::new(20.0, 10.0));
+    harness.pixels_xy(-30.0, 0.0);
+    assert_eq!(harness.offsets(), Vector::new(50.0, 10.0));
+    harness.pixels_xy(10.0, 0.0);
+    assert_eq!(harness.offsets(), Vector::new(40.0, 10.0));
+}
+
+/// 横向夹在 0 到可滚的最大值之间：拉过末端时内容不动、画的位置被拉开，松手弹回。
+#[test]
+fn a_two_way_scroller_stops_at_the_far_sideways_end_and_springs_back() {
+    let mut harness = Harness::two_way(keyboard::Modifiers::empty());
+    harness.pixels_xy(-1_000.0, 0.0);
+    assert_eq!(harness.offsets(), Vector::new(200.0, 0.0));
+    assert!(harness.displacement_vector().x > 10.0);
+    assert_eq!(harness.displacement_vector().y, 0.0);
+
+    harness.lift();
+    harness.settle();
+    assert_eq!(harness.displacement_vector(), Vector::ZERO);
+    assert_eq!(harness.offsets(), Vector::new(200.0, 0.0));
+}
+
+#[test]
+fn a_two_way_scroller_stops_at_the_near_sideways_end_and_springs_back() {
+    let mut harness = Harness::two_way(keyboard::Modifiers::empty());
+    harness.pixels_xy(40.0, 0.0);
+    assert_eq!(harness.offsets(), Vector::ZERO);
+    assert!(harness.displacement_vector().x < -10.0);
+
+    harness.lift();
+    harness.settle();
+    assert_eq!(harness.displacement_vector(), Vector::ZERO);
+    assert_eq!(harness.offsets(), Vector::ZERO);
+}
+
+/// 倾斜滚轮和 Shift+竖向滚轮走滚轮惯性横滚，到边即停。
+#[test]
+fn a_two_way_scroller_scrolls_sideways_from_a_tilt_wheel_and_a_shifted_wheel() {
+    let mut harness = Harness::two_way(keyboard::Modifiers::empty());
+    harness.send(Event::Mouse(mouse::Event::WheelScrolled {
+        delta: mouse::ScrollDelta::Lines { x: -1.0, y: 0.0 },
+    }));
+    harness.settle();
+    // 和竖向一格同一段距离：惯性走完，不是滚动区自己的一次跳 60 px。
+    let tilted = harness.offsets();
+    let target = MOS_SCROLL_STEP * MOS_SCROLL_SPEED;
+    assert!((tilted.x - target).abs() <= 1.0, "{tilted:?} vs {target}");
+    assert_eq!(tilted.y, 0.0);
+
+    let mut harness = Harness::two_way(keyboard::Modifiers::SHIFT);
+    for _ in 0..8 {
+        harness.wheel_down();
+    }
+    harness.settle();
+    assert_eq!(harness.offsets(), Vector::new(200.0, 0.0));
+}
+
+/// 竖向区不变：横向分量丢掉，纯横划不认领，滚动区自己的竖向滚动也不会因此动。
+#[test]
+fn a_vertical_scroller_still_ignores_the_sideways_part() {
+    let mut harness = Harness::new(keyboard::Modifiers::empty());
+    harness.pixels_xy(-30.0, 0.0);
+    assert_eq!(harness.offsets(), Vector::ZERO);
+    harness.pixels_xy(-30.0, -10.0);
+    assert_eq!(harness.offsets(), Vector::new(0.0, 10.0));
 }

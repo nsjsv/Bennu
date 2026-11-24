@@ -16,6 +16,22 @@ pub fn readable_text<'a>(content: String) -> iced::widget::Text<'a, Theme> {
     }
 }
 
+/// 一段界面文字大约多宽：全角字一个字号宽，其余 0.6 个字号，宁可估宽一点。给要按内容定宽、
+/// 又不能让内容自己撑开的地方用——菜单项要铺满整行（悬停底色到右边），交给它们自己撑，
+/// 弹出菜单就会铺满整个窗口；窄栏里也靠它决定先收起哪几项。
+pub(crate) fn estimated_text_width(content: &str, size: f32) -> f32 {
+    content
+        .chars()
+        .map(|character| {
+            if is_wide_script(character) {
+                size
+            } else {
+                size * 0.6
+            }
+        })
+        .sum()
+}
+
 /// 非 ASCII（中文文件名、中文文案）要 Advanced shaping，否则显示成方框。
 fn needs_advanced_text_shaping(content: &str) -> bool {
     !content.is_ascii()
@@ -60,7 +76,17 @@ fn is_wide_script(character: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::needs_advanced_text_shaping;
+    use super::{estimated_text_width, needs_advanced_text_shaping};
+
+    #[test]
+    fn full_width_characters_count_twice_as_wide_as_latin_ones() {
+        assert_eq!(estimated_text_width("UTF-8", 10.0), 30.0);
+        assert_eq!(estimated_text_width("简体中文", 10.0), 40.0);
+        assert_eq!(
+            estimated_text_width("第 1 行，共 45 行", 10.0),
+            50.0 + 7.0 * 6.0
+        );
+    }
 
     #[test]
     fn ascii_text_keeps_fast_shaping() {

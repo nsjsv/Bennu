@@ -20,6 +20,7 @@ use encoding_rs::{
 use iced::widget::{button, container, responsive, row, scrollable, text, Column, Space};
 use iced::{Alignment, Element, Length, Padding};
 
+use crate::panel_text::estimated_text_width;
 use crate::preview_message::PreviewMessage;
 use crate::text_document::{
     HighlightStatus, LineCountStatus, TextPreviewDocument, TextViewerEvent,
@@ -35,8 +36,15 @@ const ITEM_SPACING: f32 = 6.0;
 const BUTTON_PADDING_X: f32 = 8.0;
 const CHEVRON_SIZE: f32 = 10.0;
 const CHEVRON_GAP: f32 = 4.0;
-const MENU_ITEM_PADDING: [u16; 2] = [4, 10];
+const MENU_ITEM_PADDING_X: f32 = 10.0;
+const MENU_ITEM_PADDING_Y: f32 = 4.0;
 const MENU_CHECK_SIZE: f32 = 12.0;
+const MENU_CHECK_GAP: f32 = 8.0;
+const MENU_PADDING: f32 = 4.0;
+/// 滚动条压在菜单右边上，给它留出来，最长的那项不被盖住。
+const MENU_SCROLLBAR_ROOM: f32 = 12.0;
+/// 菜单最高这么高（十来项），多的滚动：38 种编码全排开会从按钮一直盖到窗口顶上。
+const MENU_MAX_HEIGHT: f32 = 320.0;
 
 /// 编码菜单里的一项：名称 + 语言说明。
 struct EncodingOption {
@@ -59,9 +67,9 @@ where
         let too_large_label = tr!("Too large to highlight");
         let wrap_label = tr!("Wrap Lines");
         let zoom_label = format!("{}%", view.zoom_percent);
-        let mut always_shown = caption_width(&position);
+        let mut always_shown = estimated_text_width(&position, CAPTION_SIZE);
         if too_large {
-            always_shown += caption_width(&too_large_label) + ITEM_SPACING;
+            always_shown += estimated_text_width(&too_large_label, CAPTION_SIZE) + ITEM_SPACING;
         }
         let shown = shown_items(
             size.width,
@@ -144,29 +152,29 @@ fn shown_items(
     }
 }
 
-/// 一段说明字大约多宽，只用来决定窄面板里收起哪几项：中日韩文字、全角标点按一个字号宽，
-/// 其余按 0.6 个字号。宁可估宽一点，收起一项也比挤出栏外好。
-fn caption_width(label: &str) -> f32 {
-    label
-        .chars()
-        .map(|character| {
-            if character.is_ascii() {
-                CAPTION_SIZE * 0.6
-            } else {
-                CAPTION_SIZE
-            }
-        })
-        .sum()
-}
-
 fn button_width(label: &str) -> f32 {
-    caption_width(label) + BUTTON_PADDING_X * 2.0
+    estimated_text_width(label, CAPTION_SIZE) + BUTTON_PADDING_X * 2.0
 }
 
 /// 编码按钮只写当前编码的名字和一个箭头，语言说明放在菜单里：按钮要是和下拉框一样按最长的
 /// 一项（“ISO-8859-16 · 东南欧”）定宽，窄面板里就把换行、缩放都挤掉了。
 fn encoding_button_width(encoding: &'static Encoding) -> f32 {
     button_width(encoding.name()) + CHEVRON_GAP + CHEVRON_SIZE
+}
+
+/// 菜单宽度按最长的那项定。菜单项要铺满整行（悬停底色到右边），宽度不能交给它们自己撑，
+/// 否则弹层按能给的最大宽度铺开，盖住整个窗口。
+fn encoding_menu_width(options: &[EncodingOption]) -> f32 {
+    let longest = options
+        .iter()
+        .map(|option| estimated_text_width(&option.label, CAPTION_SIZE))
+        .fold(0.0, f32::max);
+    longest
+        + MENU_CHECK_SIZE
+        + MENU_CHECK_GAP
+        + MENU_ITEM_PADDING_X * 2.0
+        + MENU_PADDING * 2.0
+        + MENU_SCROLLBAR_ROOM
 }
 
 /// 编码按钮，点开在上方弹出全部编码（贴着窗口底边，只能往上开），当前的打勾；点外面收起。
@@ -187,8 +195,9 @@ where
     .style(icon_button_style)
     .on_press(Message::from(PreviewMessage::TextEncodingMenuToggled));
     let popup = document.encoding_menu_open().then(|| {
+        let options = encoding_options();
         let mut list = Column::new().spacing(2);
-        for option in encoding_options() {
+        for option in options.iter() {
             let check: Element<'a, Message> = if option.encoding == current {
                 themed_icon(IconSymbol::Check, IconTone::Normal, MENU_CHECK_SIZE).into()
             } else {
@@ -196,11 +205,11 @@ where
             };
             list = list.push(
                 button(
-                    row![check, text(option.label).size(CAPTION_SIZE)]
-                        .spacing(8)
+                    row![check, text(option.label.clone()).size(CAPTION_SIZE)]
+                        .spacing(MENU_CHECK_GAP)
                         .align_y(Alignment::Center),
                 )
-                .padding(MENU_ITEM_PADDING)
+                .padding([MENU_ITEM_PADDING_Y, MENU_ITEM_PADDING_X])
                 .width(Length::Fill)
                 .style(context_menu_item_button_style())
                 .on_press(Message::from(
@@ -209,7 +218,9 @@ where
             );
         }
         container(scrollable(list))
-            .padding(4)
+            .padding(MENU_PADDING)
+            .width(Length::Fixed(encoding_menu_width(&options)))
+            .max_height(MENU_MAX_HEIGHT)
             .style(context_menu_style)
             .into()
     });
@@ -345,7 +356,7 @@ mod tests {
     /// 不再按最长的那一项（“ISO-8859-16 · 东南欧”）把换行、缩放挤掉。
     #[test]
     fn a_narrow_panel_still_fits_every_item() {
-        let position = caption_width("第 1 行，共 45 行");
+        let position = estimated_text_width("第 1 行，共 45 行", CAPTION_SIZE);
         let everything = ShownItems {
             encoding: true,
             wrap: true,
@@ -363,7 +374,7 @@ mod tests {
 
     #[test]
     fn items_fold_away_zoom_first_then_wrap_then_encoding() {
-        let position = caption_width("第 1 行，共 45 行");
+        let position = estimated_text_width("第 1 行，共 45 行", CAPTION_SIZE);
         let shown = |width| shown_items(width, position, UTF_8, Some("自动换行"), "100%");
         assert_eq!(
             shown(300.0),
@@ -391,6 +402,22 @@ mod tests {
         );
         // Markdown 渲染模式没有换行开关，空出来的给缩放。
         assert!(shown_items(300.0, position, UTF_8, None, "100%").zoom);
+    }
+
+    /// 编码菜单按最长的那项定宽：每项都放得下，又不会像铺满窗口那样盖住整个界面。
+    #[test]
+    fn the_encoding_menu_is_as_wide_as_its_longest_item() {
+        let options = encoding_options();
+        let width = encoding_menu_width(&options);
+        let chrome = MENU_CHECK_SIZE + MENU_CHECK_GAP + MENU_ITEM_PADDING_X * 2.0;
+        for option in &options {
+            assert!(
+                estimated_text_width(&option.label, CAPTION_SIZE) + chrome <= width,
+                "{}",
+                option.label
+            );
+        }
+        assert!(width < 400.0, "menu width {width}");
     }
 
     #[test]

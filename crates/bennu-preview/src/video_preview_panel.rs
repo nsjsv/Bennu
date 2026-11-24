@@ -14,6 +14,7 @@ use bennu_theme::anchored_popup::anchored_dropup;
 use bennu_theme::icons::{themed_icon, IconSymbol, IconTone};
 use bennu_theme::preview_styles::{preview_media_style, preview_window_bottom_gradient_style};
 use bennu_theme::styles::{context_menu_item_button_style, context_menu_style};
+use bennu_theme::typography::BODY_SIZE;
 
 use crate::info_overlay::info_overlay;
 use crate::media_controls::{
@@ -23,7 +24,7 @@ use crate::media_controls::{
     AUDIO_PROGRESS_SLIDER_STEP_SECONDS, AUDIO_TIMELINE_CONTROL_GAP, AUDIO_VOLUME_SLIDER_STEP,
     VIDEO_CONTROL_HORIZONTAL_PADDING, VIDEO_PREVIEW_CONTROL_HEIGHT,
 };
-use crate::panel_text::readable_text;
+use crate::panel_text::{estimated_text_width, readable_text};
 use crate::preview::{scaled_media_size, PreviewSize};
 use crate::preview::{
     VideoPreviewDetails, VideoPreviewPlayback, VideoPreviewPlaybackStatus, VideoTrackMenu,
@@ -41,6 +42,8 @@ const VIDEO_CONTROL_SLIDER_GAP: f32 = 14.0;
 const VIDEO_VOLUME_ICON_GAP: f32 = 6.0;
 const TRACK_MENU_ITEM_PADDING: [u16; 2] = [5, 12];
 const TRACK_MENU_CHECK_SIZE: f32 = 14.0;
+const TRACK_MENU_CHECK_GAP: f32 = 8.0;
+const TRACK_MENU_PADDING: f32 = 4.0;
 
 pub(crate) fn video_preview_panel<Message>(
     path: &Path,
@@ -348,6 +351,15 @@ where
         .height(Length::Fixed(AUDIO_CONTROL_BUTTON_SIZE))
         .style(move |theme, status| faded_media_button_style(theme, status, opacity));
     let popup = (open_menu == Some(menu)).then(|| {
+        // 菜单项铺满整行，菜单宽度得按最长的那项定，否则铺满整个窗口。
+        let menu_width = items
+            .iter()
+            .map(|(label, _, _)| estimated_text_width(label, BODY_SIZE))
+            .fold(0.0, f32::max)
+            + TRACK_MENU_CHECK_SIZE
+            + TRACK_MENU_CHECK_GAP
+            + f32::from(TRACK_MENU_ITEM_PADDING[1]) * 2.0
+            + TRACK_MENU_PADDING * 2.0;
         let mut list = Column::new().spacing(2);
         for (label, selected, message) in items {
             let check: Element<'static, Message> = if selected {
@@ -360,7 +372,7 @@ where
             list = list.push(
                 button(
                     row![check, readable_text(label)]
-                        .spacing(8)
+                        .spacing(TRACK_MENU_CHECK_GAP)
                         .align_y(Alignment::Center),
                 )
                 .padding(TRACK_MENU_ITEM_PADDING)
@@ -369,7 +381,11 @@ where
                 .on_press(message),
             );
         }
-        container(list).padding(4).style(context_menu_style).into()
+        container(list)
+            .padding(TRACK_MENU_PADDING)
+            .width(Length::Fixed(menu_width))
+            .style(context_menu_style)
+            .into()
     });
     anchored_dropup(anchor, popup)
 }

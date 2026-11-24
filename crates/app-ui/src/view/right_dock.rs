@@ -3,7 +3,7 @@ use iced::widget::{button, column, container, mouse_area, row, stack, text, Colu
 use iced::{Alignment, Element, Length, Theme};
 
 use crate::app::right_dock::{
-    RightDockMessage, DIVIDER_HEIGHT, HEADER_HEIGHT, RESIZE_HANDLE_WIDTH,
+    GroupFrame, RightDockMessage, DIVIDER_HEIGHT, HEADER_HEIGHT, RESIZE_HANDLE_WIDTH,
 };
 use crate::app::FileBrowser;
 use crate::appearance::{app_content_style, column_resize_divider_style};
@@ -12,7 +12,7 @@ use crate::right_dock::{DockGroup, DockPanel, DropTarget};
 use bennu_theme::icons::IconSymbol;
 use bennu_theme::typography::CAPTION_SIZE;
 
-/// 拖面板时边上那条落点线的粗细。
+/// 拖面板时缝上那条落点线的粗细。
 const DROP_LINE_HEIGHT: f32 = 3.0;
 const CLOSE_ICON_SIZE: f32 = 11.0;
 const CLOSE_SLOT_WIDTH: f32 = 18.0;
@@ -60,11 +60,21 @@ pub(crate) fn right_dock(browser: &FileBrowser) -> Element<'_, Message> {
             drop,
         ));
     }
+    // 缝上的落点线是盖在整列格子上的一层，一直在（不拖时是空的），理由同各格里的提示层。
+    let gap_line = match drop {
+        Some(DropTarget::Gap(position)) => gap_line(position, &frames),
+        _ => Space::new().into(),
+    };
     // 手柄必须留在外层 row:放进各格这一列就要跟各格分纵向高度,整条左缘拖拽带会被压扁。
-    row![handle, groups]
-        .width(Length::Fixed(browser.right_dock_effective_width()))
-        .height(Length::Fill)
-        .into()
+    row![
+        handle,
+        stack![groups, gap_line]
+            .width(Length::Fill)
+            .height(Length::Fill)
+    ]
+    .width(Length::Fixed(browser.right_dock_effective_width()))
+    .height(Length::Fill)
+    .into()
 }
 
 /// 一格：标题栏或标签条（锁定且只有一个面板时没有）+ 面板内容，叠一层拖动落点提示。
@@ -216,28 +226,43 @@ fn divider(upper: usize) -> Element<'static, Message> {
     .into()
 }
 
-/// 这格是落点时的提示：叠进来是整格淡色，上下另起一格是那条边上一道粗线。
+/// 叠进这格是落点时的提示：整格淡色。另起一格的提示是缝上的那条线，见 [`gap_line`]。
 fn drop_indicator(target: DropTarget, index: usize) -> Element<'static, Message> {
-    let line = || {
-        container(Space::new())
-            .width(Length::Fill)
-            .height(Length::Fixed(DROP_LINE_HEIGHT))
-            .style(drop_line_style)
-    };
     match target {
         DropTarget::Join(group) if group == index => container(Space::new())
             .width(Length::Fill)
             .height(Length::Fill)
             .style(drop_area_style)
             .into(),
-        DropTarget::Above(group) if group == index => {
-            column![line(), Space::new().height(Length::Fill)].into()
-        }
-        DropTarget::Below(group) if group == index => {
-            column![Space::new().height(Length::Fill), line()].into()
-        }
         _ => Space::new().into(),
     }
+}
+
+/// 第 `position` 条缝上的落点线，一条缝只画这一条：两格之间压在分隔线正中，最上面、最下面
+/// 没有分隔线，贴着栏的上沿、下沿。位置从 `right_dock_group_frames` 来，跟格子画出来的位置是
+/// 同一份。
+fn gap_line(position: usize, frames: &[GroupFrame]) -> Element<'static, Message> {
+    let top = frames.first().map_or(0.0, |frame| frame.bounds.y);
+    let bottom = frames
+        .last()
+        .map_or(0.0, |frame| frame.bounds.y + frame.bounds.height);
+    let center = match position {
+        0 => top,
+        _ => frames
+            .get(position)
+            .map_or(bottom, |below| below.bounds.y - DIVIDER_HEIGHT / 2.0),
+    };
+    let line_top = (center - top - DROP_LINE_HEIGHT / 2.0)
+        .clamp(0.0, (bottom - top - DROP_LINE_HEIGHT).max(0.0));
+    column![
+        Space::new().height(Length::Fixed(line_top)),
+        container(Space::new())
+            .width(Length::Fill)
+            .height(Length::Fixed(DROP_LINE_HEIGHT))
+            .style(drop_line_style),
+    ]
+    .width(Length::Fill)
+    .into()
 }
 
 fn drop_line_style(theme: &Theme) -> container::Style {

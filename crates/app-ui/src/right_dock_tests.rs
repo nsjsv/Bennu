@@ -75,14 +75,14 @@ fn dropping_onto_a_group_stacks_tabs_and_dropping_on_an_edge_splits_again() {
     assert_invariants(&dock);
     assert_eq!(arrangement(&dock), vec![(vec![Preview, Info], Info)]);
 
-    dock.move_panel(Info, DropTarget::Above(0));
+    dock.move_panel(Info, DropTarget::Gap(0));
     assert_invariants(&dock);
     assert_eq!(
         arrangement(&dock),
         vec![(vec![Info], Info), (vec![Preview], Preview)]
     );
 
-    dock.move_panel(Info, DropTarget::Below(1));
+    dock.move_panel(Info, DropTarget::Gap(2));
     assert_invariants(&dock);
     assert_eq!(
         arrangement(&dock),
@@ -94,14 +94,148 @@ fn dropping_onto_a_group_stacks_tabs_and_dropping_on_an_edge_splits_again() {
 fn dropping_a_lone_panel_onto_its_own_group_changes_nothing() {
     let mut dock = shown_dock();
     let before = dock.layout().clone();
-    for target in [
-        DropTarget::Join(1),
-        DropTarget::Above(1),
-        DropTarget::Below(1),
-    ] {
+    for target in [DropTarget::Join(1), DropTarget::Gap(1), DropTarget::Gap(2)] {
+        assert!(!dock.would_change_layout(Info, target), "{target:?}");
         dock.move_panel(Info, target);
         assert_eq!(dock.layout(), &before);
     }
+    for target in [DropTarget::Join(0), DropTarget::Gap(0)] {
+        assert!(dock.would_change_layout(Info, target), "{target:?}");
+    }
+}
+
+fn stacks(dock: &RightDock) -> Vec<Vec<DockPanel>> {
+    dock.layout()
+        .groups()
+        .iter()
+        .map(|group| group.panels().to_vec())
+        .collect()
+}
+
+#[test]
+fn a_lone_panel_moved_to_any_gap_lands_there_with_an_equal_share() {
+    use DockPanel::TaskLog as Tasks;
+    // 每行：拖的面板，和它落到第 0、1、2、3 条缝以后从上到下的次序。
+    let cases = [
+        (
+            Preview,
+            [
+                [Preview, Info, Tasks],
+                [Preview, Info, Tasks],
+                [Info, Preview, Tasks],
+                [Info, Tasks, Preview],
+            ],
+        ),
+        (
+            Info,
+            [
+                [Info, Preview, Tasks],
+                [Preview, Info, Tasks],
+                [Preview, Info, Tasks],
+                [Preview, Tasks, Info],
+            ],
+        ),
+        (
+            Tasks,
+            [
+                [Tasks, Preview, Info],
+                [Preview, Tasks, Info],
+                [Preview, Info, Tasks],
+                [Preview, Info, Tasks],
+            ],
+        ),
+    ];
+    for (panel, expected_by_gap) in cases {
+        for (gap, expected) in expected_by_gap.into_iter().enumerate() {
+            let mut dock = shown_dock();
+            dock.open(Tasks);
+            dock.move_panel(panel, DropTarget::Gap(gap));
+            assert_invariants(&dock);
+            let order: Vec<DockPanel> = stacks(&dock).into_iter().flatten().collect();
+            assert_eq!(order, expected, "{panel:?} to gap {gap}");
+            assert_eq!(dock.layout().groups().len(), 3, "no group lost or added");
+        }
+    }
+}
+
+#[test]
+fn a_panel_split_out_of_a_stack_lands_in_any_gap_with_an_equal_share() {
+    use DockPanel::TaskLog as Tasks;
+    let expected_by_gap = [
+        vec![vec![Info], vec![Preview], vec![Tasks]],
+        vec![vec![Preview], vec![Info], vec![Tasks]],
+        vec![vec![Preview], vec![Tasks], vec![Info]],
+    ];
+    for (gap, expected) in expected_by_gap.into_iter().enumerate() {
+        let mut dock = shown_dock();
+        dock.open(Tasks);
+        dock.move_panel(Info, DropTarget::Join(0));
+        assert_eq!(stacks(&dock), vec![vec![Preview, Info], vec![Tasks]]);
+
+        dock.move_panel(Info, DropTarget::Gap(gap));
+
+        assert_invariants(&dock);
+        assert_eq!(stacks(&dock), expected, "Info to gap {gap}");
+        let moved = dock.layout().group_of(Info).expect("Info is still docked");
+        let share = dock.layout().groups()[moved].portion();
+        assert!((333..=334).contains(&share), "gap {gap}: {share}");
+    }
+}
+
+#[test]
+fn a_drop_changes_the_layout_exactly_when_the_rule_says_it_would() {
+    use DockPanel::{QuickActions, TaskLog};
+    let lone_two = shown_dock();
+    let mut lone_three = shown_dock();
+    lone_three.open(TaskLog);
+    let mut stacked_pair = shown_dock();
+    stacked_pair.move_panel(Info, DropTarget::Join(0));
+    let mut stack_and_lone = shown_dock();
+    stack_and_lone.open(TaskLog);
+    stack_and_lone.move_panel(Info, DropTarget::Join(0));
+    let mut mixed_four = shown_dock();
+    mixed_four.open(TaskLog);
+    mixed_four.open(QuickActions);
+    mixed_four.move_panel(QuickActions, DropTarget::Join(1));
+
+    for dock in [
+        lone_two,
+        lone_three,
+        stacked_pair,
+        stack_and_lone,
+        mixed_four,
+    ] {
+        let groups = dock.layout().groups().len();
+        for panel in DockPanel::ALL {
+            // 越界的落点（多出一格、多出一条缝）也算：什么都不做。
+            let targets = (0..=groups + 1)
+                .flat_map(|index| [DropTarget::Join(index), DropTarget::Gap(index)]);
+            for target in targets {
+                let mut moved = dock.clone();
+                moved.move_panel(panel, target);
+                assert_invariants(&moved);
+                assert_eq!(
+                    moved.layout() != dock.layout(),
+                    dock.would_change_layout(panel, target),
+                    "{panel:?} to {target:?} in {:?}",
+                    stacks(&dock)
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn only_the_lone_panels_own_surroundings_are_no_ops_and_a_stack_can_always_be_split() {
+    let mut dock = shown_dock();
+    dock.move_panel(Info, DropTarget::Join(0));
+    assert_eq!(stacks(&dock), vec![vec![Preview, Info]]);
+    // 叠着的：叠回自己那格不变，上下两条缝是真的把它拆出来。
+    assert!(!dock.would_change_layout(Info, DropTarget::Join(0)));
+    assert!(dock.would_change_layout(Info, DropTarget::Gap(0)));
+    assert!(dock.would_change_layout(Info, DropTarget::Gap(1)));
+    // 栏里没有的面板没有可动的。
+    assert!(!dock.would_change_layout(DockPanel::FolderTree, DropTarget::Gap(0)));
 }
 
 #[test]
@@ -149,7 +283,7 @@ fn a_closed_panel_comes_back_where_it_was() {
     // 跟别的面板叠着：回到那个面板的格子里，成为当前标签。
     dock.move_panel(Info, DropTarget::Join(0));
     dock.close(Info);
-    dock.move_panel(Preview, DropTarget::Below(0));
+    dock.move_panel(Preview, DropTarget::Gap(1));
     dock.open(Info);
     assert_invariants(&dock);
     assert_eq!(arrangement(&dock), vec![(vec![Preview, Info], Info)]);
@@ -281,13 +415,12 @@ fn any_sequence_of_operations_keeps_the_portions_summing_to_the_scale() {
     for _ in 0..3000 {
         let panel = DockPanel::ALL[next(DockPanel::ALL.len())];
         let group = next(4);
-        match next(7) {
+        match next(6) {
             0 => dock.toggle_panel(panel),
             1 => dock.open(panel),
             2 => dock.close(panel),
             3 => dock.move_panel(panel, DropTarget::Join(group)),
-            4 => dock.move_panel(panel, DropTarget::Above(group)),
-            5 => dock.move_panel(panel, DropTarget::Below(group)),
+            4 => dock.move_panel(panel, DropTarget::Gap(next(7))),
             _ => dock.set_split(group, next(1001) as f32 / 1000.0),
         }
         assert_invariants(&dock);
@@ -299,8 +432,11 @@ fn splitting_a_group_down_to_a_single_portion_still_sums_to_the_scale() {
     let mut dock = shown_dock();
     dock.set_split(0, 0.0);
     assert_eq!(portions(&dock), vec![1, 999]);
-    dock.move_panel(Info, DropTarget::Below(0));
-    dock.move_panel(Info, DropTarget::Above(0));
+    dock.open(DockPanel::TaskLog);
+    assert_invariants(&dock);
+    dock.move_panel(Info, DropTarget::Gap(0));
+    assert_invariants(&dock);
+    dock.move_panel(Info, DropTarget::Gap(3));
     assert_invariants(&dock);
 }
 

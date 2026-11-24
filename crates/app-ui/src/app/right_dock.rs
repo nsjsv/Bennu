@@ -19,7 +19,8 @@ const MIN_GROUP_CONTENT_HEIGHT: f32 = 80.0;
 const MIN_BROWSER_AREA_WIDTH: f32 = crate::config::MIN_COLUMN_WIDTH;
 /// 按住面板标题移动这么远才算拖（跟标签一样）。
 const PANEL_DRAG_ACTIVATION_DISTANCE: f32 = 3.0;
-/// 拖到某格的上下这么多（按格高的比例）是在它上面、下面另起一格，中间是叠进去。
+/// 拖到某格的上下这么多（按格高的比例）是在它上面、下面另起一格（落在它与邻格之间的缝），
+/// 中间是叠进去。
 const EDGE_DROP_FRACTION: f32 = 0.25;
 
 #[derive(Debug, Clone)]
@@ -232,7 +233,7 @@ impl FileBrowser {
                     origin,
                     dragging,
                     target: dragging
-                        .then(|| self.right_dock_drop_target_at(position))
+                        .then(|| self.right_dock_drop_target_at(panel, position))
                         .flatten(),
                 });
             }
@@ -345,8 +346,9 @@ impl FileBrowser {
         Some(area)
     }
 
-    /// 指针在哪格的上 1/4、下 1/4（另起一格）或中间（叠进去）；出了停靠区是 None。
-    fn right_dock_drop_target_at(&self, position: Point) -> Option<DropTarget> {
+    /// 指针在哪格的上 1/4、下 1/4（落在它上面、下面的缝）或中间（叠进去）；出了停靠区、或者
+    /// 放下去布局不会变（见 [`crate::right_dock::RightDock::would_change_layout`]）都是 None，不画提示、松开取消。
+    fn right_dock_drop_target_at(&self, panel: DockPanel, position: Point) -> Option<DropTarget> {
         let frames = self.right_dock_group_frames();
         let first = frames.first()?;
         if position.x < first.bounds.x {
@@ -358,13 +360,16 @@ impl FileBrowser {
             .unwrap_or(frames.len() - 1);
         let bounds = frames[index].bounds;
         let fraction = ((position.y - bounds.y) / bounds.height.max(1.0)).clamp(0.0, 1.0);
-        Some(if fraction < EDGE_DROP_FRACTION {
-            DropTarget::Above(index)
+        let target = if fraction < EDGE_DROP_FRACTION {
+            DropTarget::Gap(index)
         } else if fraction > 1.0 - EDGE_DROP_FRACTION {
-            DropTarget::Below(index)
+            DropTarget::Gap(index + 1)
         } else {
             DropTarget::Join(index)
-        })
+        };
+        self.right_dock
+            .would_change_layout(panel, target)
+            .then_some(target)
     }
 }
 

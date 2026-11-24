@@ -305,26 +305,33 @@ fn an_unlocked_panel_dragged_onto_another_group_joins_it() {
     assert_eq!(browser.user_config.right_dock, *browser.right_dock.layout());
 }
 
+/// 三格：预览、信息、任务，从上到下；解锁，这样标题能拖。
+fn browser_with_three_unlocked_groups() -> FileBrowser {
+    let mut browser = browser_with_dock();
+    browser.right_dock.open(DockPanel::TaskLog);
+    browser.right_dock.toggle_locked();
+    browser
+}
+
 #[test]
 fn drop_zones_are_the_edges_and_the_middle_of_a_group_and_nothing_outside() {
-    let mut browser = browser_with_dock();
-    browser.right_dock.toggle_locked();
+    let mut browser = browser_with_three_unlocked_groups();
     let preview = browser.right_dock_group_frames()[0].bounds;
     press_at(
         &mut browser,
-        RightDockMessage::PanelPressed(DockPanel::Info),
+        RightDockMessage::PanelPressed(DockPanel::TaskLog),
         Point::new(preview.x + 10.0, preview.y + preview.height + 50.0),
     );
     let x = preview.x + 30.0;
     let cases = [
-        (Point::new(x, preview.y + 5.0), Some(DropTarget::Above(0))),
+        (Point::new(x, preview.y + 5.0), Some(DropTarget::Gap(0))),
         (
             Point::new(x, preview.y + preview.height / 2.0),
             Some(DropTarget::Join(0)),
         ),
         (
             Point::new(x, preview.y + preview.height - 5.0),
-            Some(DropTarget::Below(0)),
+            Some(DropTarget::Gap(1)),
         ),
         (Point::new(preview.x - 20.0, preview.y + 50.0), None),
     ];
@@ -340,6 +347,105 @@ fn drop_zones_are_the_edges_and_the_middle_of_a_group_and_nothing_outside() {
     let before = browser.right_dock.layout().clone();
     drop(browser.finish_right_dock_drag());
     assert_eq!(browser.right_dock.layout(), &before);
+}
+
+#[test]
+fn the_bottom_of_one_group_and_the_top_of_the_next_are_the_same_gap() {
+    let mut browser = browser_with_three_unlocked_groups();
+    browser.right_dock.open(DockPanel::QuickActions);
+    // 快捷操作面板叠进信息那格：被拖的这个叠着，所以每条缝都是真的落点。
+    browser
+        .right_dock
+        .move_panel(DockPanel::QuickActions, DropTarget::Join(1));
+    let frames = browser.right_dock_group_frames();
+    assert_eq!(frames.len(), 3);
+    for index in 0..frames.len() - 1 {
+        let above = frames[index].bounds;
+        let below = frames[index + 1].bounds;
+        let x = above.x + 30.0;
+        let from_above = browser.right_dock_drop_target_at(
+            DockPanel::QuickActions,
+            Point::new(x, above.y + above.height * 0.9),
+        );
+        let from_below = browser.right_dock_drop_target_at(
+            DockPanel::QuickActions,
+            Point::new(x, below.y + below.height * 0.1),
+        );
+        let on_divider = browser.right_dock_drop_target_at(
+            DockPanel::QuickActions,
+            Point::new(x, above.y + above.height + DIVIDER_HEIGHT / 2.0),
+        );
+        assert_eq!(from_above, Some(DropTarget::Gap(index + 1)));
+        assert_eq!(from_below, from_above);
+        assert_eq!(on_divider, from_above);
+    }
+}
+
+#[test]
+fn targets_that_would_change_nothing_resolve_to_no_target_and_releasing_there_cancels() {
+    let mut browser = browser_with_three_unlocked_groups();
+    let frames = browser.right_dock_group_frames();
+    let info = frames[1].bounds;
+    let x = info.x + 30.0;
+    // 信息独占第 1 格：它自己、它上面的缝、它下面的缝都不会变。
+    let around_info = [
+        Point::new(x, info.y + 5.0),
+        Point::new(x, info.y + info.height / 2.0),
+        Point::new(x, info.y + info.height - 5.0),
+    ];
+    for at in around_info {
+        assert_eq!(
+            browser.right_dock_drop_target_at(DockPanel::Info, at),
+            None,
+            "{at:?}"
+        );
+    }
+    // 别的格子里的落点照常有。
+    let preview = frames[0].bounds;
+    assert_eq!(
+        browser.right_dock_drop_target_at(DockPanel::Info, Point::new(x, preview.y + 5.0)),
+        Some(DropTarget::Gap(0))
+    );
+
+    press_at(
+        &mut browser,
+        RightDockMessage::PanelPressed(DockPanel::Info),
+        Point::new(x, info.y + 10.0),
+    );
+    browser.update_right_dock_drag(Point::new(x, info.y + info.height / 2.0));
+    assert_eq!(browser.right_dock_panel_drop(), None, "no indicator either");
+    let before = browser.right_dock.layout().clone();
+    let saved = browser.user_config.right_dock.clone();
+    drop(browser.finish_right_dock_drag());
+    assert_eq!(browser.right_dock.layout(), &before);
+    assert_eq!(
+        browser.user_config.right_dock, saved,
+        "cancelling writes nothing"
+    );
+
+    // 叠着的面板：自己那格的中间不变，但上下的缝是真的把它拆出来。
+    browser
+        .right_dock
+        .move_panel(DockPanel::Info, DropTarget::Join(0));
+    let stack = browser.right_dock_group_frames()[0].bounds;
+    assert_eq!(
+        browser.right_dock_drop_target_at(
+            DockPanel::Info,
+            Point::new(x, stack.y + stack.height / 2.0)
+        ),
+        None
+    );
+    assert_eq!(
+        browser.right_dock_drop_target_at(DockPanel::Info, Point::new(x, stack.y + 5.0)),
+        Some(DropTarget::Gap(0))
+    );
+    assert_eq!(
+        browser.right_dock_drop_target_at(
+            DockPanel::Info,
+            Point::new(x, stack.y + stack.height - 5.0)
+        ),
+        Some(DropTarget::Gap(1))
+    );
 }
 
 #[test]

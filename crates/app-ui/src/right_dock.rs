@@ -247,12 +247,14 @@ enum PanelHome {
     OwnGroup(usize),
 }
 
-/// 拖着的面板放到哪儿：叠进某格，或者在某格上面、下面另起一格。
+/// 拖着的面板放到哪儿。同一个插入位置只有一种写法：两格之间的缝只能是 `Gap`，不分「上一格
+/// 的下边」还是「下一格的上边」。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DropTarget {
+    /// 叠进第几格。
     Join(usize),
-    Above(usize),
-    Below(usize),
+    /// 在第几个位置另起一格：0 是最上面，格数是最下面，中间的 k 是第 k-1 格和第 k 格之间。
+    Gap(usize),
 }
 
 /// 本窗口在用的停靠区。
@@ -306,12 +308,10 @@ impl RightDock {
             Some(PanelHome::WithPanel(sibling)) => self.layout.group_of(sibling),
             _ => None,
         };
-        // 新格子取现有每格的平均份额：规整（按比例缩放）以后它正好占 1/(n+1)，其余按原比例让出。
-        let portion = PORTION_SCALE / self.layout.groups.len().max(1) as u16;
         match (sibling_group, home) {
             (Some(group), _) => self.join(panel, group),
-            (None, Some(PanelHome::OwnGroup(index))) => self.insert_group(panel, index, portion),
-            _ => self.insert_group(panel, self.layout.groups.len(), portion),
+            (None, Some(PanelHome::OwnGroup(index))) => self.insert_group(panel, index),
+            _ => self.insert_group(panel, self.layout.groups.len()),
         }
     }
 
@@ -340,35 +340,38 @@ impl RightDock {
         }
     }
 
-    /// 拖着的面板放下。放回自己独占的那格（叠进去、或贴着自己上下）什么都不变。
-    pub(crate) fn move_panel(&mut self, panel: DockPanel, target: DropTarget) {
+    /// 放下去布局会不会变：落点提示和放下共用的唯一判断。叠进自己那格不变；自己独占一格时，
+    /// 紧挨着那格上下的两条缝放回去也不变（叠了几个的话，缝是真的把它拆出来）；越界的落点
+    /// 什么也做不了。
+    pub(crate) fn would_change_layout(&self, panel: DockPanel, target: DropTarget) -> bool {
         let Some(from) = self.layout.group_of(panel) else {
-            return;
+            return false;
         };
+        let groups = self.layout.groups.len();
         let alone = self.layout.groups[from].panels.len() == 1;
-        let target_group = match target {
-            DropTarget::Join(index) | DropTarget::Above(index) | DropTarget::Below(index) => index,
-        };
-        if target_group >= self.layout.groups.len() || (alone && target_group == from) {
+        match target {
+            DropTarget::Join(index) => index < groups && index != from,
+            DropTarget::Gap(position) => {
+                position <= groups && !(alone && (position == from || position == from + 1))
+            }
+        }
+    }
+
+    /// 拖着的面板放下；不会改布局的落点（见 [`Self::would_change_layout`]）什么都不做。
+    pub(crate) fn move_panel(&mut self, panel: DockPanel, target: DropTarget) {
+        if !self.would_change_layout(panel, target) {
             return;
         }
-        // 拿走以后格子可能少了一格，记下那格里另一个面板，拿走后按它重新找那格（不能用当前
-        // 标签：拖的可能正是它）。
-        let Some(&anchor) = self.layout.groups[target_group]
-            .panels
-            .iter()
-            .find(|candidate| **candidate != panel)
-        else {
-            return;
+        // 独占的那格拿走后就没了，排在它后面的格子序号都少一；落点按拿走前的序号给，要换算。
+        let vanished_group = match self.take(panel) {
+            Some(PanelHome::OwnGroup(index)) => Some(index),
+            _ => None,
         };
-        self.take(panel);
-        let Some(index) = self.layout.group_of(anchor) else {
-            return;
-        };
+        let after_take =
+            |index: usize| index - usize::from(vanished_group.is_some_and(|gone| index > gone));
         match target {
-            DropTarget::Join(_) => self.join(panel, index),
-            DropTarget::Above(_) => self.split_off(panel, index, index),
-            DropTarget::Below(_) => self.split_off(panel, index, index + 1),
+            DropTarget::Join(index) => self.join(panel, after_take(index)),
+            DropTarget::Gap(position) => self.insert_group(panel, after_take(position)),
         }
     }
 
@@ -422,16 +425,11 @@ impl RightDock {
         group.active = group.panels.len() - 1;
     }
 
-    /// 从第 `from` 格分出一半份额，在 `at` 处给 `panel` 另起一格。
-    fn split_off(&mut self, panel: DockPanel, from: usize, at: usize) {
-        let group = &mut self.layout.groups[from];
-        let half = (group.portion / 2).max(1);
-        group.portion = group.portion.saturating_sub(half).max(1);
-        self.insert_group(panel, at, half);
-    }
-
-    /// 在第 `index` 格（夹到末尾）插一格，插完把合计规整回 [`PORTION_SCALE`]。
-    fn insert_group(&mut self, panel: DockPanel, index: usize, portion: u16) {
+    /// 在第 `index` 格（夹到末尾）插一格。新格取现有每格的平均份额：规整（按比例缩放）以后它
+    /// 正好占 1/(n+1)，其余各格按原比例让出，不偏袒哪个邻居；打开面板和拖面板另起一格都走这里，
+    /// 所以新格大小一个样。
+    fn insert_group(&mut self, panel: DockPanel, index: usize) {
+        let portion = PORTION_SCALE / self.layout.groups.len().max(1) as u16;
         let index = index.min(self.layout.groups.len());
         self.layout
             .groups

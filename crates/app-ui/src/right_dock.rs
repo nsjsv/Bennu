@@ -2,14 +2,16 @@
 //!
 //! [`RightDockLayout`] 是存盘的那部分；[`RightDock`] 再加上「关掉的面板回哪儿」（只在这次
 //! 运行里记），所有改布局的操作都在它上面，操作完下面这些一直成立：每个面板最多出现一次；
-//! 没有空格子；每格的当前标签在范围里；每格的份额大于 0；没有面板时栏不显示。
+//! 没有空格子；每格的当前标签在范围里；各格份额至少 1、合计正好是 [`PORTION_SCALE`]；没有
+//! 面板时栏不显示。
 
 use std::collections::HashMap;
 
 use crate::config::{normalize_right_dock_width, DEFAULT_RIGHT_DOCK_WIDTH};
 
-/// 一格的份额按这个数分（跟窗格分屏一样）；只用来算比例，合计不必正好是它。
-const PORTION_SCALE: f32 = 1000.0;
+/// 各格份额的合计，永远正好是它。高度按「份额 / 它」分，所以合计不能飘：飘大了（反复开关
+/// 面板只增不减）各格就会被分到比栏本身更多的高度。
+pub(crate) const PORTION_SCALE: u16 = 1000;
 
 /// 停靠区里能放的面板。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -103,21 +105,22 @@ impl Default for RightDockLayout {
 impl RightDockLayout {
     /// 旧版右侧面板（开没开、宽度、预览区占比）换成同样子的布局。
     pub(crate) fn from_previous_panel(open: bool, width: f32, preview_ratio: f32) -> Self {
-        let preview = (preview_ratio.clamp(0.0, 1.0) * PORTION_SCALE).round() as u16;
-        let preview = preview.clamp(1, PORTION_SCALE as u16 - 1);
+        let preview = (preview_ratio.clamp(0.0, 1.0) * f32::from(PORTION_SCALE)).round() as u16;
+        let preview = preview.clamp(1, PORTION_SCALE - 1);
         Self {
             visible: open,
             width: normalize_right_dock_width(width),
             locked: true,
             groups: vec![
                 DockGroup::single(DockPanel::Preview, preview),
-                DockGroup::single(DockPanel::Info, PORTION_SCALE as u16 - preview),
+                DockGroup::single(DockPanel::Info, PORTION_SCALE - preview),
             ],
         }
     }
 
-    /// 从存盘的各项拼回布局，顺手规整：认不出的面板名、重复的面板、空格子去掉，当前标签和
-    /// 份额夹回范围。返回布局和「有没有去掉东西」（调用方据此提示部分设置已恢复默认）。
+    /// 从存盘的各项拼回布局，顺手规整：认不出的面板名、重复的面板、空格子去掉，当前标签夹回
+    /// 范围，份额按存的比例缩到合计 [`PORTION_SCALE`]（旧版本存过合计飘得很大的份额）。返回
+    /// 布局和「有没有去掉东西」（调用方据此提示部分设置已恢复默认）。
     pub(crate) fn from_parts<'a>(
         visible: bool,
         width: f32,
@@ -154,13 +157,49 @@ impl RightDockLayout {
                 portion: portion.max(1),
             });
         }
-        let layout = Self {
+        let mut layout = Self {
             visible: visible && !kept.is_empty(),
             width: normalize_right_dock_width(width),
             locked,
             groups: kept,
         };
+        layout.normalize_portions();
         (layout, dropped)
+    }
+
+    /// 把份额按现有比例缩到合计正好 [`PORTION_SCALE`]、每格至少 1。合计会偏离的两个入口
+    /// （新插一格、从存盘读入）都只经这里；拿走一格、分隔线拖动只在格子之间挪份额，合计本来
+    /// 就不变。
+    fn normalize_portions(&mut self) {
+        let scale = u32::from(PORTION_SCALE);
+        let weights: Vec<u32> = self
+            .groups
+            .iter()
+            .map(|group| u32::from(group.portion.max(1)))
+            .collect();
+        let total: u32 = weights.iter().sum();
+        let mut shares: Vec<u32> = weights
+            .iter()
+            .map(|weight| (weight * scale / total).max(1))
+            .collect();
+        let assigned: u32 = shares.iter().sum();
+        if assigned < scale {
+            // 向下取整少分的零头（少于一格一份），一份一份补给小数部分最大的格子。
+            let mut by_remainder: Vec<usize> = (0..shares.len()).collect();
+            by_remainder.sort_by_key(|&index| std::cmp::Reverse(weights[index] * scale % total));
+            for &index in by_remainder.iter().take((scale - assigned) as usize) {
+                shares[index] += 1;
+            }
+        }
+        // 「至少 1」顶上去的份额从最大的格子扣回。
+        for _ in scale..assigned {
+            if let Some(largest) = shares.iter_mut().max() {
+                *largest -= 1;
+            }
+        }
+        for (group, share) in self.groups.iter_mut().zip(shares) {
+            group.portion = share as u16;
+        }
     }
 
     pub(crate) fn is_visible(&self) -> bool {
@@ -267,10 +306,12 @@ impl RightDock {
             Some(PanelHome::WithPanel(sibling)) => self.layout.group_of(sibling),
             _ => None,
         };
+        // 新格子取现有每格的平均份额：规整（按比例缩放）以后它正好占 1/(n+1)，其余按原比例让出。
+        let portion = PORTION_SCALE / self.layout.groups.len().max(1) as u16;
         match (sibling_group, home) {
             (Some(group), _) => self.join(panel, group),
-            (None, Some(PanelHome::OwnGroup(index))) => self.insert_group(panel, index),
-            _ => self.insert_group(panel, self.layout.groups.len()),
+            (None, Some(PanelHome::OwnGroup(index))) => self.insert_group(panel, index, portion),
+            _ => self.insert_group(panel, self.layout.groups.len(), portion),
         }
     }
 
@@ -370,7 +411,7 @@ impl RightDock {
         let freed = self.layout.groups.remove(index).portion;
         let neighbour = index.saturating_sub(1);
         if let Some(group) = self.layout.groups.get_mut(neighbour) {
-            group.portion = group.portion.saturating_add(freed);
+            group.portion += freed;
         }
         Some(PanelHome::OwnGroup(index))
     }
@@ -383,30 +424,19 @@ impl RightDock {
 
     /// 从第 `from` 格分出一半份额，在 `at` 处给 `panel` 另起一格。
     fn split_off(&mut self, panel: DockPanel, from: usize, at: usize) {
-        let half = (self.layout.groups[from].portion / 2).max(1);
-        self.layout.groups[from].portion =
-            self.layout.groups[from].portion.saturating_sub(half).max(1);
-        self.layout
-            .groups
-            .insert(at, DockGroup::single(panel, half));
+        let group = &mut self.layout.groups[from];
+        let half = (group.portion / 2).max(1);
+        group.portion = group.portion.saturating_sub(half).max(1);
+        self.insert_group(panel, at, half);
     }
 
-    /// 在第 `index` 格（夹到末尾）插一格，份额取现有格子的平均。
-    fn insert_group(&mut self, panel: DockPanel, index: usize) {
-        let groups = &self.layout.groups;
-        let portion = if groups.is_empty() {
-            PORTION_SCALE as u16
-        } else {
-            (groups
-                .iter()
-                .map(|group| u32::from(group.portion))
-                .sum::<u32>()
-                / groups.len() as u32) as u16
-        };
+    /// 在第 `index` 格（夹到末尾）插一格，插完把合计规整回 [`PORTION_SCALE`]。
+    fn insert_group(&mut self, panel: DockPanel, index: usize, portion: u16) {
         let index = index.min(self.layout.groups.len());
         self.layout
             .groups
             .insert(index, DockGroup::single(panel, portion));
+        self.layout.normalize_portions();
     }
 }
 

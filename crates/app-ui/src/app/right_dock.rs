@@ -5,7 +5,7 @@ use iced::{Point, Rectangle, Size, Task};
 
 use super::FileBrowser;
 use crate::model::{ContextMenuState, DockMenuPanelSection, Message, RightDockMenuState};
-use crate::right_dock::{DockPanel, DropTarget};
+use crate::right_dock::{DockPanel, DropTarget, PORTION_SCALE};
 
 /// 左缘拖宽带的宽度。
 pub(crate) const RESIZE_HANDLE_WIDTH: f32 = 6.0;
@@ -13,8 +13,8 @@ pub(crate) const RESIZE_HANDLE_WIDTH: f32 = 6.0;
 pub(crate) const DIVIDER_HEIGHT: f32 = crate::model::SPLIT_DIVIDER_WIDTH;
 /// 标题栏、标签条的高度。
 pub(crate) const HEADER_HEIGHT: f32 = 28.0;
-/// 拖分隔线时每格至少留这么高。
-const MIN_GROUP_HEIGHT: f32 = 80.0;
+/// 每格内容区（标题栏、标签条下面）至少这么高：份额分高度和拖分隔线都不会把一格压得更矮。
+const MIN_GROUP_CONTENT_HEIGHT: f32 = 80.0;
 /// 停靠区最宽：窗格区至少留一栏宽。
 const MIN_BROWSER_AREA_WIDTH: f32 = crate::config::MIN_COLUMN_WIDTH;
 /// 按住面板标题移动这么远才算拖（跟标签一样）。
@@ -44,11 +44,13 @@ pub(super) enum RightDockDrag {
         cursor_start_x: f32,
         width_start: f32,
     },
+    /// 上下两格各自的最小高度之外，还有 `room` 高度能在两格之间挪。
     Divider {
         upper: usize,
         cursor_start_y: f32,
         upper_start: f32,
-        pair_height: f32,
+        upper_min: f32,
+        room: f32,
     },
     Panel {
         panel: DockPanel,
@@ -81,12 +83,20 @@ impl FileBrowser {
             RightDockMessage::DividerDragStarted(upper) => {
                 let frames = self.right_dock_group_frames();
                 if let (Some(top), Some(bottom)) = (frames.get(upper), frames.get(upper + 1)) {
-                    self.right_dock_drag = Some(RightDockDrag::Divider {
-                        upper,
-                        cursor_start_y: self.cursor_or_origin().y,
-                        upper_start: top.bounds.height,
-                        pair_height: top.bounds.height + bottom.bounds.height,
-                    });
+                    let upper_min = min_group_height(top.header_height);
+                    let room = top.bounds.height + bottom.bounds.height
+                        - upper_min
+                        - min_group_height(bottom.header_height);
+                    // 栏矮到两格都只剩平分的高度时，份额不影响画出来的高度，没有可拖的。
+                    if room > 0.0 {
+                        self.right_dock_drag = Some(RightDockDrag::Divider {
+                            upper,
+                            cursor_start_y: self.cursor_or_origin().y,
+                            upper_start: top.bounds.height,
+                            upper_min,
+                            room,
+                        });
+                    }
                 }
             }
             RightDockMessage::PanelPressed(panel) => {
@@ -199,13 +209,15 @@ impl FileBrowser {
                 upper,
                 cursor_start_y,
                 upper_start,
-                pair_height,
+                upper_min,
+                room,
             } => {
-                let height = (upper_start + position.y - cursor_start_y)
-                    .min(pair_height - MIN_GROUP_HEIGHT)
-                    .max(MIN_GROUP_HEIGHT.min(pair_height / 2.0));
+                // 份额按「最小高度之外的部分」分，所以上面那格在 room 里占的比例就是它在两格份额
+                // 里占的比例；指针走多少像素分隔线就走多少。
+                let upper_height =
+                    (upper_start + position.y - cursor_start_y).clamp(upper_min, upper_min + room);
                 self.right_dock
-                    .set_split(upper, height / pair_height.max(1.0));
+                    .set_split(upper, (upper_height - upper_min) / room);
             }
             RightDockDrag::Panel {
                 panel,
@@ -281,8 +293,8 @@ impl FileBrowser {
         }
     }
 
-    /// 每格在窗口里的位置，从上到下。跟视图同一套：格子按份额分去掉分隔线后的高度。
-    /// 栏从窗格区顶上开始，到终端抽屉上沿为止，贴着窗口右边。
+    /// 每格在窗口里的位置，从上到下：渲染、预览视口、拖放落点、分隔线拖动共用的唯一一份。
+    /// 栏从窗格区顶上开始，到终端抽屉上沿为止，贴着窗口右边；高度见 [`group_heights`]。
     pub(crate) fn right_dock_group_frames(&self) -> Vec<GroupFrame> {
         let layout = self.right_dock.layout();
         let groups = layout.groups();
@@ -291,19 +303,26 @@ impl FileBrowser {
             self.main_window_height - crate::terminal_panel::view::terminal_panel_area_height(self);
         let dividers = DIVIDER_HEIGHT * groups.len().saturating_sub(1) as f32;
         let available = (bottom - top - dividers).max(0.0);
-        let total: f32 = groups.iter().map(|group| f32::from(group.portion())).sum();
-        let left = self.main_window_width - self.right_dock_effective_width();
-        let mut y = top;
-        groups
+        let portions_and_headers: Vec<(u16, f32)> = groups
             .iter()
             .map(|group| {
-                let height = available * f32::from(group.portion()) / total.max(1.0);
+                (
+                    group.portion(),
+                    header_height(layout.is_locked(), group.panels().len()),
+                )
+            })
+            .collect();
+        let heights = group_heights(available, &portions_and_headers);
+        let width = self.right_dock_effective_width();
+        let left = self.main_window_width - width;
+        let mut y = top;
+        portions_and_headers
+            .iter()
+            .zip(heights)
+            .map(|(&(_, header), height)| {
                 let frame = GroupFrame {
-                    bounds: Rectangle::new(
-                        Point::new(left, y),
-                        Size::new(self.right_dock_effective_width(), height),
-                    ),
-                    header_height: header_height(layout.is_locked(), group.panels().len()),
+                    bounds: Rectangle::new(Point::new(left, y), Size::new(width, height)),
+                    header_height: header,
                 };
                 y += height + DIVIDER_HEIGHT;
                 frame
@@ -347,6 +366,32 @@ impl FileBrowser {
             DropTarget::Join(index)
         })
     }
+}
+
+/// 一格至少这么高：标题栏（或标签条）加上内容区的最小高度。
+fn min_group_height(header_height: f32) -> f32 {
+    header_height + MIN_GROUP_CONTENT_HEIGHT
+}
+
+/// 各格的像素高度（`available` 已去掉分隔线），元素是（份额，标题栏高度）。每格先拿最小高度，
+/// 剩下的按份额分；剩的不够（栏太矮）时不看份额，各格平分，不让哪一格被挤没。份额合计是
+/// [`PORTION_SCALE`]，所以高度合计正好是 `available`。
+fn group_heights(available: f32, portions_and_headers: &[(u16, f32)]) -> Vec<f32> {
+    let minimums: Vec<f32> = portions_and_headers
+        .iter()
+        .map(|&(_, header)| min_group_height(header))
+        .collect();
+    let spare = available - minimums.iter().sum::<f32>();
+    if spare <= 0.0 {
+        return vec![available / portions_and_headers.len() as f32; portions_and_headers.len()];
+    }
+    portions_and_headers
+        .iter()
+        .zip(minimums)
+        .map(|(&(portion, _), minimum)| {
+            minimum + spare * f32::from(portion) / f32::from(PORTION_SCALE)
+        })
+        .collect()
 }
 
 /// 锁定时只有一个面板的格子没有标题栏；叠了几个时总有标签条；解锁时总有标题栏。

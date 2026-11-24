@@ -45,15 +45,22 @@ pub(crate) fn right_dock(browser: &FileBrowser) -> Element<'_, Message> {
     .into();
     let layout = browser.right_dock.layout();
     let drop = browser.right_dock_panel_drop().map(|(_, target)| target);
+    let frames = browser.right_dock_group_frames();
     let mut groups = Column::new().width(Length::Fill).height(Length::Fill);
-    for (index, group) in layout.groups().iter().enumerate() {
+    for (index, (group, frame)) in layout.groups().iter().zip(&frames).enumerate() {
         if index > 0 {
             groups = groups.push(divider(index - 1));
         }
-        groups = groups.push(group_view(browser, index, group, layout.is_locked(), drop));
+        groups = groups.push(group_view(
+            browser,
+            index,
+            group,
+            frame.bounds.height,
+            layout.is_locked(),
+            drop,
+        ));
     }
-    // 手柄必须留在外层 row:Fill 高度与 FillPortion 同列会按 1 份参与分配,整条左缘拖拽带
-    // 会被压到 ~1px。
+    // 手柄必须留在外层 row:放进各格这一列就要跟各格分纵向高度,整条左缘拖拽带会被压扁。
     row![handle, groups]
         .width(Length::Fixed(browser.right_dock_effective_width()))
         .height(Length::Fill)
@@ -62,10 +69,14 @@ pub(crate) fn right_dock(browser: &FileBrowser) -> Element<'_, Message> {
 
 /// 一格：标题栏或标签条（锁定且只有一个面板时没有）+ 面板内容，叠一层拖动落点提示。
 /// 提示层一直在（不拖时是空的）：按条件包一层会改控件树，预览里的滚动之类的状态会被重建。
+/// 高度直接给 `right_dock_group_frames` 算好的像素：分隔线拖动、落点、预览视口都按那份算，
+/// 画出来必须是同一个数。不用 `FillPortion`：iced 把一列里的填充系数加在 u16 里，合计过
+/// 65535 会回绕，各格被分到远超栏高的高度、后面的格子被挤出栏外。
 fn group_view<'a>(
     browser: &'a FileBrowser,
     index: usize,
     group: &'a DockGroup,
+    height: f32,
     locked: bool,
     drop: Option<DropTarget>,
 ) -> Element<'a, Message> {
@@ -95,7 +106,7 @@ fn group_view<'a>(
     .on_right_press(Message::RightDock(RightDockMessage::MenuRequested));
     container(cell)
         .width(Length::Fill)
-        .height(Length::FillPortion(group.portion()))
+        .height(Length::Fixed(height))
         .into()
 }
 

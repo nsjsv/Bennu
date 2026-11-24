@@ -1,5 +1,4 @@
 use std::ffi::OsStr;
-use std::path::Path;
 use std::time::SystemTime;
 
 use bennu_preview::formatting::file_kind_label;
@@ -22,6 +21,9 @@ use bennu_preview::panel_text::readable_text;
 use bennu_theme::icons::IconSymbol;
 
 use super::auxiliary_window_layout::auxiliary_detail_scroller;
+use super::property_text::{
+    display_path, display_permissions, display_size, time_rows, type_text,
+};
 use super::settings_group::{
     action_row, control_row, label_row, meter_row, muted_setting_text, notice_row, settings_card,
     settings_group, value_row, RowNote, SettingsRow, SETTINGS_GROUP_SPACING,
@@ -208,17 +210,6 @@ fn basic_rows(snapshot: &FilePropertiesSnapshot) -> Vec<SettingsRow<'static>> {
     rows
 }
 
-/// 普通文件「PNG 图像（image/png）」；类型库没有类型名的只写类型；其余是种类名。
-fn type_text(details: &FilePropertiesKindDetails) -> String {
-    match details {
-        FilePropertiesKindDetails::File(file) => match &file.description {
-            Some(description) => tr!("%1 (%2)", description, file.mime_type),
-            None => file.mime_type.clone(),
-        },
-        details => file_kind_label(details.kind()),
-    }
-}
-
 fn contents_text(contents: &FilePropertiesDirectoryContentsState) -> String {
     match contents {
         FilePropertiesDirectoryContentsState::Loading(contents) => contents
@@ -297,25 +288,6 @@ fn times_card(snapshot: &FilePropertiesSnapshot) -> Element<'static, Message> {
             .map(|(label, value)| value_row(label, value))
             .collect(),
     )
-}
-
-/// 文件系统不记创建时间（老式 ext4、网络和共享目录）时不显示这一行，不写「不可用」：
-/// 这是文件系统的事，不是这个文件出了问题。状态改变时间（ctime）放最后。
-fn time_rows(snapshot: &FilePropertiesSnapshot) -> Vec<(String, String)> {
-    let created = snapshot
-        .created
-        .map(|created| (tr!("Created"), format_system_time(created)));
-    created
-        .into_iter()
-        .chain([
-            (tr!("Modified"), display_optional_time(snapshot.modified)),
-            (tr!("Accessed"), display_optional_time(snapshot.accessed)),
-            (
-                tr!("Status Changed"),
-                display_optional_time(snapshot.changed),
-            ),
-        ])
-        .collect()
 }
 
 /// 多选：标题是“N 项”，卡片里是各类各几个、在哪、总大小，时间只在大家都一样时有。
@@ -548,19 +520,6 @@ fn display_name(name: &OsStr) -> String {
     name.to_string_lossy().into_owned()
 }
 
-fn display_path(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
-}
-
-fn display_optional_time(time: Option<SystemTime>) -> String {
-    time.map(format_system_time)
-        .unwrap_or_else(|| tr!("Unavailable"))
-}
-
-fn display_size(bytes: u64) -> String {
-    tr!("%1 (%2 bytes)", format_file_size(bytes), bytes)
-}
-
 fn display_contents(contents: &FilePropertiesDirectoryContents) -> String {
     let counts = tr!(
         "%1 files, %2 folders, total %3",
@@ -578,14 +537,6 @@ fn with_unreadable_contents_note(counts: String, unreadable_entries: u64) -> Str
     } else {
         tr!("%1 (some contents unreadable)", counts)
     }
-}
-
-fn display_permissions(permissions: FilePropertiesPermissions) -> String {
-    format!(
-        "{} ({})",
-        permissions.symbolic_string(),
-        permissions.octal_string()
-    )
 }
 
 #[cfg(test)]

@@ -436,3 +436,25 @@ fn accept_mode_and_pin_round_trip_and_unreadable_values_are_reported() {
         vec!["transfer_accept_mode", "transfer_receive_pin"]
     );
 }
+
+#[test]
+fn info_panel_fields_roundtrip_and_unknown_names_are_reported() {
+    let default = default_user_config();
+    let mut config = default.clone();
+    config.info_panel =
+        crate::info_panel::InfoPanelPreferences::new([crate::info_panel::InfoField::Owner], false);
+    let mut stored = config.user_preferences().to_stored();
+    let restored = UserPreferences::from_stored(stored.clone(), &default);
+    assert_eq!(restored.preferences.info_panel, config.info_panel);
+    assert!(restored.unrecognized.into_keys().is_empty());
+
+    stored
+        .info_panel
+        .as_mut()
+        .unwrap()
+        .hidden_fields
+        .push("from-a-newer-version".to_owned());
+    let restored = UserPreferences::from_stored(stored, &default);
+    assert_eq!(restored.preferences.info_panel, config.info_panel);
+    assert_eq!(restored.unrecognized.into_keys(), vec!["info_panel"]);
+}

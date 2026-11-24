@@ -19,6 +19,13 @@ pub(crate) const LAUNCH_WINDOW_POLICY_OPEN_NEW_WINDOW: &str = "open_new_window";
 pub(crate) const COLUMN_WIDTH_ADJUST_MODE_PER_COLUMN: &str = "per_column";
 pub(crate) const COLUMN_WIDTH_ADJUST_MODE_UNIFORM: &str = "uniform";
 
+/// 信息面板：字段按存储名（`InfoField::storage_name`）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StoredInfoPanel {
+    pub hidden_fields: Vec<String>,
+    pub follow_hover: bool,
+}
+
 /// 右侧停靠区：从上到下几格，每格的面板按存储名（`DockPanel::storage_name`）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct StoredRightDock {
@@ -47,6 +54,9 @@ pub(crate) struct StoredUserPreferences {
     #[serde(default = "default_language_setting")]
     pub language_setting: String,
     pub sidebar_width: f64,
+    /// 信息面板关掉的字段、跟不跟悬停;None = 还没改过,用默认。
+    #[serde(default)]
+    pub info_panel: Option<StoredInfoPanel>,
     /// 右侧停靠区布局;None = 0.4.7 及以前的数据,由下面三个旧键换算。
     #[serde(default)]
     pub right_dock: Option<StoredRightDock>,
@@ -235,6 +245,7 @@ impl Default for StoredUserPreferences {
             show_hidden_files: false,
             language_setting: default_language_setting(),
             sidebar_width: 180.0,
+            info_panel: None,
             right_dock: None,
             right_preview_panel_open: false,
             right_preview_panel_width: None,

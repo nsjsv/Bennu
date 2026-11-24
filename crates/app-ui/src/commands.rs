@@ -67,12 +67,11 @@ pub(crate) use network_connections::{
 mod preview;
 pub(crate) use preview::{
     image_preview_dimensions_command, original_image_preview_command,
-    right_preview_panel_info_command,
 };
 mod properties;
 pub(crate) use properties::{
     apply_file_properties_permissions_to_enclosed_items_command, file_properties_command,
-    set_file_properties_permissions_command, FilePropertiesPermissionTargets,
+    info_panel_command, set_file_properties_permissions_command, FilePropertiesPermissionTargets,
 };
 mod search;
 pub(crate) use search::{

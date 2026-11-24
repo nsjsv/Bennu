@@ -9,10 +9,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::model::Message;
 
-pub(crate) fn right_preview_panel_info_command(path: PathBuf) -> Task<Message> {
-    bennu_preview::commands::preview::right_preview_panel_info_command(path).map(Message::Preview)
-}
-
 pub(crate) fn image_preview_dimensions_command(path: PathBuf, generation: u64) -> Task<Message> {
     bennu_preview::commands::preview::image_preview_dimensions_command(path, generation)
         .map(Message::Preview)

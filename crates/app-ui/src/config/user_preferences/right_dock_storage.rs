@@ -1,11 +1,13 @@
-//! 右侧停靠区的存储形态 ↔ 布局。0.4.7 及以前只有一个右侧面板（预览在上、信息在下），
-//! 没有 `right_dock` 键时由那三个旧键换算成同样子的布局。
+//! 右侧停靠区和信息面板的存储形态 ↔ 设置。0.4.7 及以前只有一个右侧面板（预览在上、信息
+//! 在下），没有 `right_dock` 键时由那三个旧键换算成同样子的布局。
 
 use super::super::unrecognized_settings::UnrecognizedSettings;
 use super::super::{
-    normalize_right_preview_preview_ratio, StoredDockGroup, StoredRightDock, StoredUserPreferences,
-    DEFAULT_RIGHT_DOCK_WIDTH, DEFAULT_RIGHT_PREVIEW_PREVIEW_RATIO,
+    normalize_right_preview_preview_ratio, StoredDockGroup, StoredInfoPanel, StoredRightDock,
+    StoredUserPreferences, DEFAULT_RIGHT_DOCK_WIDTH, DEFAULT_RIGHT_PREVIEW_PREVIEW_RATIO,
 };
+use super::UserPreferences;
+use crate::info_panel::{InfoField, InfoPanelPreferences};
 use crate::right_dock::RightDockLayout;
 
 pub(super) fn right_dock_from_stored(
@@ -63,5 +65,33 @@ pub(super) fn right_dock_to_stored(layout: &RightDockLayout) -> StoredRightDock 
                 portion: u32::from(group.portion()),
             })
             .collect(),
+    }
+}
+
+pub(super) fn info_panel_from_stored(
+    stored: &StoredUserPreferences,
+    default_preferences: &UserPreferences,
+    unrecognized: &mut UnrecognizedSettings,
+) -> InfoPanelPreferences {
+    let Some(panel) = &stored.info_panel else {
+        return default_preferences.info_panel.clone();
+    };
+    let hidden: Vec<InfoField> = panel
+        .hidden_fields
+        .iter()
+        .filter_map(|name| InfoField::from_storage_name(name))
+        .collect();
+    unrecognized.note_dropped("info_panel", panel.hidden_fields.len(), hidden.len());
+    InfoPanelPreferences::new(hidden, panel.follow_hover)
+}
+
+pub(super) fn info_panel_to_stored(preferences: &InfoPanelPreferences) -> StoredInfoPanel {
+    StoredInfoPanel {
+        hidden_fields: preferences
+            .hidden_fields()
+            .iter()
+            .map(|field| field.storage_name().to_owned())
+            .collect(),
+        follow_hover: preferences.follow_hover,
     }
 }

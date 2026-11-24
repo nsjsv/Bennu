@@ -146,7 +146,7 @@ pub(crate) use bennu_preview::sqlite_preview::{SqlitePreviewMessage, SqlitePrevi
 pub(crate) use bennu_preview::preview::{
     AudioPreviewPlayback, ImagePreviewContent, PreviewContent, PreviewSize, PreviewState,
     PreviewWindowProfile, RemotePreviewCacheFinished, RemotePreviewCacheMessage,
-    RightPreviewPanelInfoSnapshot, VideoPreviewPlayback,
+    VideoPreviewPlayback,
 };
 // 纯搬移：视口模型已下沉 bennu-preview，此处 re-export 维持
 // crate::model::ImagePreviewViewport 既有调用路径不变。
@@ -476,6 +476,7 @@ pub(crate) enum Message {
     SmartFolderRemoved(String),
     SidebarResizeStarted,
     RightDock(crate::app::right_dock::RightDockMessage),
+    InfoPanel(crate::app::info_panel::InfoPanelMessage),
     SplitResizeStarted,
     CursorMoved {
         window: window::Id,
@@ -943,6 +944,8 @@ pub(crate) struct RightDockMenuState {
     /// 打开菜单那一刻在栏里的面板和锁定状态（菜单点一下就关，不会过时）。
     pub(crate) open_panels: Vec<crate::right_dock::DockPanel>,
     pub(crate) locked: bool,
+    /// 从信息面板里右键时多一段「显示的信息」：当时的字段设置。
+    pub(crate) info_panel: Option<crate::info_panel::InfoPanelPreferences>,
 }
 
 impl ContextMenuState {

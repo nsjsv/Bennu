@@ -99,7 +99,7 @@ fn group_view<'a>(
 fn panel_content(browser: &FileBrowser, panel: DockPanel) -> Element<'_, Message> {
     match panel {
         DockPanel::Preview => browser.right_preview_panel_content(),
-        DockPanel::Info => super::right_preview_panel::info_panel_content(browser),
+        DockPanel::Info => super::info_panel::info_panel_content(browser),
     }
 }
 

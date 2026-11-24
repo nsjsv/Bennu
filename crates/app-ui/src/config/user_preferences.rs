@@ -30,6 +30,7 @@ use crate::model::{
     WindowControlPlacement, WindowControlSide, WindowControlVisibility, WindowControlsConfig,
 };
 use crate::network_connections::SavedNetworkConnection;
+use crate::info_panel::InfoPanelPreferences;
 use crate::right_dock::RightDockLayout;
 use crate::shortcuts::ShortcutConfig;
 use bennu_preview::preview_config::{
@@ -54,6 +55,7 @@ pub(crate) struct UserPreferences {
     pub(crate) language_setting: UiLanguageSetting,
     pub(crate) sidebar_width: f32,
     pub(crate) right_dock: RightDockLayout,
+    pub(crate) info_panel: InfoPanelPreferences,
     pub(crate) sidebar_favorites: Option<Vec<SidebarFavoriteConfig>>,
     pub(crate) network_connections: Vec<SavedNetworkConnection>,
     pub(crate) terminal_emulator: TerminalEmulator,
@@ -114,6 +116,7 @@ impl UserPreferences {
             language_setting: config.language_setting,
             sidebar_width: normalize_sidebar_width(config.sidebar_width),
             right_dock: config.right_dock.clone(),
+            info_panel: config.info_panel.clone(),
             sidebar_favorites: config.sidebar_favorites.clone(),
             network_connections: config.network_connections.clone(),
             terminal_emulator: config.terminal_emulator,
@@ -173,6 +176,7 @@ impl UserPreferences {
         config.language_setting = self.language_setting;
         config.sidebar_width = self.sidebar_width;
         config.right_dock = self.right_dock.clone();
+        config.info_panel = self.info_panel.clone();
         config.sidebar_favorites = self.sidebar_favorites.clone();
         config.network_connections = self.network_connections.clone();
         config.terminal_emulator = self.terminal_emulator;
@@ -258,6 +262,7 @@ impl UserPreferences {
         stored.language_setting = self.language_setting.config_value().to_owned();
         stored.sidebar_width = f64::from(normalize_sidebar_width(self.sidebar_width));
         stored.right_dock = Some(right_dock_to_stored(&self.right_dock));
+        stored.info_panel = Some(info_panel_to_stored(&self.info_panel));
         stored.sidebar_favorites = self
             .sidebar_favorites
             .as_ref()
@@ -426,6 +431,7 @@ impl UserPreferences {
             ),
             sidebar_width: normalize_sidebar_width(stored.sidebar_width as f32),
             right_dock: right_dock_from_stored(&stored, &mut unrecognized),
+            info_panel: info_panel_from_stored(&stored, &default_preferences, &mut unrecognized),
             sidebar_favorites: stored
                 .sidebar_favorites
                 .map(|favorites| bennu_sidebar::sidebar_favorites_from_stored(&favorites)),
@@ -749,7 +755,9 @@ use context_menu_storage::{context_menu_preferences_from_stored, stored_context_
 mod shortcut_storage;
 use shortcut_storage::{shortcut_config_from_stored, stored_shortcut_overrides};
 mod right_dock_storage;
-use right_dock_storage::{right_dock_from_stored, right_dock_to_stored};
+use right_dock_storage::{
+    info_panel_from_stored, info_panel_to_stored, right_dock_from_stored, right_dock_to_stored,
+};
 mod transfer_favorites;
 use transfer_favorites::{favorite_transfer_devices_from_stored, stored_favorite_transfer_devices};
 

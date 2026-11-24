@@ -17,7 +17,7 @@ use crate::document_preview::DocumentPreviewMessage;
 use crate::image_preview_viewport::PreviewImageViewportMessage;
 use crate::original_image_preview::{ImageProbe, ImageProbeError, OriginalImagePreview};
 use crate::preview::{
-    AudioTimelineView, PreviewContent, RemotePreviewCacheMessage, RightPreviewPanelInfoSnapshot,
+    AudioTimelineView, PreviewContent, RemotePreviewCacheMessage,
     VideoPreviewFrame,
 };
 use crate::sqlite_preview::SqlitePreviewMessage;
@@ -136,10 +136,6 @@ pub enum PreviewMessage {
     /// 文件夹、压缩包树滚到哪了：只排看得见的行。
     PreviewTreeScrolled(crate::preview::TreeViewport),
     PreviewTreeAnimationTick,
-    RightPreviewPanelInfoLoaded {
-        path: PathBuf,
-        snapshot: Result<Box<RightPreviewPanelInfoSnapshot>, String>,
-    },
     SqliteTablesResizeStarted,
     PreviewWindowPinToggled,
     /// 引擎呈现（开启或复用）预览窗口时随任务发出：宿主的焦点簿记

@@ -66,6 +66,7 @@ mod rendering_settings;
 mod revealed_path;
 #[cfg(test)]
 mod revealed_path_tests;
+pub(crate) mod info_panel;
 pub(crate) mod right_dock;
 pub(crate) mod right_preview_panel;
 mod runtime;
@@ -274,8 +275,7 @@ pub(crate) struct FileBrowser {
     /// 本窗口在用的右侧停靠区（`user_config.right_dock` 是存盘的那份）。
     pub(crate) right_dock: crate::right_dock::RightDock,
     right_dock_drag: Option<right_dock::RightDockDrag>,
-    /// 信息面板显示的元数据，按路径对上当前目标才显示。
-    pub(crate) info_panel_snapshot: Option<crate::model::RightPreviewPanelInfoSnapshot>,
+    pub(crate) info_panel: info_panel::InfoPanelState,
     pub(crate) renaming: Option<PathBuf>,
     pending_created_entry_rename: Option<PathBuf>,
     pub(crate) pending_operation: Option<PendingOperation>,
@@ -700,7 +700,7 @@ impl FileBrowser {
             sidebar_resize_drag: None,
             right_dock: crate::right_dock::RightDock::new(user_config.right_dock.clone()),
             right_dock_drag: None,
-            info_panel_snapshot: None,
+            info_panel: info_panel::InfoPanelState::default(),
             renaming: None,
             pending_created_entry_rename: None,
             pending_operation: None,

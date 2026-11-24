@@ -129,6 +129,7 @@ impl FileBrowser {
                         .filter(|panel| layout.contains(*panel))
                         .collect(),
                     locked: layout.is_locked(),
+                    info_panel: None,
                 }));
             }
         }

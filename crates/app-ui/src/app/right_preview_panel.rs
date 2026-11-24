@@ -71,37 +71,6 @@ impl FileBrowser {
         self.open_preview_for_resolved_path(path, kind)
     }
 
-    /// 目标路径变化才重新读元数据;快照按 path 门控渲染,过期快照在新快照到达前不显示。
-    fn sync_info_panel(&mut self) -> Task<Message> {
-        if !self.right_dock.layout().shows(DockPanel::Info) {
-            return Task::none();
-        }
-        let Some(path) = self.tab().selected.clone() else {
-            self.info_panel_snapshot = None;
-            return Task::none();
-        };
-        if self
-            .info_panel_snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.path == path)
-        {
-            return Task::none();
-        }
-        crate::commands::right_preview_panel_info_command(path)
-    }
-
-    pub(super) fn accept_info_panel_snapshot(
-        &mut self,
-        path: &std::path::Path,
-        snapshot: Result<Box<crate::model::RightPreviewPanelInfoSnapshot>, String>,
-    ) {
-        // 只有快照仍对应当前目标才落地,防陈旧回写。
-        if self.tab().selected.as_deref() != Some(path) {
-            return;
-        }
-        self.info_panel_snapshot = snapshot.ok().map(|snapshot| *snapshot);
-    }
-
     /// 预览面板内容视口的估算尺寸:宽度精确(决定媒体适配与分页文档页宽),
     /// 高度允许 ±数 px 误差(只影响垂直居中留白与滚动高度估算)。
     pub(crate) fn right_preview_panel_viewport(&self) -> PreviewSize {

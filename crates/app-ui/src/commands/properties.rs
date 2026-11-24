@@ -30,6 +30,60 @@ pub(crate) enum FilePropertiesPermissionTargets {
     TargetSet(Vec<FilePropertiesPermissionBaseline>),
 }
 
+/// 信息面板读一个条目：属性窗口同一个快速读取，再在后台读详细信息（图片、音视频）和 PDF
+/// 页数。不读文件夹里面、不查默认打开程序：目标换得勤，这两样不值。被取消（目标换了）时
+/// 后台的 ffprobe、pdfinfo 跟着停。
+pub(crate) fn info_panel_command(
+    request: u64,
+    path: PathBuf,
+    cancellation: CancellationToken,
+) -> Task<Message> {
+    use crate::app::info_panel::InfoPanelMessage;
+    Task::stream(iced::stream::channel(
+        FILE_PROPERTIES_CHANNEL_SIZE,
+        async move |mut output| {
+            let loaded = load_file_properties(path.clone()).await;
+            let media = loaded.as_ref().ok().and_then(|(_, lookups)| lookups.media);
+            let is_pdf = loaded.as_ref().is_ok_and(|(snapshot, _)| {
+                matches!(snapshot.details, FilePropertiesKindDetails::File(_))
+            }) && bennu_preview::document_preview::document_preview_format_for_path(&path)
+                == Some(bennu_preview::document_preview::DocumentPreviewFormat::Pdf);
+            let outcome = loaded.map(|(snapshot, _)| Box::new(snapshot));
+            let message = Message::InfoPanel(InfoPanelMessage::Loaded { request, outcome });
+            if output.send(message).await.is_err() {
+                return;
+            }
+            let details = async {
+                if let Some(media) = media {
+                    let outcome =
+                        bennu_preview::media_details::media_detail_rows(path.clone(), media).await;
+                    let message =
+                        Message::InfoPanel(InfoPanelMessage::DetailsLoaded { request, outcome });
+                    let _ = output.clone().send(message).await;
+                }
+            };
+            let pages = async {
+                if is_pdf {
+                    let pages = bennu_preview::commands::document_preview::pdf_page_count(
+                        path.clone(),
+                        cancellation.clone(),
+                    )
+                    .await;
+                    if let Some(pages) = pages {
+                        let message =
+                            Message::InfoPanel(InfoPanelMessage::PagesLoaded { request, pages });
+                        let _ = output.clone().send(message).await;
+                    }
+                }
+            };
+            tokio::select! {
+                () = cancellation.cancelled() => {}
+                _ = async { tokio::join!(details, pages) } => {}
+            }
+        },
+    ))
+}
+
 /// 读一遍属性。重读时 `previous` 是上次读到的单个目标：慢项先摆上次的，`reread` 说不用再读的
 /// 就不读（多个目标总是整个重读）。
 pub(crate) fn file_properties_command(

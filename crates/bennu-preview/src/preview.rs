@@ -599,20 +599,6 @@ pub struct PreviewSize {
     pub height: f32,
 }
 
-/// 右侧面板信息区的单条目元数据快照:按目标路径异步读自文件系统,
-/// 与目录列表快照解耦(列视图深层选中、搜索结果同样有完整元数据)。
-#[derive(Debug, Clone)]
-pub struct RightPreviewPanelInfoSnapshot {
-    pub path: std::path::PathBuf,
-    pub kind: file_core::FileKind,
-    pub name: std::ffi::OsString,
-    pub location: std::path::PathBuf,
-    pub size_bytes: u64,
-    pub created: Option<std::time::SystemTime>,
-    pub modified: Option<std::time::SystemTime>,
-    pub accessed: Option<std::time::SystemTime>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewWindowProfile {
     Regular,

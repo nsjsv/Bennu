@@ -59,6 +59,24 @@ struct DocumentPrograms {
     office: OfficePrograms,
 }
 
+/// PDF 有几页：只跑一次 `pdfinfo`，给信息面板用。没装 Poppler、读不了、被取消都是 `None`
+/// （面板不显示这一行，不当错误）。
+pub async fn pdf_page_count(path: PathBuf, cancellation: CancellationToken) -> Option<usize> {
+    let output = run_poppler_command(
+        &PopplerPrograms::default().pdfinfo,
+        &[path.into_os_string()],
+        "pdfinfo",
+        PDFINFO_TIMEOUT,
+        PDFINFO_STDOUT_LIMIT,
+        PDFINFO_STDERR_LIMIT,
+        &cancellation,
+        None,
+    )
+    .await
+    .ok()??;
+    parse_pdfinfo_page_count(&output.stdout.bytes).ok()
+}
+
 pub fn prepare_document_command(request: DocumentPrepareRequest) -> Task<PreviewMessage> {
     Task::perform(prepare_document(request), |outcome| {
         PreviewMessage::DocumentPreview(DocumentPreviewMessage::Prepared(outcome))

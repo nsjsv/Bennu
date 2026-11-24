@@ -82,10 +82,6 @@ impl FileBrowser {
             PreviewMessage::FolderEntryOpened { path, kind } => {
                 self.open_folder_preview_entry(path, kind)
             }
-            PreviewMessage::RightPreviewPanelInfoLoaded { path, snapshot } => {
-                self.accept_info_panel_snapshot(&path, snapshot);
-                Task::none()
-            }
             // 焦点簿记归宿主；窗口在消息回到宿主前已被关掉时，不能让它
             // 指向已死窗口。
             PreviewMessage::PreviewWindowPresented(window) => {

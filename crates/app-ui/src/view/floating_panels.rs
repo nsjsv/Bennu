@@ -312,6 +312,23 @@ fn right_dock_menu_panel(menu: &RightDockMenuState) -> Element<'static, Message>
         tr!("Lock Panels"),
         Message::RightDock(RightDockMessage::LockToggled),
     ));
+    // 在信息面板里右键：下面一段选显示哪些信息、跟不跟鼠标悬停。
+    if let Some(info) = &menu.info_panel {
+        use crate::app::info_panel::InfoPanelMessage;
+        content = content.push(iced::widget::rule::horizontal(1));
+        for field in crate::info_panel::InfoField::ALL {
+            content = content.push(checked_menu_button(
+                info.shows(field),
+                super::info_panel::info_field_label(field),
+                Message::InfoPanel(InfoPanelMessage::FieldToggled(field)),
+            ));
+        }
+        content = content.push(checked_menu_button(
+            info.follow_hover,
+            tr!("Show Hovered Items"),
+            Message::InfoPanel(InfoPanelMessage::FollowHoverToggled),
+        ));
+    }
     container(content)
         .width(Length::Fixed(RIGHT_DOCK_MENU_WIDTH))
         .style(context_menu_style)

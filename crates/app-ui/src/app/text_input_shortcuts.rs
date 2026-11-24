@@ -1,3 +1,6 @@
+use std::any::Any;
+
+use bennu_theme::controls::FocusedTextControl;
 use iced::advanced::widget as advanced_widget;
 use iced::advanced::widget::operation::{Focusable, Operation, Outcome, TextInput};
 use iced::{Rectangle, Task};
@@ -19,6 +22,8 @@ struct FocusedTextInputShortcutRoute {
     content_key: FileContentKey,
     focused_widgets: Vec<FocusedWidget>,
     text_input_state_addresses: Vec<usize>,
+    /// 多行文字控件（`TextEditor`）不报告“是文字输入”，靠 `bennu_theme::controls` 补报的标记认。
+    text_control_focused: bool,
 }
 
 impl FocusedTextInputShortcutRoute {
@@ -27,6 +32,7 @@ impl FocusedTextInputShortcutRoute {
             content_key,
             focused_widgets: Vec::new(),
             text_input_state_addresses: Vec::new(),
+            text_control_focused: false,
         }
     }
 
@@ -67,9 +73,22 @@ impl Operation<Message> for FocusedTextInputShortcutRoute {
             .push(widget_state_address(state));
     }
 
+    fn custom(
+        &mut self,
+        _id: Option<&advanced_widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn Any,
+    ) {
+        self.text_control_focused |= state.is::<FocusedTextControl>();
+    }
+
     fn finish(&self) -> Outcome<Message> {
         let Some(focused_text_input) = self.focused_text_input() else {
-            return Outcome::Some(Message::FileContentKeyRouted(self.content_key.clone()));
+            return if self.text_control_focused {
+                Outcome::None
+            } else {
+                Outcome::Some(Message::FileContentKeyRouted(self.content_key.clone()))
+            };
         };
         let rename_id: advanced_widget::Id = rename_input_id().into();
 
@@ -192,6 +211,78 @@ mod tests {
         assert!(matches!(
             redo_operation.finish(),
             Outcome::Some(Message::RenameInputRedoRequested)
+        ));
+    }
+
+    /// 聚焦只读文字：真实控件被 `FocusedTextInputShortcutRoute` 走一遍，看它认不认。
+    /// 空渲染器没有显卡也能量出控件，聚焦靠 operation 代替点击。
+    fn route_through_selectable_text(
+        focused: bool,
+        content_key: FileContentKey,
+    ) -> Outcome<Message> {
+        use bennu_theme::controls::{selectable_text, SelectableTextContent};
+        use iced::advanced::widget::operation::{black_box, Focusable};
+        use iced::advanced::widget::Tree;
+        use iced::advanced::{layout, Layout};
+        use iced::{Element, Size, Theme};
+
+        struct FocusEverything;
+        impl Operation for FocusEverything {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+                operate(self);
+            }
+            fn focusable(
+                &mut self,
+                _id: Option<&advanced_widget::Id>,
+                _bounds: Rectangle,
+                state: &mut dyn Focusable,
+            ) {
+                state.focus();
+            }
+        }
+
+        let content = SelectableTextContent::<()>::new("value");
+        let mut element: Element<'_, (), Theme, ()> = selectable_text(&content, |_| ());
+        let mut tree = Tree::new(&element);
+        let limits = layout::Limits::new(Size::ZERO, Size::new(200.0, 120.0));
+        let node = element.as_widget_mut().layout(&mut tree, &(), &limits);
+        let layout = Layout::new(&node);
+        if focused {
+            element
+                .as_widget_mut()
+                .operate(&mut tree, layout, &(), &mut FocusEverything);
+        }
+        let mut operation = FocusedTextInputShortcutRoute::new(content_key);
+        element.as_widget_mut().operate(
+            &mut tree,
+            layout,
+            &(),
+            &mut black_box::<Message, ()>(&mut operation),
+        );
+        operation.finish()
+    }
+
+    /// Ctrl+Z 这类编辑器不认、不会捕获的键：多行文字控件聚焦时也得留在文字里，不能落到文件撤销上。
+    #[test]
+    fn focused_selectable_text_consumes_file_shortcut() {
+        for content_key in [
+            FileContentKey::Action(ShortcutAction::Undo),
+            FileContentKey::Action(ShortcutAction::SelectAll),
+        ] {
+            assert!(matches!(
+                route_through_selectable_text(true, content_key),
+                Outcome::None
+            ));
+        }
+    }
+
+    #[test]
+    fn unfocused_selectable_text_routes_original_file_shortcut() {
+        assert!(matches!(
+            route_through_selectable_text(false, FileContentKey::Action(ShortcutAction::Undo)),
+            Outcome::Some(Message::FileContentKeyRouted(FileContentKey::Action(
+                ShortcutAction::Undo
+            )))
         ));
     }
 

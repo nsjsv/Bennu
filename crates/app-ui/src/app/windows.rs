@@ -555,6 +555,13 @@ impl FileBrowser {
     /// 关掉最上面的一层（弹窗、菜单、拖拽、重命名、图标展开树）；什么都没关时返回 None，
     /// Esc 据此往下一层走（清空选择）。点击外部也走这里，但不清空选择。
     fn dismiss_floating_layer(&mut self) -> Option<Task<Message>> {
+        self.dismiss_overlay_layer()
+            .or_else(|| self.escape_icon_grid_expansion())
+    }
+
+    /// [`Self::dismiss_floating_layer`] 里不碰文件区的那几层：弹窗、菜单、拖拽、地址栏编辑、
+    /// 重命名。文字控件吃掉 Esc 时只走这几层。
+    pub(super) fn dismiss_overlay_layer(&mut self) -> Option<Task<Message>> {
         if self.shortcut_help_open {
             self.shortcut_help_open = false;
             return Some(Task::none());
@@ -671,11 +678,7 @@ impl FileBrowser {
             self.cancel_address_editing(),
             self.commit_rename_if_active(),
         ]);
-        if dismissed_existing_interaction {
-            return Some(dismiss_command);
-        }
-        self.escape_icon_grid_expansion()
-            .map(|expansion_command| Task::batch([dismiss_command, expansion_command]))
+        dismissed_existing_interaction.then_some(dismiss_command)
     }
 
     /// Esc 的最后几层：没有别的东西可关时，先退 vim 的 `/` 跳转、待定键、范围选择，再清掉

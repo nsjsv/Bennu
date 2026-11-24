@@ -42,7 +42,9 @@ pub fn inline_text_field<'a, Message: Clone>(
     TextField::new(placeholder, value)
 }
 
-pub fn text_area<'a, Message: Clone>(content: &'a text_editor::Content) -> TextArea<'a, Message> {
+pub fn text_area<'a, Message: Clone, Renderer: text::Renderer>(
+    content: &'a text_editor::Content<Renderer>,
+) -> TextArea<'a, Message, Renderer> {
     TextArea::new(content)
 }
 
@@ -265,10 +267,15 @@ pub fn text_field_style(theme: &Theme, status: text_input::Status) -> text_input
             text_input::Status::Disabled => muted_text_color(theme),
             _ => colors.on_surface,
         },
-        selection: Color {
-            a: 0.35,
-            ..colors.primary
-        },
+        selection: selection_color(theme),
+    }
+}
+
+/// 输入框和只读文字里选中那段的底色：强调色淡淡一层。
+pub(super) fn selection_color(theme: &Theme) -> Color {
+    Color {
+        a: 0.35,
+        ..ui_colors(theme).primary
     }
 }
 

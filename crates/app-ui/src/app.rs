@@ -71,6 +71,7 @@ mod revealed_path_tests;
 pub(crate) mod dock_hover;
 pub(crate) mod folder_tree;
 pub(crate) mod info_panel;
+pub(crate) mod info_panel_rows;
 pub(crate) mod quick_actions_panel;
 pub(crate) mod right_dock;
 pub(crate) mod right_preview_panel;
@@ -109,6 +110,8 @@ mod task_end;
 mod terminal_follow_tests;
 #[cfg(test)]
 mod terminal_keys_tests;
+#[cfg(test)]
+mod focused_control_keys_tests;
 mod text_input_shortcuts;
 mod thumbnailing;
 pub(crate) mod transfer;

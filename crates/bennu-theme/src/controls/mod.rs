@@ -14,6 +14,7 @@ mod hint;
 mod primary_selection;
 #[cfg(test)]
 mod primary_selection_tests;
+mod selectable_text;
 mod toggles;
 
 pub use buttons::{
@@ -31,6 +32,8 @@ pub use fields::{
 };
 pub(crate) use hint::gated_tooltip;
 pub use hint::{tooltip, TOOLTIP_DELAY};
+pub use primary_selection::FocusedTextControl;
+pub use selectable_text::{selectable_text, SelectableTextContent};
 pub use toggles::{
     check_box, segmented_choice_row, switch, SegmentedChoice, SWITCH_HEIGHT, SWITCH_WIDTH,
 };

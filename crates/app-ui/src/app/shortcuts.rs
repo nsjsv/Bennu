@@ -141,15 +141,26 @@ impl FileBrowser {
         )
     }
 
-    /// 辅助窗口里被捕获的 Escape，是聚焦的输入框吃掉的（iced text_input 只在聚焦时
-    /// 捕获 Escape，并借此失焦）：这一下只离开输入框，第二下才关窗口。主窗口不算：
-    /// 地址栏编辑正是靠这次被捕获的 Escape 来取消编辑。
+    /// 被捕获的 Escape 是聚焦的文字控件吃掉的（单行、多行文字控件都在失焦时捕获它，见
+    /// `PrimarySelection`），这一下只是离开控件：辅助窗口里第二下才关窗口；主窗口里应用中
+    /// 跟着文字控件走的东西（搜索、地址栏编辑、改名、弹窗）照样收尾，但文件区的几层（收起
+    /// 展开树、退 vim、清打字缓冲、清选择）不动，不然离开信息面板的值也会清掉文件选择。
     fn handle_escape_key(&mut self, status: event::Status) -> Task<Message> {
-        if status == event::Status::Captured && self.auxiliary_window(self.focused_window).is_some()
-        {
-            return Task::none();
+        match status {
+            event::Status::Ignored => self.handle_escape_shortcut(),
+            event::Status::Captured if self.auxiliary_window(self.focused_window).is_some() => {
+                Task::none()
+            }
+            event::Status::Captured => self
+                .dismiss_search_layers()
+                .or_else(|| {
+                    self.address_editing
+                        .is_some()
+                        .then(|| self.cancel_address_editing())
+                })
+                .or_else(|| self.dismiss_overlay_layer())
+                .unwrap_or_else(Task::none),
         }
-        self.handle_escape_shortcut()
     }
 
     fn route_file_content_key(
@@ -400,20 +411,25 @@ impl FileBrowser {
 
     /// 先收搜索历史浮层、筛选下拉；在搜索结果里且没有别的浮层占着键盘时退出搜索。
     pub(super) fn handle_escape_shortcut(&mut self) -> Task<Message> {
+        self.dismiss_search_layers()
+            .unwrap_or_else(|| self.handle_focused_window_escape_pressed())
+    }
+
+    fn dismiss_search_layers(&mut self) -> Option<Task<Message>> {
         if self
             .search_history_interaction
             .popup_is_visible(&self.user_config.search_history)
         {
             self.search_history_interaction.dismiss_popup();
-            return Task::none();
+            return Some(Task::none());
         }
         if self.search_filter_menu.is_some() {
-            return self.close_search_filter_menu();
+            return Some(self.close_search_filter_menu());
         }
         if self.active_search().is_some() && self.file_browser_content_shortcuts_enabled() {
-            return self.close_search_workspace();
+            return Some(self.close_search_workspace());
         }
-        self.handle_focused_window_escape_pressed()
+        None
     }
 
     pub(super) fn start_shortcut_capture(
@@ -632,6 +648,86 @@ mod tests {
 
         escape(&mut browser, event::Status::Ignored);
         assert_eq!(browser.settings_window, None);
+    }
+
+    /// 文字控件吃掉的 Esc 只是离开控件，不能顺带动文件区；没人吃的 Esc 才清选择。
+    #[test]
+    fn captured_escape_in_the_main_window_leaves_the_file_selection() {
+        let selected_path = PathBuf::from("/workspace/report.txt");
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        browser.tab_mut().location = BrowserLocation::Directory(PathBuf::from("/workspace"));
+        browser.tab_mut().entries = vec![test_entry(&selected_path)].into();
+        browser.tab_mut().selected = Some(selected_path.clone());
+        *browser.tab_mut().selected_paths = HashSet::from([selected_path.clone()]);
+
+        escape(&mut browser, event::Status::Captured);
+        assert_eq!(browser.tab().selected, Some(selected_path));
+
+        escape(&mut browser, event::Status::Ignored);
+        assert_eq!(browser.tab().selected, None);
+    }
+
+    /// 真实的多行文字控件（本地发送窗口里的 `text_area`）聚焦时按 Esc：第一下只离开控件、
+    /// 窗口不关，第二下才关。多行控件原先不捕获 Esc，第一下就把窗口关了。
+    #[test]
+    fn escape_in_a_focused_text_area_leaves_the_auxiliary_window_open_once() {
+        use super::super::focused_control_keys_tests::press_key_in_focused_control;
+        use bennu_theme::controls::text_area;
+
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        let local_send_window = iced::window::Id::unique();
+        browser.local_send_window = Some(local_send_window);
+        browser.focused_window = local_send_window;
+        let escape_key = keyboard::Key::Named(key::Named::Escape);
+
+        let content = iced::widget::text_editor::Content::<()>::new();
+        let area = text_area(&content).on_action(|_| Message::LetterInputDeadlinePassed);
+        let (status, _) = press_key_in_focused_control(
+            area.into(),
+            escape_key.clone(),
+            keyboard::Modifiers::default(),
+            None,
+        );
+        assert_eq!(status, event::Status::Captured);
+        drop(browser.handle_keyboard_key_pressed(
+            escape_key.clone(),
+            escape_key.clone(),
+            keyboard::Modifiers::default(),
+            status,
+        ));
+        assert_eq!(browser.local_send_window, Some(local_send_window));
+
+        // 控件已经失焦，第二下没人捕获，窗口关闭。
+        escape(&mut browser, event::Status::Ignored);
+        assert_eq!(browser.local_send_window, None);
+    }
+
+    /// 主窗口里的对话框（高级新建文件夹）：聚焦的多行输入区吃掉 Esc，对话框照旧一下就关。
+    #[test]
+    fn escape_in_a_focused_text_area_still_closes_a_main_window_dialog() {
+        use super::super::focused_control_keys_tests::press_key_in_focused_control;
+        use bennu_theme::controls::text_area;
+
+        let mut browser = FileBrowser::new(config::default_user_config()).0;
+        drop(browser.open_advanced_new_folder(PathBuf::from("/workspace")));
+        let escape_key = keyboard::Key::Named(key::Named::Escape);
+
+        let content = iced::widget::text_editor::Content::<()>::new();
+        let area = text_area(&content).on_action(|_| Message::LetterInputDeadlinePassed);
+        let (status, _) = press_key_in_focused_control(
+            area.into(),
+            escape_key.clone(),
+            keyboard::Modifiers::default(),
+            None,
+        );
+        assert_eq!(status, event::Status::Captured);
+        drop(browser.handle_keyboard_key_pressed(
+            escape_key.clone(),
+            escape_key,
+            keyboard::Modifiers::default(),
+            status,
+        ));
+        assert!(browser.advanced_new_folder.is_none());
     }
 
     #[test]

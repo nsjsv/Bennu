@@ -6,6 +6,8 @@
 //! - 中键点在输入框上时，把 PRIMARY 当作 Ctrl+V 的内容交给输入框自己粘贴。点击位置的命中、
 //!   聚焦、光标移动都由输入框自己做；粘贴走它原本的 `on_input` / `on_paste` / `on_action`，
 //!   应用看到的是一次普通编辑。
+//! - 聚焦时向 widget operation 补报 [`FocusedTextControl`]，让按键路由认得出多行文字控件。
+//! - 聚焦的文字控件因 Esc 失焦时捕获这次事件，单行、多行一个样。
 
 use std::marker::PhantomData;
 
@@ -75,6 +77,12 @@ impl<Renderer: text::Renderer> SelectionSource for TextEditorSelection<'_, Rende
         self.content.selection()
     }
 }
+
+/// 键盘焦点在文字控件上时，向 widget operation 报告的标记。
+///
+/// iced 的 `TextEditor` 只报告“可聚焦”，不像 `TextInput` 那样再报告“是文字输入”，按键路由
+/// 单凭这个认不出多行文字控件在用键盘。所有文字控件都包着本部件，由它统一补报。
+pub struct FocusedTextControl;
 
 pub(super) struct PrimarySelection<'a, Message, Theme, Renderer> {
     pub(super) inner: Element<'a, Message, Theme, Renderer>,
@@ -168,10 +176,26 @@ fn may_settle_selection(event: &Event) -> bool {
     )
 }
 
+fn is_escape_press(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(key::Named::Escape),
+            ..
+        })
+    )
+}
+
 impl<Message, Theme, Renderer> PrimarySelection<'_, Message, Theme, Renderer>
 where
     Renderer: iced::advanced::Renderer,
 {
+    fn is_focused(&self, tree: &Tree) -> bool {
+        self.selection
+            .as_ref()
+            .is_some_and(|source| source.is_focused(&tree.children[0]))
+    }
+
     fn write_settled_selection(
         &self,
         tree: &mut Tree,
@@ -253,6 +277,9 @@ where
         self.inner
             .as_widget_mut()
             .operate(&mut tree.children[0], layout, renderer, operation);
+        if self.is_focused(tree) {
+            operation.custom(None, layout.bounds(), &mut FocusedTextControl);
+        }
     }
 
     fn update(
@@ -316,6 +343,7 @@ where
             }
             _ => {}
         }
+        let focused_before = self.is_focused(tree);
         self.inner.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -326,6 +354,12 @@ where
             shell,
             viewport,
         );
+        // 聚焦的单行输入框按 Esc 失焦并捕获事件，多行的 `TextEditor` 失焦却不捕获。应用靠“被
+        // 捕获”认出这一下 Esc 是文字控件吃掉的（只是离开控件，不再往下清选择、关窗口），
+        // 所以所有文字控件在这里统一成捕获。
+        if is_escape_press(event) && focused_before && !self.is_focused(tree) {
+            shell.capture_event();
+        }
         self.write_settled_selection(tree, event, clipboard, shell);
     }
 

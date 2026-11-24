@@ -35,3 +35,6 @@ tempfile.workspace = true
 # 只给测试用：编译期查出 vendor 的 cryoglyph 着色器写错（WGSL 平时到运行时才由显卡驱动层编译）。
 # 版本与 wgpu 用的那份相同，不多下载、不进程序。
 naga = { version = "27", features = ["wgsl-in"] }
+# 只给测试用：真实的文字编辑器（空渲染器的编辑器读不出选区），验证只读文字的内容不变量。
+# 软件渲染器的并集本来就在 app-ui、portal-backend 里，不进程序、不多下载。
+iced = { version = "0.14", default-features = false, features = ["tiny-skia"] }

@@ -37,6 +37,7 @@ mod preview_settings;
 mod properties_window;
 mod rendering_settings;
 mod info_panel;
+mod info_panel_text;
 mod folder_tree_panel;
 mod quick_actions_panel;
 mod task_log_panel;
@@ -68,6 +69,7 @@ pub(crate) use sidebar_panel::{SIDEBAR_ROW_HEIGHT, SIDEBAR_ROW_SPACING};
 pub(crate) use window_chrome::{main_toolbar_height, window_shell};
 
 pub(crate) use address_bar::address_input_id;
+pub(crate) use info_panel_text::{info_panel_text, InfoPanelText};
 pub(crate) use local_send_window::{local_send_header, view_local_send_window};
 pub(crate) use pane_blank_area::pane_blank_area;
 pub(crate) use preview_panel::view_preview_window;

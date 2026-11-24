@@ -5,9 +5,11 @@
 use std::path::PathBuf;
 
 use bennu_preview::info_overlay::InfoRow;
+use iced::widget::text_editor;
 use iced::Task;
 use tokio_util::sync::CancellationToken;
 
+use super::info_panel_rows::InfoPanelRows;
 use super::FileBrowser;
 use crate::info_panel::InfoField;
 use crate::model::{DockMenuPanelSection, FilePropertiesSnapshot, Message};
@@ -30,6 +32,11 @@ pub(crate) enum InfoPanelMessage {
         pages: usize,
     },
     FieldToggled(InfoField),
+    /// 某一行的值被点选、拖选、按键。`row_key` 是 `InfoValueRow::key`，行已经换掉时这条消息被丢弃。
+    ValueAction {
+        row_key: u64,
+        action: text_editor::Action,
+    },
     MenuRequested,
 }
 
@@ -66,11 +73,16 @@ pub(crate) struct InfoPanelState {
     request: u64,
     cancellation: Option<CancellationToken>,
     facts: Option<EntryFacts>,
+    rows: InfoPanelRows,
 }
 
 impl InfoPanelState {
     pub(crate) fn target(&self) -> Option<&InfoTarget> {
         self.target.as_ref()
+    }
+
+    pub(crate) fn rows(&self) -> &InfoPanelRows {
+        &self.rows
     }
 
     /// 读到的东西，而且就是面板正显示的那个条目的（防陈旧）。
@@ -123,6 +135,9 @@ impl FileBrowser {
                 self.user_config.info_panel.toggle(field);
                 return self.persist_user_preferences_command();
             }
+            InfoPanelMessage::ValueAction { row_key, action } => {
+                self.info_panel.rows.perform(row_key, action);
+            }
             InfoPanelMessage::MenuRequested => {
                 self.context_menu = Some(self.right_dock_context_menu(Some(
                     DockMenuPanelSection::InfoFields(self.user_config.info_panel.clone()),
@@ -132,12 +147,21 @@ impl FileBrowser {
         Task::none()
     }
 
-    /// `update` 出口：信息面板显示着时看目标变没变，变了就取消旧的、读新的。没显示时什么都不做，
-    /// 再显示时目标没变就不重读。
+    /// `update` 出口：信息面板显示着时看目标变没变，变了就取消旧的、读新的，再把面板的文字
+    /// 对到现在的状态上。文字的来源有目标、读到的东西、字段开关、选中数、文件夹数字、界面语言，
+    /// 在出口统一比一次，比各个入口分别记着去重建不会漏。没显示时什么都不做，再显示时目标没变
+    /// 就不重读。
     pub(super) fn sync_info_panel(&mut self) -> Task<Message> {
         if !self.right_dock.layout().shows(DockPanel::Info) {
             return Task::none();
         }
+        let read = self.retarget_info_panel();
+        let text = crate::view::info_panel_text(self);
+        self.info_panel.rows.reconcile(text);
+        read
+    }
+
+    fn retarget_info_panel(&mut self) -> Task<Message> {
         let target = self.info_panel_target();
         if target == self.info_panel.target {
             return Task::none();

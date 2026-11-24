@@ -7,6 +7,7 @@
 //! 读不出选区，多行输入区只验证粘贴消息和事件通路。
 
 use iced::advanced::clipboard::{self, Clipboard};
+use iced::advanced::text::highlighter::PlainText;
 use iced::advanced::widget::Tree;
 use iced::advanced::{layout, mouse, Layout, Shell};
 use iced::keyboard::{self, key};
@@ -144,6 +145,30 @@ impl<'a> Harness<'a> {
             )),
             cursor,
         );
+    }
+
+    /// 按一下 Esc，返回这次事件是否被捕获。
+    fn press_escape(&mut self) -> bool {
+        let cursor = self.inside();
+        let escape = keyboard::Key::Named(key::Named::Escape);
+        self.send(
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                modified_key: escape.clone(),
+                key: escape,
+                physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::default(),
+                text: None,
+                repeat: false,
+            }),
+            cursor,
+        )
+    }
+
+    fn text_editor_state(&mut self) -> &mut text_editor::State<PlainText> {
+        self.tree.children[0]
+            .state
+            .downcast_mut::<text_editor::State<PlainText>>()
     }
 
     fn press_arrow_right(&mut self) {
@@ -460,4 +485,39 @@ fn text_area_without_on_action_ignores_the_middle_click() {
     let captured = harness.send(press(mouse::Button::Middle), cursor);
     assert!(harness.messages.is_empty());
     assert!(!captured);
+}
+
+/// 聚焦的文字控件因 Esc 失焦时，单行、多行都捕获这次事件；没聚焦的不碰。
+#[test]
+fn escape_leaving_a_focused_text_control_is_captured() {
+    let mut field = field("abc");
+    field.click();
+    assert!(field.text_input_state().is_focused());
+    assert!(field.press_escape());
+    assert!(!field.text_input_state().is_focused());
+
+    let content = Content::<()>::with_text("abc");
+    let mut area = Harness::new(
+        TextArea::<Message, ()>::new(&content)
+            .on_action(Message::Edit)
+            .height(Length::Fixed(80.0)),
+    );
+    area.click();
+    assert!(area.text_editor_state().is_focused());
+    assert!(area.press_escape());
+    assert!(!area.text_editor_state().is_focused());
+}
+
+#[test]
+fn escape_in_an_unfocused_text_control_is_left_to_others() {
+    let mut field = field("abc");
+    assert!(!field.press_escape());
+
+    let content = Content::<()>::with_text("abc");
+    let mut area = Harness::new(
+        TextArea::<Message, ()>::new(&content)
+            .on_action(Message::Edit)
+            .height(Length::Fixed(80.0)),
+    );
+    assert!(!area.press_escape());
 }

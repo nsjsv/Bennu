@@ -1,61 +1,21 @@
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+//! 终端屏幕：alacritty 的 [`Term`]。读线程解析输出时写它，画面画的时候读它，中间隔一把公平锁
+//! （读线程不会把画面饿着）。
 
-use alacritty_terminal::event::{Event, EventListener};
-use alacritty_terminal::grid::{Dimensions, GridIterator, Scroll};
-use alacritty_terminal::index::{Column, Line, Point, Side};
-use alacritty_terminal::selection::{Selection, SelectionType};
-use alacritty_terminal::term::cell::Flags;
-use alacritty_terminal::term::{Config as TermConfig, RenderableContent, Term, TermMode};
-use alacritty_terminal::vte::ansi::Processor;
-use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
+use std::ops::DerefMut;
+use std::sync::Arc;
+
+use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line, Point};
+use alacritty_terminal::sync::FairMutex;
+use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
+
+use super::session::EventProxy;
 
 /// 终端回看缓冲行数。
 pub(crate) const SCROLLBACK_LINES: usize = 10_000;
 
-/// PTY 写端的唯一持有者;终端应答(DA/光标查询等)与用户输入都经它写。
-/// 第一次写不进去就记下原因、记一条日志,此后的写入直接丢弃:会话已经断了,
-/// 界面据此显示"已断开"(同 GNOME Terminal 子进程结束后的提示条)。
-pub(crate) struct PtyInput {
-    writer: Mutex<Box<dyn Write + Send>>,
-    failure: std::sync::OnceLock<String>,
-}
-
-impl PtyInput {
-    pub(crate) fn new(writer: Box<dyn Write + Send>) -> Arc<Self> {
-        Arc::new(Self {
-            writer: Mutex::new(writer),
-            failure: std::sync::OnceLock::new(),
-        })
-    }
-
-    pub(crate) fn write(&self, bytes: &[u8]) {
-        if self.failure.get().is_some() {
-            return;
-        }
-        let outcome = match self.writer.lock() {
-            Ok(mut writer) => writer
-                .write_all(bytes)
-                .and_then(|()| writer.flush())
-                .map_err(|error| error.to_string()),
-            Err(_) => Err("terminal input writer is unusable".to_owned()),
-        };
-        if let Err(reason) = outcome {
-            tracing::error!(
-                target: "app_ui::terminal",
-                event = "terminal_write_failed",
-                error = %reason,
-                "terminal input could not be written; the session is disconnected"
-            );
-            let _ = self.failure.set(reason);
-        }
-    }
-
-    /// 写不进去的原因;`None` 表示会话还能接受输入。
-    pub(crate) fn failure(&self) -> Option<&str> {
-        self.failure.get().map(String::as_str)
-    }
-}
+/// 读线程和画面共用的屏幕。
+pub(crate) type SharedTerm = Arc<FairMutex<Term<EventProxy>>>;
 
 /// alacritty [`Term`] 只认 `Dimensions` 实现;`total_lines` 由 scrollback 常量决定。
 #[derive(Debug, Clone, Copy)]
@@ -78,314 +38,147 @@ impl Dimensions for TerminalDimensions {
     }
 }
 
-/// Term 事件沉淀点:PTY 回写经同一个 `PtyInput`;其余事件(标题/铃响)第一版忽略。
-struct EventProxy {
-    input: Arc<PtyInput>,
-}
-
-impl EventListener for EventProxy {
-    fn send_event(&self, event: Event) {
-        if let Event::PtyWrite(text) = event {
-            self.input.write(text.as_bytes());
-        }
-    }
-}
-
-/// 单个终端字符格的渲染快照。
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TerminalCell {
-    pub(crate) character: char,
-    pub(crate) fg: TermColor,
-    pub(crate) bg: TermColor,
-    pub(crate) flags: Flags,
-    pub(crate) selected: bool,
-}
-
-/// 一帧可渲染的终端内容:可视区按行存放。
-pub(crate) struct TerminalFrame {
-    pub(crate) lines: Vec<Vec<TerminalCell>>,
-    pub(crate) cursor: Option<(usize, usize)>,
-    pub(crate) cursor_shape: CursorShape,
-}
-
 pub(crate) struct TerminalEmulator {
-    term: Term<EventProxy>,
-    processor: Processor,
+    term: SharedTerm,
 }
 
 impl TerminalEmulator {
-    pub(crate) fn new(columns: usize, rows: usize, input: Arc<PtyInput>) -> Self {
-        let dimensions = TerminalDimensions {
-            columns,
-            screen_lines: rows,
+    pub(crate) fn new(dimensions: TerminalDimensions, events: EventProxy) -> Self {
+        let config = TermConfig {
+            scrolling_history: SCROLLBACK_LINES,
+            ..TermConfig::default()
         };
-        let mut config = TermConfig::default();
-        config.scrolling_history = SCROLLBACK_LINES;
-        let term = Term::new(config, &dimensions, EventProxy { input });
         Self {
-            term,
-            processor: Processor::new(),
+            term: Arc::new(FairMutex::new(Term::new(config, &dimensions, events))),
         }
+    }
+
+    pub(crate) fn shared(&self) -> SharedTerm {
+        Arc::clone(&self.term)
+    }
+
+    pub(crate) fn lock(&self) -> impl DerefMut<Target = Term<EventProxy>> + '_ {
+        self.term.lock()
+    }
+
+    pub(crate) fn mode(&self) -> TermMode {
+        *self.lock().mode()
     }
 
     pub(crate) fn dimensions(&self) -> TerminalDimensions {
+        let term = self.lock();
         TerminalDimensions {
-            columns: self.term.columns(),
-            screen_lines: self.term.screen_lines(),
+            columns: term.columns(),
+            screen_lines: term.screen_lines(),
         }
     }
 
-    pub(crate) fn feed(&mut self, bytes: &[u8]) {
-        self.processor.advance(&mut self.term, bytes);
+    pub(crate) fn resize(&self, dimensions: TerminalDimensions) {
+        self.lock().resize(dimensions);
     }
 
-    pub(crate) fn resize(&mut self, columns: usize, rows: usize) {
-        if columns == 0 || rows == 0 {
-            return;
-        }
-        let dimensions = TerminalDimensions {
-            columns,
-            screen_lines: rows,
-        };
-        self.term.resize(dimensions);
+    pub(crate) fn scroll(&self, scroll: Scroll) {
+        self.lock().scroll_display(scroll);
     }
 
-    pub(crate) fn scroll_display(&mut self, lines: i32) {
-        self.term.scroll_display(Scroll::Delta(lines));
+    pub(crate) fn scroll_to_bottom(&self) {
+        self.scroll(Scroll::Bottom);
     }
 
-    pub(crate) fn display_offset(&self) -> usize {
-        self.term.grid().display_offset()
-    }
-
-    pub(crate) fn begin_selection(&mut self, screen_row: usize, column: usize) {
-        self.term.selection = Some(Selection::new(
-            SelectionType::Simple,
-            self.absolute_point(screen_row, column),
-            Side::Left,
-        ));
-    }
-
-    pub(crate) fn extend_selection(&mut self, screen_row: usize, column: usize) {
-        // Side::Right 让 end 单元格包含在选择内(拖到第 4 列 = 选到第 4 列的字符)。
-        let point = self.absolute_point(screen_row, column);
-        if let Some(selection) = self.term.selection.as_mut() {
-            selection.update(point, Side::Right);
-        }
-    }
-
-    pub(crate) fn clear_selection(&mut self) {
-        self.term.selection = None;
+    pub(crate) fn clear_selection(&self) {
+        self.lock().selection = None;
     }
 
     pub(crate) fn selection_string(&self) -> Option<String> {
-        self.term.selection_to_string()
+        self.lock().selection_to_string()
     }
 
     /// 程序打开了全屏界面，要用户来操作：切到了备用屏幕，或者打开了方向键的程序模式（DECCKM）。
     /// top 不切备用屏幕，只开方向键模式；普通命令两样都不碰。
     pub(crate) fn is_full_screen(&self) -> bool {
-        self.term
-            .mode()
+        self.mode()
             .intersects(TermMode::ALT_SCREEN | TermMode::APP_CURSOR)
     }
 
     /// 最后 `count` 行字（连同回看），行尾空白去掉，后面空着的行不算。
     pub(crate) fn last_lines(&self, count: usize) -> String {
-        let bottom = self.term.bottommost_line();
+        let term = self.lock();
+        let bottom = term.bottommost_line();
         // 屏幕下半截可能还空着：多取一屏，去掉空行后再数。
-        let reach = (count + self.term.screen_lines()) as i32;
-        let top = Line((bottom.0 - reach + 1).max(self.term.topmost_line().0));
-        let text = self.term.bounds_to_string(
+        let reach = (count + term.screen_lines()) as i32;
+        let top = Line((bottom.0 - reach + 1).max(term.topmost_line().0));
+        let text = term.bounds_to_string(
             Point::new(top, Column(0)),
-            Point::new(bottom, self.term.last_column()),
+            Point::new(bottom, term.last_column()),
         );
         let lines: Vec<&str> = text.trim_end().lines().map(str::trim_end).collect();
         lines[lines.len().saturating_sub(count)..].join("\n")
     }
-
-    fn absolute_point(&self, screen_row: usize, column: usize) -> Point<Line, Column> {
-        Point::new(
-            Line(screen_row as i32 - self.display_offset() as i32),
-            Column(column.min(self.term.columns().saturating_sub(1))),
-        )
-    }
-
-    /// 截取当前可视帧。调用方在绘制路径上频繁使用,不做写操作。
-    pub(crate) fn renderable_frame(&self) -> TerminalFrame {
-        let columns = self.term.columns();
-        let rows = self.term.screen_lines();
-        let offset = self.display_offset();
-        let content: RenderableContent<'_> = self.term.renderable_content();
-        let cursor = content.cursor.point;
-        let selection_range = content.selection;
-        let mut lines: Vec<Vec<TerminalCell>> = vec![Vec::with_capacity(columns); rows];
-
-        // renderable_content 的迭代器从可见区顶部开始;abs_line = point.line + offset
-        // 映射回屏幕行,历史行(负)在 offset>0 时同样落在可视范围内。
-        let mut iterator: GridIterator<'_, alacritty_terminal::term::cell::Cell> =
-            content.display_iter;
-        while let Some(indexed) = iterator.next() {
-            let screen_row = (indexed.point.line.0 + offset as i32) as usize;
-            if screen_row >= rows {
-                continue;
-            }
-            let column = indexed.point.column.0;
-            if column >= columns {
-                continue;
-            }
-            let cell = indexed.cell;
-            if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                continue;
-            }
-            lines[screen_row].push(TerminalCell {
-                character: cell.c,
-                fg: cell.fg,
-                bg: cell.bg,
-                flags: cell.flags,
-                selected: selection_range.is_some_and(|range| range.contains(indexed.point)),
-            });
-        }
-
-        // 迭代器跳过空 cell;补齐每行,保证列号与屏幕坐标一一对应。
-        for line in &mut lines {
-            line.resize(columns, TerminalCell::empty());
-        }
-
-        let cursor_screen_row = (cursor.line.0 + offset as i32) as usize;
-        let cursor = if cursor_screen_row < rows {
-            Some((cursor_screen_row, cursor.column.0))
-        } else {
-            None
-        };
-
-        TerminalFrame {
-            lines,
-            cursor,
-            cursor_shape: content.cursor.shape,
-        }
-    }
 }
 
-impl TerminalCell {
-    fn empty() -> Self {
-        Self {
-            character: ' ',
-            fg: TermColor::Named(NamedColor::Foreground),
-            bg: TermColor::Named(NamedColor::Background),
-            flags: Flags::empty(),
-            selected: false,
-        }
-    }
+/// 屏幕上第 `row` 行第 `column` 列在整个网格（连同回看）里的位置；回看滚上去时也对。
+pub(crate) fn grid_point(term: &Term<EventProxy>, row: usize, column: usize) -> Point {
+    Point::new(
+        Line(row as i32 - term.grid().display_offset() as i32),
+        Column(column.min(term.columns().saturating_sub(1))),
+    )
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use alacritty_terminal::index::Side;
+    use alacritty_terminal::selection::{Selection, SelectionType};
+    use alacritty_terminal::vte::ansi::Processor;
+
     use super::*;
 
-    fn emulator(columns: usize, rows: usize) -> TerminalEmulator {
-        TerminalEmulator::new(columns, rows, PtyInput::new(Box::new(std::io::sink())))
+    /// 不接伪终端的屏幕：测试直接喂字节。
+    pub(crate) fn emulator(columns: usize, rows: usize) -> TerminalEmulator {
+        TerminalEmulator::new(
+            TerminalDimensions {
+                columns,
+                screen_lines: rows,
+            },
+            EventProxy::detached(),
+        )
     }
 
-    /// 写端已断（如 shell 那头关了 PTY）：每次写都失败，并记下被调用了几次。
-    struct BrokenPty(Arc<std::sync::atomic::AtomicUsize>);
-
-    impl Write for BrokenPty {
-        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Err(std::io::Error::from_raw_os_error(libc::EIO))
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn a_failed_write_disconnects_the_session_and_is_logged_once() {
-        use tracing_subscriber::layer::SubscriberExt;
-
-        struct ErrorCounter(Arc<std::sync::atomic::AtomicUsize>);
-        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ErrorCounter {
-            fn on_event(
-                &self,
-                event: &tracing::Event<'_>,
-                _: tracing_subscriber::layer::Context<'_, S>,
-            ) {
-                if *event.metadata().level() == tracing::Level::ERROR {
-                    self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                }
-            }
-        }
-
-        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let errors = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let input = PtyInput::new(Box::new(BrokenPty(Arc::clone(&attempts))));
-        let subscriber = tracing_subscriber::registry().with(ErrorCounter(Arc::clone(&errors)));
-
-        tracing::subscriber::with_default(subscriber, || {
-            input.write(b"ls\r");
-            input.write(b"pwd\r");
-        });
-
-        assert!(input.failure().is_some());
-        // 断开以后不再去写、也不再重复报。
-        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
-        assert_eq!(errors.load(std::sync::atomic::Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn a_working_pty_stays_connected() {
-        let input = PtyInput::new(Box::new(std::io::sink()));
-
-        input.write(b"ls\r");
-
-        assert!(input.failure().is_none());
-    }
-
-    #[test]
-    fn printable_input_renders_in_grid() {
-        let mut emulator = emulator(10, 3);
-        emulator.feed(b"hello");
-        let frame = emulator.renderable_frame();
-        let rendered: String = frame.lines[0].iter().map(|cell| cell.character).collect();
-        assert!(rendered.starts_with("hello"));
-        assert_eq!(frame.cursor, Some((0, 5)));
+    pub(crate) fn feed(emulator: &TerminalEmulator, bytes: &[u8]) {
+        let mut processor: Processor = Processor::new();
+        processor.advance(&mut *emulator.lock(), bytes);
     }
 
     #[test]
     fn resize_keeps_visible_content() {
-        let mut emulator = emulator(10, 3);
-        emulator.feed(b"abc");
-        emulator.resize(20, 6);
-        let frame = emulator.renderable_frame();
-        let rendered: String = frame.lines[0].iter().map(|cell| cell.character).collect();
-        assert!(rendered.starts_with("abc"));
+        let emulator = emulator(10, 3);
+        feed(&emulator, b"abc");
+        emulator.resize(TerminalDimensions {
+            columns: 20,
+            screen_lines: 6,
+        });
+        assert_eq!(emulator.last_lines(1), "abc");
     }
 
     #[test]
     fn selection_over_rendered_text_extracts_it() {
-        let mut emulator = emulator(20, 3);
-        emulator.feed(b"hello world");
-        emulator.begin_selection(0, 0);
-        emulator.extend_selection(0, 4);
+        let emulator = emulator(20, 3);
+        feed(&emulator, b"hello world");
+        {
+            let mut term = emulator.lock();
+            let start = grid_point(&term, 0, 0);
+            let end = grid_point(&term, 0, 4);
+            let mut selection = Selection::new(SelectionType::Simple, start, Side::Left);
+            selection.update(end, Side::Right);
+            term.selection = Some(selection);
+        }
         assert_eq!(emulator.selection_string().as_deref(), Some("hello"));
     }
 
     #[test]
-    fn newline_moves_cursor_to_next_line() {
-        let mut emulator = emulator(10, 4);
-        emulator.feed(b"one\r\ntwo");
-        let frame = emulator.renderable_frame();
-        let second: String = frame.lines[1].iter().map(|cell| cell.character).collect();
-        assert!(second.starts_with("two"));
-    }
-
-    #[test]
     fn the_last_lines_come_from_the_history_too_and_skip_the_empty_screen_below() {
-        let mut emulator = emulator(6, 3);
+        let emulator = emulator(6, 3);
         // 换行时折到下一行的不算两行；进度条用回车改写的只留最后的样子。
-        emulator.feed(b"one\r\ntwo\r\n10%\r100%  \r\nlong line\r\n");
+        feed(&emulator, b"one\r\ntwo\r\n10%\r100%  \r\nlong line\r\n");
         assert_eq!(emulator.last_lines(3), "two\n100%\nlong line");
         assert_eq!(emulator.last_lines(10), "one\ntwo\n100%\nlong line");
         assert_eq!(emulator.last_lines(1), "long line");
@@ -393,15 +186,15 @@ mod tests {
 
     #[test]
     fn a_program_that_takes_over_the_screen_or_the_arrow_keys_is_full_screen() {
-        let mut emulator = emulator(10, 4);
-        emulator.feed(b"plain output\r\n");
+        let emulator = emulator(10, 4);
+        feed(&emulator, b"plain output\r\n");
         assert!(!emulator.is_full_screen());
-        emulator.feed(b"\x1b[?1049h");
+        feed(&emulator, b"\x1b[?1049h");
         assert!(emulator.is_full_screen());
-        emulator.feed(b"\x1b[?1049l");
+        feed(&emulator, b"\x1b[?1049l");
         assert!(!emulator.is_full_screen());
         // top 只发这个。
-        emulator.feed(b"\x1b[?1h");
+        feed(&emulator, b"\x1b[?1h");
         assert!(emulator.is_full_screen());
     }
 }

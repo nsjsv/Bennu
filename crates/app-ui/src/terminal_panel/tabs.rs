@@ -18,7 +18,7 @@ use file_operations::CommandInvocation;
 /// 单个终端标签:一个 PTY 会话 + 标签条展示所需的元数据。
 pub(crate) struct TerminalTab {
     pub(crate) session: TerminalSession,
-    /// 标签当前目录:启动目录,或最近一次跟随注入的目标;驱动标签标题。
+    /// shell 所在的目录：读线程从 /proc 报上来的，或者刚叫它 cd 去的;驱动标签标题。
     pub(crate) directory: PathBuf,
     /// 非激活期间收到过输出,标签标题旁显示小圆点。
     pub(crate) has_unread_output: bool,
@@ -28,8 +28,8 @@ pub(crate) struct TerminalTab {
 /// 标签里跑的是什么。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TabProgram {
-    /// 交互 shell：跟着文件区换目录。
-    Shell,
+    /// 交互 shell：跟文件区互相跟着换目录；cd 那一行按它认的引号写。
+    Shell(super::follow::ShellQuoting),
     /// 超级输入框执行的一条命令：不跟着换目录，往它的输入里打 `cd` 会打进程序里。
     Command,
 }
@@ -161,8 +161,10 @@ impl FileBrowser {
         let tab_strip_visible =
             super::view::tab_strip_visible_for_tab_count(self.terminal_panel.tabs.len() + 1);
         let rows = super::terminal_panel_canvas_rows(rows_height, tab_strip_visible);
+        let program = self.terminal_panel_shell();
+        let quoting = super::follow::ShellQuoting::of(Path::new(&program));
         let shell = CommandInvocation {
-            program: self.terminal_panel_shell().into(),
+            program: program.into(),
             arguments: Vec::new(),
             working_directory: directory.clone(),
         };
@@ -172,13 +174,14 @@ impl FileBrowser {
             session_id,
             &shell,
             super::emulator_dimensions(columns, rows),
+            self.terminal_panel.events.sender(),
         ) {
             Ok(spawned) => {
                 self.terminal_panel.tabs.push(TerminalTab {
                     session: spawned,
                     directory: directory.clone(),
                     has_unread_output: false,
-                    program: TabProgram::Shell,
+                    program: TabProgram::Shell(quoting),
                 });
                 self.terminal_panel.active_session_id = Some(session_id);
                 // 新 shell 已在目标目录,快照同步,避免紧接着注入一次 cd。
@@ -192,7 +195,7 @@ impl FileBrowser {
         }
     }
 
-    /// 关闭一个终端标签并终止其 shell;关掉激活标签后激活相邻标签,
+    /// 关闭一个终端标签并挂断其 shell;关掉激活标签后激活相邻标签,
     /// 关掉最后一个标签则收起面板(等同 shell 自己 exit 的语义)。
     pub(crate) fn close_terminal_tab(&mut self, session_id: SessionId) -> Task<Message> {
         let Some(index) = self
@@ -210,8 +213,8 @@ impl FileBrowser {
             .map(|tab| tab.session.id)
             .collect();
 
-        let mut tab = self.terminal_panel.tabs.remove(index);
-        tab.session.terminate();
+        // 丢掉会话就是挂断它（`TerminalSession` 的 Drop）。
+        drop(self.terminal_panel.tabs.remove(index));
         self.terminal_panel.tab_shift_animations.remove(&session_id);
         if self
             .terminal_panel

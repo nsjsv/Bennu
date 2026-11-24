@@ -198,36 +198,25 @@ impl FileBrowser {
         }
     }
 
-    /// 输出读到头了：输出取下来，在后台等它退出（进程关了终端还能接着跑，不卡界面），再交回结果。
-    pub(crate) fn super_box_command_ended(&mut self, ended: TerminalSession) -> Task<Message> {
-        let session = ended.id;
+    /// 进程收了（读线程等到了它的退出）：取下输出的末尾，连同退出情况交回去。
+    pub(crate) fn super_box_command_ended(
+        &mut self,
+        ended: TerminalSession,
+        end: Result<portable_pty::ExitStatus, String>,
+    ) -> Task<Message> {
         let output = ShownOutput::from_text(ended.emulator.last_lines(SHOWN_OUTPUT_LINES));
-        Task::perform(
-            async move {
-                tokio::task::spawn_blocking(move || ended.wait())
-                    .await
-                    .map_err(|error| error.to_string())
-                    .and_then(|waited| waited.map_err(|error| error.to_string()))
+        let end = match end {
+            Ok(status) => RunEnd::Exited {
+                exit: exit_of(&status),
+                output,
             },
-            move |waited| {
-                let end = match waited {
-                    Ok(status) => RunEnd::Exited {
-                        exit: exit_of(&status),
-                        output,
-                    },
-                    Err(reason) => RunEnd::Failed(reason),
-                };
-                Message::SuperBox(SuperBoxMessage::CommandEnded { session, end })
-            },
-        )
+            Err(reason) => RunEnd::Failed(reason),
+        };
+        self.accept_super_box_command_end(ended.id, end)
     }
 
     /// 命令退出了：记下结果（框关了也记），框还开着就交给框。
-    pub(super) fn accept_super_box_command_end(
-        &mut self,
-        session: SessionId,
-        end: RunEnd,
-    ) -> Task<Message> {
+    fn accept_super_box_command_end(&mut self, session: SessionId, end: RunEnd) -> Task<Message> {
         let Some(command) = self.super_box_commands.running.remove(&session) else {
             return Task::none();
         };

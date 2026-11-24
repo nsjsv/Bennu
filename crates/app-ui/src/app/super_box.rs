@@ -11,7 +11,7 @@ use crate::model::{IndexedSearchOutcome, Message, NavigationMode, SettingsCatego
 use crate::shortcuts::{ShortcutAction, ShortcutScope, ShortcutTarget};
 use crate::super_box::{
     BoxContext, BoxEntry, BoxLookup, BoxMode, BoxRow, BoxTarget, EntryKind, Listing, NewEntry,
-    PipeSource, RunEnd, SendTarget, SuperBox,
+    PipeSource, SendTarget, SuperBox,
 };
 use crate::terminal_panel::session::SessionId;
 use file_operations::QueuedFileOperation;
@@ -48,10 +48,6 @@ pub(crate) enum SuperBoxMessage {
     StopGraceEnded(SessionId),
     /// 命令模式的“转到终端”按钮。
     ShowInTerminalPressed,
-    CommandEnded {
-        session: SessionId,
-        end: RunEnd,
-    },
     PastRunsLoaded(Result<Vec<crate::super_box::PastRun>, String>),
     /// 记命令结果没写进状态库时是原因。
     PastRunSaved(Option<String>),
@@ -80,9 +76,6 @@ impl FileBrowser {
             SuperBoxMessage::ShowInTerminalPressed => {
                 self.show_running_super_box_command();
                 Task::none()
-            }
-            SuperBoxMessage::CommandEnded { session, end } => {
-                self.accept_super_box_command_end(session, end)
             }
             SuperBoxMessage::PastRunsLoaded(loaded) => {
                 self.accept_past_super_box_runs(loaded);

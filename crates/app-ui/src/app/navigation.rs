@@ -201,7 +201,7 @@ impl FileBrowser {
         ])
     }
 
-    pub(super) fn navigate_to(&mut self, path: PathBuf, mode: NavigationMode) -> Task<Message> {
+    pub(crate) fn navigate_to(&mut self, path: PathBuf, mode: NavigationMode) -> Task<Message> {
         let came_out_of = self.came_out_of(&path);
         self.cancel_expansion_follow_plans();
         let cancel_address_editing = self.cancel_address_editing();

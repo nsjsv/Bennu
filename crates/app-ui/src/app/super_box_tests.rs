@@ -10,7 +10,6 @@ use crate::config;
 use crate::model::BrowserLocation;
 use crate::super_box::{BoxMode, Exit, RunEnd, RunState};
 use crate::terminal_panel::session::SessionId;
-use crate::terminal_panel::TerminalPanelMessage;
 use iced::futures::{Stream, StreamExt};
 
 /// 窗口在前台：普通操作的完成通知不弹。
@@ -262,20 +261,17 @@ fn exited(browser: &FileBrowser) -> (Exit, String) {
     }
 }
 
-/// 测试里没有订阅：用订阅的那条输出流把命令终端里的输出交给浏览器。转到终端后同一条流接着读。
-struct CommandOutput(std::pin::Pin<Box<dyn Stream<Item = TerminalPanelMessage>>>);
+/// 测试里没有订阅：用订阅的那条事件流把终端会话的事交给浏览器。转到终端后同一条流接着读。
+struct CommandOutput(std::pin::Pin<Box<dyn Stream<Item = Message>>>);
 
 impl CommandOutput {
-    /// 框里最近开始的那条命令。
+    /// 框里最近开始的那条命令，和浏览器的事件流。整个应用只有一条事件流：同一个浏览器上
+    /// 后面的命令用 [`last_command`] 取会话号，流接着用。
     fn of_the_last_command(browser: &FileBrowser) -> (SessionId, Self) {
-        let tab = browser
-            .terminal_panel
-            .hidden_tabs
-            .last()
-            .expect("a command is running");
-        let reader = tab.session.clone_reader().unwrap();
-        let stream = crate::terminal_panel::session::terminal_output_stream(tab.session.id, reader);
-        (tab.session.id, Self(Box::pin(stream)))
+        (
+            last_command(browser),
+            Self(Box::pin(browser.terminal_panel.events.stream())),
+        )
     }
 
     async fn deliver_until(
@@ -288,7 +284,7 @@ impl CommandOutput {
                 .await
                 .expect("the command hung")
                 .expect("output keeps coming until the end");
-            let task = browser.update(Message::TerminalPanel(message));
+            let task = browser.update(message);
             drive(browser, task).await;
         }
     }
@@ -300,6 +296,16 @@ impl CommandOutput {
         })
         .await;
     }
+}
+
+fn last_command(browser: &FileBrowser) -> SessionId {
+    browser
+        .terminal_panel
+        .hidden_tabs
+        .last()
+        .expect("a command is running")
+        .session
+        .id
 }
 
 async fn run_to_the_end(browser: &mut FileBrowser, text: &str) {
@@ -391,7 +397,7 @@ async fn stop_ends_the_command_and_kills_it_when_it_ignores_that() {
 
     // 忽略 SIGTERM 的（子进程也跟着忽略），等够了就强行结束。
     type_and_run(&mut browser, "s:trap '' TERM; echo started; sleep 30").await;
-    let (session, mut output) = CommandOutput::of_the_last_command(&browser);
+    let session = last_command(&browser);
     output
         .deliver_until(&mut browser, |browser| {
             browser

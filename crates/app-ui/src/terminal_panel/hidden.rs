@@ -17,7 +17,12 @@ impl FileBrowser {
         dimensions: TerminalDimensions,
     ) -> Result<SessionId, String> {
         let session_id = self.terminal_panel.take_session_id();
-        let session = spawn_terminal_session(session_id, program, dimensions)?;
+        let session = spawn_terminal_session(
+            session_id,
+            program,
+            dimensions,
+            self.terminal_panel.events.sender(),
+        )?;
         self.terminal_panel.hidden_tabs.push(TerminalTab {
             session,
             directory: program.working_directory.clone(),

@@ -1011,7 +1011,7 @@ impl FileBrowser {
                 .map(foreign_task_wait_subscription),
         );
 
-        subscriptions.push(self.terminal_output_subscription());
+        subscriptions.push(self.terminal_events_subscription());
         subscriptions.push(actions::action_library_subscription(self.active_language()));
         subscriptions.extend(self.rule_watch_subscriptions());
 
@@ -1103,7 +1103,7 @@ impl FileBrowser {
         Subscription::batch(subscriptions)
     }
 
-    fn theme(&self, _window: window::Id) -> Theme {
+    pub(crate) fn theme(&self, _window: window::Id) -> Theme {
         self.application_theme
             .active(self.user_config.theme_mode, self.user_config.color_scheme)
     }

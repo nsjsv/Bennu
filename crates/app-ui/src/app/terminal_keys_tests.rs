@@ -26,6 +26,7 @@ fn a_focused_terminal_gets_what_the_keys_type() {
             columns: 80,
             screen_lines: 24,
         },
+        browser.terminal_panel.events.sender(),
     )
     .expect("spawn shell");
     browser.terminal_panel.tabs.push(TerminalTab {
@@ -76,7 +77,4 @@ fn a_focused_terminal_gets_what_the_keys_type() {
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
     assert_eq!(std::fs::read_to_string(&typed).unwrap(), ":A|");
-    for mut tab in browser.terminal_panel.tabs.drain(..) {
-        tab.session.terminate();
-    }
 }

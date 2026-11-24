@@ -427,7 +427,7 @@ fn zooming_keeps_the_same_row_at_the_top() {
     );
     assert!((state.line_height - zoomed.line_height()).abs() < 0.01);
     // 行号栏随字号变宽。
-    let normal_gutter = render::gutter_width(3, TextViewSettings::default());
+    let normal_gutter = render::gutter_width(2, TextViewSettings::default());
     assert!(state.gutter_width > normal_gutter);
 }
 
@@ -874,3 +874,15 @@ mod touch_tests;
 
 #[path = "horizontal_tests.rs"]
 mod horizontal_tests;
+
+/// 行号栏只留最大行号要的位数：19 行的文件不为第三位空出位置（行号前面那块空白就是它）。
+#[test]
+fn the_line_number_gutter_fits_the_largest_line_number() {
+    let digits = |count| {
+        render::line_number_digit_count(&document_from_bytes(lines(count), TextJump::Start))
+    };
+    assert_eq!(digits(5), 2);
+    assert_eq!(digits(19), 2);
+    assert_eq!(digits(150), 3);
+    assert_eq!(digits(12_000), 5);
+}

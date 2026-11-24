@@ -113,8 +113,8 @@ pub(super) fn text_bounds(bounds: Rectangle, gutter_width: f32) -> Rectangle {
     .shrink(Padding::new(TEXT_PREVIEW_VIEWER_PADDING))
 }
 
-/// 行号栏要容纳的位数（统计完用总行数，统计中用估算值），至少三位，免得行数一过
-/// 99 栏宽就跳。
+/// 行号栏要容纳的位数：最大行号几位就几位（统计完用总行数，统计中用估算值），不预留用不上
+/// 的位，否则短文件的行号前面空出一大块。至少两位，一位数的栏太窄。
 pub(super) fn line_number_digit_count(document: &TextPreviewDocument) -> usize {
     let digits = document.largest_line_number().max(1).ilog10() as usize + 1;
     digits.max(TEXT_PREVIEW_GUTTER_MIN_DIGITS)

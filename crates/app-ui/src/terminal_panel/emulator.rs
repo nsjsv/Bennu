@@ -5,7 +5,8 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 
 use alacritty_terminal::grid::{Dimensions, Scroll};
-use alacritty_terminal::index::{Column, Line, Point};
+use alacritty_terminal::index::{Column, Line, Point, Side};
+use alacritty_terminal::selection::{Selection, SelectionType};
 use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::{Config as TermConfig, Term, TermMode};
 
@@ -83,6 +84,23 @@ impl TerminalEmulator {
 
     pub(crate) fn scroll_to_bottom(&self) {
         self.scroll(Scroll::Bottom);
+    }
+
+    /// 全选：从回看最上一行到最下一行按行选，返回选中的字（进 PRIMARY）。
+    pub(crate) fn select_all(&self) -> Option<String> {
+        let mut term = self.lock();
+        let first = Point::new(term.topmost_line(), Column(0));
+        let last = Point::new(term.bottommost_line(), term.last_column());
+        let mut selection = Selection::new(SelectionType::Lines, first, Side::Left);
+        selection.update(last, Side::Right);
+        term.selection = Some(selection);
+        term.selection_to_string()
+    }
+
+    pub(crate) fn clear_history(&self) {
+        let mut term = self.lock();
+        term.grid_mut().clear_history();
+        term.selection = None;
     }
 
     pub(crate) fn clear_selection(&self) {

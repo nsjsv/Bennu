@@ -275,6 +275,10 @@ pub(super) fn context_menu_panel<'a>(
             root: network_connection_context_menu_panel(menu, context_menus),
             submenu: None,
         },
+        ContextMenuState::Terminal(menu) => ContextMenuPanels {
+            root: terminal_menu_panel(menu),
+            submenu: None,
+        },
         ContextMenuState::RightDock(menu) => ContextMenuPanels {
             root: right_dock_menu_panel(menu),
             submenu: None,
@@ -292,6 +296,47 @@ pub(super) fn context_menu_panel<'a>(
             submenu: None,
         },
     }
+}
+
+/// 终端网格的右键菜单：复制（有选区才能点）、粘贴、全选、清屏、新标签。
+fn terminal_menu_panel(menu: &crate::model::TerminalMenuState) -> Element<'static, Message> {
+    use crate::terminal_panel::TerminalPanelMessage as T;
+    let copy = button(menu_label(IconSymbol::Copy, tr!("Copy")))
+        .width(Length::Fill)
+        .height(Length::Fixed(CONTEXT_MENU_ITEM_HEIGHT))
+        .style(context_menu_item_button_style())
+        .on_press_maybe(
+            menu.has_selection
+                .then_some(Message::TerminalPanel(T::CopySelectionRequested)),
+        );
+    let content = Column::new()
+        .spacing(CONTEXT_MENU_ITEM_SPACING)
+        .padding(CONTEXT_MENU_PADDING)
+        .push(copy)
+        .push(menu_button(
+            IconSymbol::Copy,
+            tr!("Paste"),
+            Message::TerminalPanel(T::PasteRequested),
+        ))
+        .push(menu_button(
+            IconSymbol::List,
+            tr!("Select All"),
+            Message::TerminalPanel(T::SelectAllRequested),
+        ))
+        .push(menu_button(
+            IconSymbol::Trash,
+            tr!("Clear"),
+            Message::TerminalPanel(T::ClearRequested),
+        ))
+        .push(menu_button(
+            IconSymbol::Plus,
+            tr!("New Terminal Tab"),
+            Message::TerminalPanel(T::TabAddRequested),
+        ));
+    container(content)
+        .width(Length::Fixed(RIGHT_DOCK_MENU_WIDTH))
+        .style(context_menu_style)
+        .into()
 }
 
 /// 停靠区菜单：每个面板一行（勾 = 在栏里，点了开关），再一行锁定。

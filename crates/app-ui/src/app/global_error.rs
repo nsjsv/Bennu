@@ -119,7 +119,7 @@ impl FileBrowser {
     }
 
     /// 不归任何来源的错误：只会到期、被用户关闭或被新错误替换。
-    pub(super) fn show_global_error(&mut self, error: impl Into<String>) {
+    pub(crate) fn show_global_error(&mut self, error: impl Into<String>) {
         self.show_global_error_notification(error.into(), None);
     }
 

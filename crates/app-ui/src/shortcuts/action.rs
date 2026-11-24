@@ -73,6 +73,7 @@ pub(crate) enum ShortcutAction {
     OpenSuperBox,
     TerminalNewTab,
     TerminalCloseTab,
+    TerminalFind,
 }
 
 /// 设置页和快捷键一览里的分组，按这个顺序排。

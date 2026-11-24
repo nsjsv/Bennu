@@ -90,12 +90,18 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
         if browser.terminal_panel.height() >= CELL_HEIGHT {
             let focused = browser.terminal_has_keyboard();
             let session = &active_tab.session;
+            let search = browser
+                .terminal_panel
+                .search
+                .as_ref()
+                .filter(|(owner, _)| *owner == session.id)
+                .map(|(_, search)| search);
             let tab_strip_visible = browser.terminal_panel.tab_strip_visible();
             let terminal_canvas: Element<'_, Message> = match session.disconnected() {
-                None => terminal_grid(session, focused),
+                None => terminal_grid(session, focused, search),
                 // 保留已有输出,底部压一条"已断开"提示。
                 Some(reason) => stack![
-                    terminal_grid(session, focused),
+                    terminal_grid(session, focused, search),
                     container(disconnected_notice(reason))
                         .width(Length::Fill)
                         .height(Length::Fill)
@@ -104,11 +110,28 @@ pub(crate) fn terminal_panel_area(browser: &FileBrowser) -> Element<'_, Message>
                 .into(),
             };
             // 单标签时标签条隐藏、画布吃满其高度,加号悬浮在画布右上角。
+            // 搜索条那一层一直在（没开时是空的）：开关搜索不改控件树，网格的状态不会被重建。
+            let search_layer: Element<'_, Message> = match search {
+                Some(search) => container(super::search::search_bar(search))
+                    .width(Length::Fill)
+                    .padding(iced::Padding {
+                        top: if tab_strip_visible {
+                            TAB_STRIP_VERTICAL_PADDING
+                        } else {
+                            TAB_STRIP_HEIGHT
+                        },
+                        ..iced::Padding::default()
+                    })
+                    .align_x(iced::alignment::Horizontal::Right)
+                    .into(),
+                None => space::Space::new().into(),
+            };
             let canvas_area: Element<'_, Message> = if tab_strip_visible {
-                terminal_canvas
+                stack![terminal_canvas, search_layer].into()
             } else {
                 stack![
                     terminal_canvas,
+                    search_layer,
                     // 右留白由外层画布容器提供,这里只做垂直对齐,与标签条加号同位。
                     container(add_tab_button())
                         .width(Length::Fill)

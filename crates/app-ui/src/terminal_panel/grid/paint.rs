@@ -5,6 +5,9 @@ use alacritty_terminal::term::RenderableContent;
 use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
 use iced::{Color, Theme};
 
+use alacritty_terminal::term::search::Match;
+
+use super::super::links::ScreenSpan;
 use super::super::palette::Palette;
 
 /// 暗淡（faint）的字的不透明度。
@@ -67,21 +70,37 @@ pub(super) struct CursorMark {
     pub(super) color: Color,
 }
 
-/// 选区和光标用的颜色（从主题来）。
+/// 选区、搜索匹配用的颜色（从主题来）。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Highlight {
     pub(super) selection_background: Color,
     pub(super) selection_text: Color,
+    pub(super) match_background: Color,
+    pub(super) match_text: Color,
+    pub(super) current_match_background: Color,
+    pub(super) current_match_text: Color,
 }
 
 impl Highlight {
     pub(super) fn for_theme(theme: &Theme) -> Self {
-        let weak = theme.extended_palette().primary.weak;
+        let palette = theme.extended_palette();
         Self {
-            selection_background: weak.color,
-            selection_text: weak.text,
+            selection_background: palette.primary.weak.color,
+            selection_text: palette.primary.weak.text,
+            match_background: palette.warning.weak.color,
+            match_text: palette.warning.weak.text,
+            current_match_background: palette.warning.strong.color,
+            current_match_text: palette.warning.strong.text,
         }
     }
+}
+
+/// 叠在屏幕内容上的标记：Ctrl 悬停的链接（画下划线）、回看搜索的匹配。
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct GridMarks<'a> {
+    pub(super) link: Option<ScreenSpan>,
+    pub(super) matches: &'a [Match],
+    pub(super) current_match: Option<&'a Match>,
 }
 
 /// 把屏幕内容按格子算成要画的东西。字按列号放，不按顺序数：宽字符后面的 spacer 不画，但也
@@ -92,6 +111,7 @@ pub(super) fn paint(
     palette: &Palette,
     highlight: Highlight,
     focused: bool,
+    marks: GridMarks<'_>,
 ) -> GridPaint {
     let offset = content.display_offset as i32;
     let colors = content.colors;
@@ -136,6 +156,21 @@ pub(super) fn paint(
         if cell.flags.contains(Flags::DIM) {
             text_color.a *= DIM_ALPHA;
         }
+        // 搜索匹配画在选区下面：选区照常看得见。
+        if marks
+            .current_match
+            .is_some_and(|found| found.contains(&indexed.point))
+        {
+            text_color = highlight.current_match_text;
+            background_color = Some(highlight.current_match_background);
+        } else if marks
+            .matches
+            .iter()
+            .any(|found| found.contains(&indexed.point))
+        {
+            text_color = highlight.match_text;
+            background_color = Some(highlight.match_background);
+        }
         if selection.is_some_and(|range| range.contains(indexed.point)) {
             text_color = highlight.selection_text;
             background_color = Some(highlight.selection_background);
@@ -169,6 +204,11 @@ pub(super) fn paint(
             );
         } else if cell.flags.intersects(Flags::ALL_UNDERLINES) {
             painted.stroke(line, column, width, StrokeKind::Underline, stroke_color);
+        }
+        if marks.link.is_some_and(|link| {
+            link.line == line && (link.first_column..=link.last_column).contains(&column)
+        }) {
+            painted.stroke(line, column, width, StrokeKind::Underline, text_color);
         }
         if cell.flags.contains(Flags::STRIKEOUT) {
             painted.stroke(line, column, width, StrokeKind::Strikeout, text_color);
@@ -338,6 +378,7 @@ mod tests {
             &Palette::for_theme(&Theme::Dark),
             Highlight::for_theme(&Theme::Dark),
             focused,
+            GridMarks::default(),
         )
     }
 
@@ -406,6 +447,7 @@ mod tests {
             &Palette::for_theme(&Theme::Dark),
             highlight,
             false,
+            GridMarks::default(),
         );
 
         assert_eq!(
@@ -453,5 +495,66 @@ mod tests {
             strokes,
             vec![(0, 2, StrokeKind::Underline), (2, 1, StrokeKind::Strikeout)]
         );
+    }
+
+    #[test]
+    fn search_matches_get_a_background_and_the_current_one_stands_out() {
+        let emulator = emulator(20, 3);
+        feed(&emulator, b"ab ab");
+        let term = emulator.lock();
+        let first = grid_point(&term, 0, 0)..=grid_point(&term, 0, 1);
+        let second = grid_point(&term, 0, 3)..=grid_point(&term, 0, 4);
+        let matches = [first, second.clone()];
+        let highlight = Highlight::for_theme(&Theme::Dark);
+        let paint = paint(
+            term.renderable_content(),
+            &Palette::for_theme(&Theme::Dark),
+            highlight,
+            false,
+            GridMarks {
+                link: None,
+                matches: &matches,
+                current_match: Some(&second),
+            },
+        );
+        let spans: Vec<(usize, usize, Color)> = paint
+            .backgrounds
+            .iter()
+            .map(|span| (span.column, span.width, span.color))
+            .collect();
+        assert_eq!(
+            spans,
+            vec![
+                (0, 2, highlight.match_background),
+                (3, 2, highlight.current_match_background)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_hovered_link_is_underlined() {
+        let emulator = emulator(20, 3);
+        feed(&emulator, b"go here");
+        let term = emulator.lock();
+        let paint = paint(
+            term.renderable_content(),
+            &Palette::for_theme(&Theme::Dark),
+            Highlight::for_theme(&Theme::Dark),
+            false,
+            GridMarks {
+                link: Some(ScreenSpan {
+                    line: 0,
+                    first_column: 3,
+                    last_column: 6,
+                }),
+                ..GridMarks::default()
+            },
+        );
+        let strokes: Vec<(usize, usize, StrokeKind)> = paint
+            .strokes
+            .iter()
+            .map(|stroke| (stroke.column, stroke.width, stroke.kind))
+            .collect();
+        assert_eq!(strokes, vec![(3, 4, StrokeKind::Underline)]);
     }
 }

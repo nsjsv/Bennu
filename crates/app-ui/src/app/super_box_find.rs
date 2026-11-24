@@ -89,15 +89,26 @@ impl FileBrowser {
         Task::none()
     }
 
-    /// 回车：进入所在文件夹并选中它（找到的是文件夹就进入它）。多栏视图按设置来：从第一栏往下
-    /// 展开、所在文件夹作第一栏、或者直接打开文件。
+    /// 回车：在文件区里定位它。
     pub(super) fn open_super_box_found(&mut self, hit: SearchHit) -> Task<Message> {
-        let (folder, selection) = match hit.kind {
-            SearchFileKind::Directory => (hit.path, None),
-            _ => match hit.path.parent() {
-                Some(parent) => (parent.to_path_buf(), Some(hit.path)),
+        self.show_path_in_file_area(hit.path, hit.kind == SearchFileKind::Directory)
+    }
+
+    /// 在文件区里定位一个找到的路径（超级输入框找到的、终端里 Ctrl+点击的）：进入所在文件夹并
+    /// 选中它（是文件夹就进入它）。多栏视图按设置来：从第一栏往下展开、所在文件夹作第一栏、
+    /// 或者直接打开文件。
+    pub(crate) fn show_path_in_file_area(
+        &mut self,
+        path: std::path::PathBuf,
+        is_directory: bool,
+    ) -> Task<Message> {
+        let (folder, selection) = if is_directory {
+            (path, None)
+        } else {
+            match path.parent() {
+                Some(parent) => (parent.to_path_buf(), Some(path)),
                 None => return Task::none(),
-            },
+            }
         };
         let columns = self.tab().view_mode() == BrowserViewMode::Columns;
         match (

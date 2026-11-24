@@ -317,6 +317,7 @@ impl FileBrowser {
             ShortcutAction::ToggleTerminal => self.toggle_terminal_via_shortcut(),
             ShortcutAction::TerminalNewTab => self.add_terminal_tab(),
             ShortcutAction::TerminalCloseTab => self.close_active_terminal_tab_via_shortcut(),
+            ShortcutAction::TerminalFind => self.open_terminal_search(),
             ShortcutAction::SelectAll => self.select_all_in_file_selection_scope(),
             ShortcutAction::InvertSelection => self.invert_selection_in_file_selection_scope(),
             ShortcutAction::SelectDuplicates => self.select_duplicate_files(),

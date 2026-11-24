@@ -935,6 +935,15 @@ pub(crate) enum ContextMenuState {
     NetworkConnection(SidebarNetworkConnectionContextMenuState),
     SmartFolder(SmartFolderContextMenuState),
     RightDock(RightDockMenuState),
+    Terminal(TerminalMenuState),
+}
+
+/// 终端网格里右键（程序没要鼠标时）：复制、粘贴、全选、清屏、新标签。
+#[derive(Debug, Clone)]
+pub(crate) struct TerminalMenuState {
+    pub(crate) position: Point,
+    /// 打开菜单那一刻有没有选区（没有时「复制」点不了）。
+    pub(crate) has_selection: bool,
 }
 
 /// 右键停靠区（标题栏、标签条、面板里没有自己右键菜单的地方）弹出的菜单：开关各面板、锁定。
@@ -959,6 +968,7 @@ impl ContextMenuState {
             Self::NetworkConnection(menu) => menu.position,
             Self::SmartFolder(menu) => menu.position,
             Self::RightDock(menu) => menu.position,
+            Self::Terminal(menu) => menu.position,
         }
     }
 
@@ -970,7 +980,7 @@ impl ContextMenuState {
             Self::SidebarBookmark(_) => None,
             Self::SidebarDevice(_) => None,
             Self::NetworkConnection(_) => None,
-            Self::SmartFolder(_) | Self::RightDock(_) => None,
+            Self::SmartFolder(_) | Self::RightDock(_) | Self::Terminal(_) => None,
         }
     }
 }

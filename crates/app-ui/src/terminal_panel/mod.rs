@@ -12,7 +12,9 @@ pub(crate) mod follow;
 mod grid;
 mod hidden;
 pub(crate) mod input;
+pub(crate) mod links;
 mod palette;
+pub(crate) mod search;
 pub(crate) mod session;
 pub(crate) mod tabs;
 pub(crate) mod view;
@@ -56,10 +58,29 @@ pub(crate) enum TerminalPanelMessage {
     TabDragFinished,
     /// 会话们攒下的一批事（同一会话的屏幕变化已合并）。
     SessionEvents(Vec<(SessionId, SessionEvent)>),
-    /// 点了终端网格：键盘归终端。选区、鼠标上报、滚动由网格控件自己做。
+    /// 点了终端网格：键盘归终端（开着的搜索条随之关掉）。选区、鼠标上报、滚动由网格控件自己做。
     GridPressed,
     CopySelectionRequested,
+    PasteRequested,
     PasteReceived(Option<String>),
+    /// 程序没要鼠标时右键网格：复制、粘贴、全选、清屏、新标签。
+    MenuRequested,
+    SelectAllRequested,
+    ClearRequested,
+    /// Ctrl+点击了链接。
+    LinkOpened(links::TerminalLink),
+    /// Ctrl+点击的路径在后台看过了：在不在、是不是文件夹。
+    LinkPathChecked {
+        path: PathBuf,
+        is_directory: Option<bool>,
+    },
+    /// 交给系统打开网址的结果；打不开时提示原因。
+    LinkOpenFinished(Result<(), String>),
+    SearchChanged(String),
+    SearchStepped(search::SearchStep),
+    /// 搜索框里按了回车：往上找，按着 Shift 往下找。
+    SearchSubmitted,
+    SearchClosed,
 }
 
 /// 高度动画:from → to 的缓动插值。
@@ -98,6 +119,8 @@ pub(crate) struct TerminalPanelState {
     pub(crate) tab_drag: Option<tabs::TerminalTabDrag>,
     pub(crate) tab_shift_animations: HashMap<SessionId, tabs::TabShiftAnimation>,
     pub(crate) events: SessionEvents,
+    /// 开着的回看搜索属于哪个标签；切标签、点网格时关掉。
+    pub(crate) search: Option<(SessionId, search::TerminalSearch)>,
 }
 
 impl TerminalPanelState {
@@ -117,6 +140,7 @@ impl TerminalPanelState {
             tab_drag: None,
             tab_shift_animations: HashMap::new(),
             events: SessionEvents::new(),
+            search: None,
         }
     }
 
@@ -387,8 +411,69 @@ impl FileBrowser {
             }
             TerminalPanelMessage::GridPressed => {
                 self.terminal_panel.focused = true;
+                self.terminal_panel.search = None;
+            }
+            TerminalPanelMessage::PasteRequested => {
+                self.context_menu = None;
+                return iced::clipboard::read()
+                    .map(|text| Message::TerminalPanel(TerminalPanelMessage::PasteReceived(text)));
+            }
+            TerminalPanelMessage::MenuRequested => {
+                let has_selection = self
+                    .terminal_panel
+                    .active_tab()
+                    .is_some_and(|tab| tab.session.emulator.selection_string().is_some());
+                self.context_menu = Some(crate::model::ContextMenuState::Terminal(
+                    crate::model::TerminalMenuState {
+                        position: self.cursor_or_origin(),
+                        has_selection,
+                    },
+                ));
+            }
+            TerminalPanelMessage::SelectAllRequested => {
+                self.context_menu = None;
+                if let Some(text) = self
+                    .terminal_panel
+                    .active_tab()
+                    .and_then(|tab| tab.session.emulator.select_all())
+                {
+                    return iced::clipboard::write_primary(text);
+                }
+            }
+            TerminalPanelMessage::ClearRequested => {
+                self.context_menu = None;
+                if let Some(tab) = self.terminal_panel.active_tab() {
+                    tab.session.emulator.clear_history();
+                    // shell 清屏重画提示符，全屏程序重画自己；不打断正在跑的程序。
+                    tab.session.write_input(b"\x0c");
+                }
+            }
+            TerminalPanelMessage::LinkOpened(link) => return self.open_terminal_link(link),
+            TerminalPanelMessage::LinkPathChecked { path, is_directory } => {
+                if let Some(is_directory) = is_directory {
+                    return self.show_path_in_file_area(path, is_directory);
+                }
+            }
+            TerminalPanelMessage::LinkOpenFinished(outcome) => {
+                if let Err(error) = outcome {
+                    self.show_global_error(error);
+                }
+            }
+            TerminalPanelMessage::SearchChanged(query) => self.change_terminal_search(query),
+            TerminalPanelMessage::SearchStepped(step) => self.step_terminal_search(step),
+            TerminalPanelMessage::SearchSubmitted => {
+                let step = if self.keyboard_modifiers.shift() {
+                    search::SearchStep::Newer
+                } else {
+                    search::SearchStep::Older
+                };
+                self.step_terminal_search(step);
+            }
+            TerminalPanelMessage::SearchClosed => {
+                self.terminal_panel.search = None;
             }
             TerminalPanelMessage::CopySelectionRequested => {
+                self.context_menu = None;
                 if let Some(active_tab) = self.terminal_panel.active_tab() {
                     if let Some(text) = active_tab.session.emulator.selection_string() {
                         return iced::clipboard::write::<Message>(text);
@@ -458,7 +543,9 @@ impl FileBrowser {
     /// 键盘（连同输入法）此刻归终端：终端聚焦，而且没有地址栏、改名这类输入会话占着。
     /// 按键路由、网格要不要输入法、终端里 cd 要不要带着文件区走，都按它。
     pub(crate) fn terminal_has_keyboard(&self) -> bool {
-        self.terminal_panel.is_focused() && !self.keyboard_input_session_is_active()
+        self.terminal_panel.is_focused()
+            && self.terminal_panel.search.is_none()
+            && !self.keyboard_input_session_is_active()
     }
 }
 

@@ -634,4 +634,13 @@ pub(super) const ACTIONS: &[ActionSpec] = &[
         context: App,
         keys: &[KeyPress::ctrl_shift('W')],
     },
+    ActionSpec {
+        action: ShortcutAction::TerminalFind,
+        config_key: "terminal_find",
+        label: || tr!("Find in Terminal Output"),
+        group: G::Terminal,
+        scope: ShortcutScope::Terminal,
+        context: App,
+        keys: &[KeyPress::ctrl_shift('F')],
+    },
 ];

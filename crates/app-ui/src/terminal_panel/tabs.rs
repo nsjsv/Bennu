@@ -268,6 +268,9 @@ impl FileBrowser {
         tab.has_unread_output = false;
         tab.session
             .resize(super::emulator_dimensions(columns, rows));
+        if self.terminal_panel.active_session_id != Some(session_id) {
+            self.terminal_panel.search = None;
+        }
         self.terminal_panel.active_session_id = Some(session_id);
         self.terminal_panel.focused = true;
     }

@@ -24,11 +24,13 @@ use iced::{
 
 mod paint;
 
-use paint::{paint, GridPaint, Highlight, StrokeKind};
+use paint::{paint, GridMarks, GridPaint, Highlight, StrokeKind};
 
 use super::emulator::grid_point;
 use super::input::{mouse_report, wheel_as_arrows, MouseAction, ReportedButton};
+use super::links::{link_at, ScreenSpan, TerminalLink};
 use super::palette::Palette;
+use super::search::TerminalSearch;
 use super::session::TerminalSession;
 use super::view::{cell_width, CELL_HEIGHT, FONT_SIZE};
 use super::TerminalPanelMessage;
@@ -40,13 +42,23 @@ const CURSOR_STROKE_WIDTH: f32 = 2.0;
 /// 滚轮一格滚几行。
 const WHEEL_LINES_PER_NOTCH: f32 = 3.0;
 
-pub(super) fn terminal_grid(session: &TerminalSession, focused: bool) -> Element<'_, Message> {
-    Element::new(TerminalGrid { session, focused })
+pub(super) fn terminal_grid<'a>(
+    session: &'a TerminalSession,
+    focused: bool,
+    search: Option<&'a TerminalSearch>,
+) -> Element<'a, Message> {
+    Element::new(TerminalGrid {
+        session,
+        focused,
+        search,
+    })
 }
 
 struct TerminalGrid<'a> {
     session: &'a TerminalSession,
     focused: bool,
+    /// 这个标签开着回看搜索时的匹配。
+    search: Option<&'a TerminalSearch>,
 }
 
 /// 控件自己的状态：鼠标、输入法。
@@ -62,6 +74,8 @@ struct GridState {
     /// 触摸板一次滚不满一行时攒着。
     wheel_lines: f32,
     preedit: Option<input_method::Preedit>,
+    /// 按着 Ctrl 时指针下的链接：画下划线，点了打开。
+    ctrl_link: Option<(TerminalLink, ScreenSpan)>,
 }
 
 impl<Renderer> Widget<Message, Theme, Renderer> for TerminalGrid<'_>
@@ -91,7 +105,7 @@ where
 
     fn draw(
         &self,
-        _tree: &Tree,
+        tree: &Tree,
         renderer: &mut Renderer,
         theme: &Theme,
         _style: &renderer::Style,
@@ -101,6 +115,12 @@ where
     ) {
         let bounds = layout.bounds();
         let palette = Palette::for_theme(theme);
+        let state = tree.state.downcast_ref::<GridState>();
+        let marks = GridMarks {
+            link: state.ctrl_link.as_ref().map(|(_, span)| *span),
+            matches: self.search.map(TerminalSearch::matches).unwrap_or(&[]),
+            current_match: self.search.and_then(TerminalSearch::current),
+        };
         let painted = {
             let term = self.session.emulator.lock();
             paint(
@@ -108,6 +128,7 @@ where
                 &palette,
                 Highlight::for_theme(theme),
                 self.focused,
+                marks,
             )
         };
         renderer.with_layer(bounds, |renderer| {
@@ -131,6 +152,7 @@ where
         match event {
             Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.modifiers = *modifiers;
+                self.refresh_ctrl_link(state, cursor.position_over(bounds), bounds, shell);
             }
             Event::Mouse(mouse_event) => {
                 self.mouse_event(state, mouse_event, bounds, cursor, clipboard, shell);
@@ -161,7 +183,7 @@ where
 
     fn mouse_interaction(
         &self,
-        _tree: &Tree,
+        tree: &Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
@@ -170,6 +192,9 @@ where
         // 光标形状全局生效，只在悬停在网格上时给（iced 0.14 陷阱）。
         if !cursor.is_over(layout.bounds()) {
             return Interaction::None;
+        }
+        if tree.state.downcast_ref::<GridState>().ctrl_link.is_some() {
+            return Interaction::Pointer;
         }
         if self
             .session
@@ -204,6 +229,13 @@ impl TerminalGrid<'_> {
                 };
                 shell.publish(Message::TerminalPanel(TerminalPanelMessage::GridPressed));
                 shell.capture_event();
+                // Ctrl+点击打开链接，程序要鼠标也一样（终端里 Ctrl+点击通常就是打开）。
+                if let (mouse::Button::Left, Some((link, _))) = (button, &state.ctrl_link) {
+                    shell.publish(Message::TerminalPanel(TerminalPanelMessage::LinkOpened(
+                        link.clone(),
+                    )));
+                    return;
+                }
                 let cell = self.cell_at(position, bounds);
                 let reported = match button {
                     mouse::Button::Left => Some(ReportedButton::Left),
@@ -223,6 +255,9 @@ impl TerminalGrid<'_> {
                         if let Some(text) = clipboard.read(clipboard::Kind::Primary) {
                             self.session.paste(&text);
                         }
+                    }
+                    mouse::Button::Right => {
+                        shell.publish(Message::TerminalPanel(TerminalPanelMessage::MenuRequested))
                     }
                     _ => {}
                 }
@@ -249,6 +284,8 @@ impl TerminalGrid<'_> {
                 }
             }
             mouse::Event::CursorMoved { position } => {
+                let over = cursor.is_over(bounds).then_some(*position);
+                self.refresh_ctrl_link(state, over, bounds, shell);
                 if state.selecting {
                     let cell = self.cell_at(*position, bounds);
                     let mut term = self.session.emulator.lock();
@@ -307,6 +344,27 @@ impl TerminalGrid<'_> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// 按着 Ctrl 时认指针下的链接；变了才重画。
+    fn refresh_ctrl_link(
+        &self,
+        state: &mut GridState,
+        position: Option<Point>,
+        bounds: Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let link = match position {
+            Some(position) if state.modifiers.control() => {
+                let cell = self.cell_at(position, bounds);
+                link_at(&self.session.emulator.lock(), cell.line, cell.column)
+            }
+            _ => None,
+        };
+        if link != state.ctrl_link {
+            state.ctrl_link = link;
+            shell.request_redraw();
         }
     }
 

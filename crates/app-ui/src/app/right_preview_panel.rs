@@ -34,37 +34,26 @@ impl FileBrowser {
         Task::batch([hover, self.sync_preview_panel(), info, folder_tree])
     }
 
-    /// 目录不进面板预览:文件夹树与侧栏视觉重复,目录目标预览区回空态;Space 独立窗口的
-    /// 目录树预览不受影响。
     fn sync_preview_panel(&mut self) -> Task<Message> {
         if !self.right_dock.layout().shows(DockPanel::Preview)
             || self.preview_session_held_by_window()
         {
             return Task::none();
         }
-        let Some(path) = self.dock_item().map(Path::to_path_buf) else {
-            // 目标为空:清掉内容显示空态。clear_preview 自带固定守卫,
-            // pin 住的独立窗口预览不会被此处误清。
+        let Some((path, kind)) = self
+            .panel_preview_target()
+            .map(|(path, kind)| (path.to_path_buf(), kind))
+        else {
+            // 空态：清掉内容（clear_preview 自带固定守卫）。文件夹、包里面的成员连同路径一起登记，
+            // 否则收敛点每轮 update 都会重复清空/重载。
+            if let Some(item) = self.dock_item().map(Path::to_path_buf) {
+                self.preview_engine.preview_shown_path = Some(item);
+            }
             if self.preview_engine.preview.is_some() {
                 self.preview_engine.clear_preview();
             }
             return Task::none();
         };
-        // 包内成员不进面板预览:虚拟路径读不了文件,按只读浏览语义
-        // 与目录目标同款清空为空态,不发起加载也不弹错。
-        // 归档文件本身是 BrowsingRoot 但仍是真实文件,照常进面板预览。
-        let kind = self.entry_kind(&path).unwrap_or(FileKind::Other);
-        if kind == FileKind::Directory
-            || file_core::archive_path_identity(&path)
-                == file_core::ArchivePathIdentity::InsideArchive
-        {
-            // 必须连同“已一致”判定一起登记,否则收敛点每轮 update 都会重复清空/重载。
-            self.preview_engine.preview_shown_path = Some(path);
-            if self.preview_engine.preview.is_some() {
-                self.preview_engine.clear_preview();
-            }
-            return Task::none();
-        }
         // 必须同时校验 preview 非空:clear_preview 不重置 preview_shown_path,
         // “选中 A → 点空白清空 → 再选中 A”时路径相等但内容已丢失,必须重载。
         if self.preview_engine.preview.is_some()
@@ -77,6 +66,29 @@ impl FileBrowser {
         // open_preview 预先写入);面板流程在此等价登记,保证会话目标可查。
         self.preview_engine.preview_shown_path = Some(path.clone());
         self.open_preview_for_resolved_path(path, kind)
+    }
+
+    /// 预览面板要预览的条目：停靠区的条目（悬停项或选中项）。文件夹不进面板预览（用户
+    /// 2026-09-06 定的：和侧栏、多栏的下一栏重复）；包里面的成员是虚拟路径，读不了文件。这两种
+    /// 面板都是空态，空格打开的独立窗口照常预览它们。
+    fn panel_preview_target(&self) -> Option<(&Path, FileKind)> {
+        let path = self.dock_item()?;
+        let kind = self.entry_kind(path).unwrap_or(FileKind::Other);
+        let previewable = kind != FileKind::Directory
+            && file_core::archive_path_identity(path)
+                != file_core::ArchivePathIdentity::InsideArchive;
+        previewable.then_some((path, kind))
+    }
+
+    /// 面板画不画共用的预览内容：只在内容正是面板自己的目标时画。面板管着内容时两者总是一致；
+    /// 空格窗口开着时内容归窗口，窗口里是文件夹（面板这时该是空态）或钉住的窗口还停在别的
+    /// 文件上，面板都不跟着画，免得点一下是空的、按了空格却冒出来。
+    pub(crate) fn right_preview_panel_shows_preview(&self) -> bool {
+        let engine = &self.preview_engine;
+        engine.preview.is_some()
+            && self
+                .panel_preview_target()
+                .is_some_and(|(path, _)| engine.preview_shown_path.as_deref() == Some(path))
     }
 
     /// 预览内容只有一份，空格打开的独立窗口和右侧预览面板共用。窗口开着时它归窗口：面板不换
@@ -106,7 +118,7 @@ impl FileBrowser {
     /// (音视频/动图全显,图片指针在图上才显)。
     pub(crate) fn right_preview_panel_content(&self) -> Element<'_, Message> {
         let preview_engine = &self.preview_engine;
-        if preview_engine.preview.is_none() {
+        if !self.right_preview_panel_shows_preview() {
             return container_centered(bennu_preview::panel_text::readable_text(tr!(
                 "Select an item to preview"
             )));
@@ -287,6 +299,24 @@ mod tests {
             browser.preview_engine.preview_load_surface,
             PreviewLoadSurface::StandaloneWindow
         );
+        // 面板对文件夹是空态，点一下是这样，按了空格也是这样，不跟着窗口画出来。
+        assert!(!browser.right_preview_panel_shows_preview());
+    }
+
+    /// 空格窗口里的文件正是面板自己的目标时，面板照样显示它（同一份内容）。
+    #[test]
+    fn the_panel_shows_the_window_preview_of_its_own_file() {
+        let path = PathBuf::from("/workspace/report.txt");
+        let mut browser = panel_open_browser();
+        browser.tab_mut().entries = vec![test_file_entry(&path)].into();
+        browser.tab_mut().selected = Some(path.clone());
+        drop(browser.sync_right_dock_panels());
+
+        drop(browser.request_preview());
+        drop(browser.sync_right_dock_panels());
+
+        assert!(browser.preview_engine.preview_window.is_some());
+        assert!(browser.right_preview_panel_shows_preview());
     }
 
     /// 窗口开着时选中项变了（钉住的窗口），面板不把新的选中项载进窗口；窗口关了面板才接手。
@@ -306,6 +336,7 @@ mod tests {
         browser.tab_mut().selected = Some(next.clone());
         drop(browser.sync_right_dock_panels());
         assert_eq!(browser.preview_engine.preview_shown_path, Some(shown));
+        assert!(!browser.right_preview_panel_shows_preview());
 
         browser.preview_engine.preview_window_pinned = false;
         drop(browser.close_preview_window());

@@ -8,6 +8,7 @@
 //!   应用看到的是一次普通编辑。
 //! - 聚焦时向 widget operation 补报 [`FocusedTextControl`]，让按键路由认得出多行文字控件。
 //! - 聚焦的文字控件因 Esc 失焦时捕获这次事件，单行、多行一个样。
+//! - 在控件里按下左键拖选时，指针出了控件也照样跟着选（见 [`drag_cursor`]）。
 
 use std::marker::PhantomData;
 
@@ -18,7 +19,7 @@ use iced::keyboard::{self, key};
 use iced::widget::text_editor::{self, Content};
 use iced::widget::text_input::{self, Value};
 use iced::window;
-use iced::{Element, Event, Length, Rectangle, Size, Vector};
+use iced::{Element, Event, Length, Point, Rectangle, Size, Vector};
 
 /// 被包输入控件的选区读法：选区存在各控件自己的内部状态里，读法各不相同。
 pub(super) trait SelectionSource {
@@ -106,6 +107,8 @@ struct PrimaryState {
     last_selection: Option<String>,
     /// 真实的修饰键。text_input 自己记着修饰键，合成 Ctrl+V 之后要改回来。
     modifiers: keyboard::Modifiers,
+    /// 左键是在本控件里按下的，还没松开。
+    left_held_inside: bool,
 }
 
 /// 读标准剪贴板的人拿到 PRIMARY 的文字，其余照旧走真实剪贴板。
@@ -174,6 +177,49 @@ fn may_settle_selection(event: &Event) -> bool {
         Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_))
             | Event::Keyboard(keyboard::Event::KeyPressed { .. })
     )
+}
+
+/// 交给被包控件的指针。
+///
+/// iced 的 `TextEditor` 拖选只认落在自己范围里的指针，一出范围选区就停在那儿。信息面板的值
+/// 只有一行高，往上下行一拖就出界，看上去选区不跟手。所以在本控件里按下的左键没松开时，
+/// 把指针换成范围里最近的一点：拖到上面选到开头，拖到下面选到结尾，左右出界夹到两边。
+/// 单行输入框拖选读的是事件里的位置，不看这个指针，换了也一样。
+fn drag_cursor(
+    state: &mut PrimaryState,
+    event: &Event,
+    bounds: Rectangle,
+    cursor: mouse::Cursor,
+) -> mouse::Cursor {
+    match event {
+        Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+            state.left_held_inside = cursor.is_over(bounds);
+        }
+        Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+            state.left_held_inside = false;
+        }
+        Event::Mouse(mouse::Event::CursorMoved { .. }) if state.left_held_inside => {
+            if let Some(position) = cursor.position() {
+                return mouse::Cursor::Available(nearest_point_inside(bounds, position));
+            }
+        }
+        _ => {}
+    }
+    cursor
+}
+
+/// 范围里离 `point` 最近、又照“上面算开头、下面算结尾”取的那一点。范围的右边和下边不算在
+/// 里面（`Rectangle::contains` 是半开的），所以往里收半个像素。
+fn nearest_point_inside(bounds: Rectangle, point: Point) -> Point {
+    let right = (bounds.x + bounds.width - 0.5).max(bounds.x);
+    let bottom = (bounds.y + bounds.height - 0.5).max(bounds.y);
+    if point.y < bounds.y {
+        Point::new(bounds.x, bounds.y)
+    } else if point.y >= bounds.y + bounds.height {
+        Point::new(right, bottom)
+    } else {
+        Point::new(point.x.clamp(bounds.x, right), point.y)
+    }
 }
 
 fn is_escape_press(event: &Event) -> bool {
@@ -344,6 +390,12 @@ where
             _ => {}
         }
         let focused_before = self.is_focused(tree);
+        let cursor = drag_cursor(
+            tree.state.downcast_mut::<PrimaryState>(),
+            event,
+            layout.bounds(),
+            cursor,
+        );
         self.inner.as_widget_mut().update(
             &mut tree.children[0],
             event,

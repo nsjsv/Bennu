@@ -521,3 +521,104 @@ fn escape_in_an_unfocused_text_control_is_left_to_others() {
     );
     assert!(!area.press_escape());
 }
+
+/// 记下每次指针移动时收到的指针位置：看包装交给被包控件的是哪一点。
+struct CursorProbe(std::rc::Rc<std::cell::RefCell<Vec<Option<Point>>>>);
+
+impl iced::advanced::Widget<Message, Theme, ()> for CursorProbe {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Fill, Length::Fill)
+    }
+
+    fn layout(
+        &mut self,
+        _tree: &mut Tree,
+        _renderer: &(),
+        limits: &layout::Limits,
+    ) -> layout::Node {
+        layout::Node::new(limits.max())
+    }
+
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut (),
+        _theme: &Theme,
+        _style: &iced::advanced::renderer::Style,
+        _layout: Layout<'_>,
+        _cursor: mouse::Cursor,
+        _viewport: &Rectangle,
+    ) {
+    }
+
+    fn update(
+        &mut self,
+        _tree: &mut Tree,
+        event: &Event,
+        _layout: Layout<'_>,
+        cursor: mouse::Cursor,
+        _renderer: &(),
+        _clipboard: &mut dyn Clipboard,
+        _shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle,
+    ) {
+        if let Event::Mouse(mouse::Event::CursorMoved { .. }) = event {
+            self.0.borrow_mut().push(cursor.position());
+        }
+    }
+}
+
+fn moved(position: Point) -> (Event, mouse::Cursor) {
+    (
+        Event::Mouse(mouse::Event::CursorMoved { position }),
+        mouse::Cursor::Available(position),
+    )
+}
+
+/// 多行文字控件（信息面板的值也是）的拖选只认落在自己范围里的指针：在控件里按下左键后，
+/// 拖到上面、下面、左右出界，交给它的都是范围里的点（上面是开头，下面是结尾）；松开以后、
+/// 或者左键是在别处按下的，指针原样交过去。
+#[test]
+fn a_drag_started_inside_follows_the_pointer_out_of_the_control() {
+    let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut harness = Harness::new(Element::new(super::primary_selection::PrimarySelection {
+        inner: Element::new(CursorProbe(seen.clone())),
+        selection: None,
+        accepts_paste: false,
+    }));
+    let bounds = harness.bounds();
+    let (right, bottom) = (bounds.width - 0.5, bounds.height - 0.5);
+    let drag_to = |harness: &mut Harness<'_>, point: Point| {
+        let (event, cursor) = moved(point);
+        harness.send(event, cursor);
+        seen.borrow_mut().pop().expect("the control saw the move")
+    };
+
+    let inside = harness.inside();
+    harness.send(press(mouse::Button::Left), inside);
+    let below = Point::new(10.0, bounds.height + 40.0);
+    assert_eq!(
+        drag_to(&mut harness, below),
+        Some(Point::new(right, bottom))
+    );
+    let above = Point::new(150.0, -30.0);
+    assert_eq!(drag_to(&mut harness, above), Some(Point::new(0.0, 0.0)));
+    let off_to_the_right = Point::new(bounds.width + 60.0, 50.0);
+    assert_eq!(
+        drag_to(&mut harness, off_to_the_right),
+        Some(Point::new(right, 50.0))
+    );
+    let off_to_the_left = Point::new(-20.0, 50.0);
+    assert_eq!(
+        drag_to(&mut harness, off_to_the_left),
+        Some(Point::new(0.0, 50.0))
+    );
+    let within = Point::new(40.0, 30.0);
+    assert_eq!(drag_to(&mut harness, within), Some(within));
+
+    harness.send(release(mouse::Button::Left), inside);
+    assert_eq!(drag_to(&mut harness, below), Some(below));
+
+    harness.send(press(mouse::Button::Left), harness.outside());
+    assert_eq!(drag_to(&mut harness, below), Some(below));
+}

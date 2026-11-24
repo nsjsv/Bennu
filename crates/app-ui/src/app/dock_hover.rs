@@ -144,9 +144,8 @@ impl FileBrowser {
         let layout = self.right_dock.layout();
         self.user_config.dock_shows_hovered_item
             && (layout.shows(DockPanel::Info) || layout.shows(DockPanel::Preview))
-            // 预览会话由面板和独立窗口（空格）共用：悬停换了目标，窗口里的内容会被一起换掉。
-            // 窗口开着时只跟选中项，悬停不碰它。
-            && self.preview_engine.preview_window.is_none()
+            // 窗口开着时预览归窗口，悬停换目标会把窗口里的内容一起换掉。
+            && !self.preview_session_held_by_window()
     }
 }
 

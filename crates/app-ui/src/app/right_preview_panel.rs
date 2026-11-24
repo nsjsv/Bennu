@@ -37,7 +37,9 @@ impl FileBrowser {
     /// 目录不进面板预览:文件夹树与侧栏视觉重复,目录目标预览区回空态;Space 独立窗口的
     /// 目录树预览不受影响。
     fn sync_preview_panel(&mut self) -> Task<Message> {
-        if !self.right_dock.layout().shows(DockPanel::Preview) {
+        if !self.right_dock.layout().shows(DockPanel::Preview)
+            || self.preview_session_held_by_window()
+        {
             return Task::none();
         }
         let Some(path) = self.dock_item().map(Path::to_path_buf) else {
@@ -75,6 +77,13 @@ impl FileBrowser {
         // open_preview 预先写入);面板流程在此等价登记,保证会话目标可查。
         self.preview_engine.preview_shown_path = Some(path.clone());
         self.open_preview_for_resolved_path(path, kind)
+    }
+
+    /// 预览内容只有一份，空格打开的独立窗口和右侧预览面板共用。窗口开着时它归窗口：面板不换
+    /// 目标、不清空，悬停也不碰它。否则面板照选中项改它，窗口里的内容就被一起换掉——选中的是
+    /// 文件夹时面板要显示空态，会把窗口里的文件夹预览清掉。窗口关了才归面板。
+    pub(super) fn preview_session_held_by_window(&self) -> bool {
+        self.preview_engine.preview_window.is_some()
     }
 
     /// 预览面板内容视口的估算尺寸:宽度精确(决定媒体适配与分页文档页宽),
@@ -244,6 +253,71 @@ mod tests {
             browser.preview_engine.preview,
             Some(PreviewState::Loading(_))
         ));
+    }
+
+    /// 回归：预览面板显示着时，对文件夹按空格，窗口里的文件夹预览刚开始加载就被面板按
+    /// “选中的是文件夹 → 空态”清掉，窗口一片空白。
+    #[test]
+    fn space_on_a_folder_keeps_its_preview_while_the_panel_shows() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(folder.path().join("inside.txt"), b"x").unwrap();
+        let path = folder.path().to_path_buf();
+        let mut browser = panel_open_browser();
+        browser.tab_mut().entries = vec![DirectoryEntry::new(
+            path.clone(),
+            FileKind::Directory,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        )]
+        .into();
+        browser.tab_mut().selected = Some(path.clone());
+        drop(browser.sync_right_dock_panels());
+
+        drop(browser.request_preview());
+        drop(browser.sync_right_dock_panels());
+
+        assert!(browser.preview_engine.preview_window.is_some());
+        assert!(matches!(
+            &browser.preview_engine.preview,
+            Some(PreviewState::Loading(loading)) if *loading == path
+        ));
+        assert_eq!(
+            browser.preview_engine.preview_load_surface,
+            PreviewLoadSurface::StandaloneWindow
+        );
+    }
+
+    /// 窗口开着时选中项变了（钉住的窗口），面板不把新的选中项载进窗口；窗口关了面板才接手。
+    #[test]
+    fn the_panel_takes_the_preview_only_once_the_window_is_closed() {
+        let shown = PathBuf::from("/workspace/shown.txt");
+        let next = PathBuf::from("/workspace/next.txt");
+        let mut browser = panel_open_browser();
+        browser.tab_mut().entries = vec![test_file_entry(&shown), test_file_entry(&next)].into();
+        browser.tab_mut().selected = Some(shown.clone());
+        browser.preview_engine.preview_shown_path = Some(shown.clone());
+        browser.preview_engine.preview = Some(PreviewState::Loading(shown.clone()));
+        browser.preview_engine.preview_load_surface = PreviewLoadSurface::StandaloneWindow;
+        browser.preview_engine.preview_window = Some(iced::window::Id::unique());
+        browser.preview_engine.preview_window_pinned = true;
+
+        browser.tab_mut().selected = Some(next.clone());
+        drop(browser.sync_right_dock_panels());
+        assert_eq!(browser.preview_engine.preview_shown_path, Some(shown));
+
+        browser.preview_engine.preview_window_pinned = false;
+        drop(browser.close_preview_window());
+        drop(browser.sync_right_dock_panels());
+        assert_eq!(
+            browser.preview_engine.preview_shown_path,
+            Some(next.clone())
+        );
+        assert_eq!(
+            browser.preview_engine.preview_load_surface,
+            PreviewLoadSurface::RightDockedPanel
+        );
     }
 
     #[test]

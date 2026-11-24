@@ -66,7 +66,7 @@ impl InfoField {
 pub(crate) struct InfoPanelPreferences {
     /// 用户关掉的字段，按 [`InfoField::ALL`] 的顺序。
     hidden_fields: Vec<InfoField>,
-    /// 指针停在某个条目上时临时显示它（Dolphin 的默认）。
+    /// 指针停在某个条目上时临时显示它；默认关，面板只跟选中项。
     pub(crate) follow_hover: bool,
 }
 
@@ -79,7 +79,7 @@ impl Default for InfoPanelPreferences {
                 InfoField::Accessed,
                 InfoField::StatusChanged,
             ],
-            follow_hover: true,
+            follow_hover: false,
         }
     }
 }

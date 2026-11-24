@@ -20,6 +20,10 @@ use crate::selection_summary::PaneSelectionSummary;
 /// 指针在一个条目上停这么久才换成显示它：划过一串文件时不挨个读、挨个跑 ffprobe。
 const HOVER_SETTLE_DELAY: Duration = Duration::from_millis(300);
 
+/// 指针离开所有条目这么久才从悬停的条目回到选中项：从一个条目挪到下一个要经过行间空隙，
+/// 一离开就切回去，面板会在悬停项和选中项之间来回闪。
+const HOVER_RELEASE_DELAY: Duration = Duration::from_secs(1);
+
 #[derive(Debug, Clone)]
 pub(crate) enum InfoPanelMessage {
     /// 快速读取到了；是图片、音视频、PDF 的，详细信息、页数后面再来。
@@ -36,6 +40,9 @@ pub(crate) enum InfoPanelMessage {
         pages: usize,
     },
     HoverSettled {
+        generation: u64,
+    },
+    HoverReleased {
         generation: u64,
     },
     FieldToggled(InfoField),
@@ -70,16 +77,24 @@ pub(crate) struct FolderCounts {
     pub(crate) visible_files_bytes: Option<u64>,
 }
 
+/// 悬停在等的那个定时。同一时刻只有一个：新的悬停事件换掉旧的，旧的到点时号对不上就作废。
+#[derive(Debug, Clone, PartialEq)]
+enum HoverTimer {
+    /// 指针停在这个条目上，等够了就显示它。
+    Settling { path: PathBuf, generation: u64 },
+    /// 指针已离开所有条目，等够了就回到选中项。
+    Releasing { generation: u64 },
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct InfoPanelState {
     target: Option<InfoTarget>,
     request: u64,
     cancellation: Option<CancellationToken>,
     facts: Option<EntryFacts>,
-    /// 指针停在上面、还没等够的条目，和它的定时号。
-    hover_pending: Option<(PathBuf, u64)>,
+    hover_timer: Option<HoverTimer>,
     hover_generation: u64,
-    /// 等够了的悬停条目：面板正显示它。
+    /// 等够了的悬停条目：面板正显示它，直到指针离开所有条目满 [`HOVER_RELEASE_DELAY`]。
     hover_settled: Option<PathBuf>,
 }
 
@@ -109,6 +124,17 @@ impl InfoPanelState {
         (self.request, cancellation)
     }
 
+    /// 悬停没开或面板没显示：不跟悬停，已显示的悬停条目也放掉，回到选中项。
+    fn forget_hover(&mut self) {
+        self.hover_timer = None;
+        self.hover_settled = None;
+    }
+
+    fn next_hover_generation(&mut self) -> u64 {
+        self.hover_generation += 1;
+        self.hover_generation
+    }
+
     fn facts_for(&mut self, request: u64) -> Option<&mut EntryFacts> {
         (request == self.request).then_some(())?;
         self.facts.as_mut()
@@ -134,12 +160,20 @@ impl FileBrowser {
                 }
             }
             InfoPanelMessage::HoverSettled { generation } => {
-                if let Some((path, pending)) = self.info_panel.hover_pending.take() {
-                    if pending == generation {
-                        self.info_panel.hover_settled = Some(path);
-                    } else {
-                        self.info_panel.hover_pending = Some((path, pending));
+                if let Some(HoverTimer::Settling {
+                    path,
+                    generation: armed,
+                }) = &self.info_panel.hover_timer
+                {
+                    if *armed == generation {
+                        self.info_panel.hover_settled = Some(path.clone());
+                        self.info_panel.hover_timer = None;
                     }
+                }
+            }
+            InfoPanelMessage::HoverReleased { generation } => {
+                if self.info_panel.hover_timer == Some(HoverTimer::Releasing { generation }) {
+                    self.info_panel.forget_hover();
                 }
             }
             InfoPanelMessage::FieldToggled(field) => {
@@ -175,6 +209,8 @@ impl FileBrowser {
     /// 再显示时目标没变就不重读。
     pub(super) fn sync_info_panel(&mut self) -> Task<Message> {
         if !self.right_dock.layout().shows(DockPanel::Info) {
+            // 没显示时不跟指针，留着旧的悬停项再显示出来就是陈旧的。
+            self.info_panel.forget_hover();
             return Task::none();
         }
         let hover = self.track_info_panel_hover();
@@ -212,34 +248,50 @@ impl FileBrowser {
         ])
     }
 
-    /// 悬停开着、指针在某个条目上时等它停稳；离开条目立刻回到选中项。
+    /// 悬停开着时：指针在某个条目上就等它停稳再显示；离开条目后继续显示最后停稳的那个，
+    /// 离开所有条目满 [`HOVER_RELEASE_DELAY`] 才回到选中项。
     fn track_info_panel_hover(&mut self) -> Task<Message> {
-        let hovered = self
-            .user_config
-            .info_panel
-            .follow_hover
-            .then(|| self.hovered_entry.clone())
-            .flatten();
         let state = &mut self.info_panel;
-        let Some(path) = hovered else {
-            state.hover_pending = None;
-            state.hover_settled = None;
-            return Task::none();
-        };
-        let waiting = state
-            .hover_pending
-            .as_ref()
-            .is_some_and(|(pending, _)| *pending == path);
-        if waiting || state.hover_settled.as_ref() == Some(&path) {
+        if !self.user_config.info_panel.follow_hover {
+            state.forget_hover();
             return Task::none();
         }
-        state.hover_generation += 1;
-        let generation = state.hover_generation;
-        state.hover_pending = Some((path, generation));
-        // 定时器在任务跑起来时才建：建它要在 tokio 运行时里。
-        Task::perform(
-            async { tokio::time::sleep(HOVER_SETTLE_DELAY).await },
-            move |()| Message::InfoPanel(InfoPanelMessage::HoverSettled { generation }),
+        let Some(path) = &self.hovered_entry else {
+            if state.hover_settled.is_none() {
+                // 没停稳就离开了：不显示它，也没有要回到的。
+                state.hover_timer = None;
+                return Task::none();
+            }
+            if matches!(state.hover_timer, Some(HoverTimer::Releasing { .. })) {
+                return Task::none();
+            }
+            let generation = state.next_hover_generation();
+            state.hover_timer = Some(HoverTimer::Releasing { generation });
+            return hover_timer_task(
+                HOVER_RELEASE_DELAY,
+                InfoPanelMessage::HoverReleased { generation },
+            );
+        };
+        if state.hover_settled.as_ref() == Some(path) {
+            // 回到正显示的条目上：离开的、去别处的定时都作废。
+            state.hover_timer = None;
+            return Task::none();
+        }
+        let waiting = matches!(
+            &state.hover_timer,
+            Some(HoverTimer::Settling { path: waiting, .. }) if waiting == path
+        );
+        if waiting {
+            return Task::none();
+        }
+        let generation = state.next_hover_generation();
+        state.hover_timer = Some(HoverTimer::Settling {
+            path: path.clone(),
+            generation,
+        });
+        hover_timer_task(
+            HOVER_SETTLE_DELAY,
+            InfoPanelMessage::HoverSettled { generation },
         )
     }
 
@@ -273,6 +325,13 @@ impl FileBrowser {
                 .and_then(|totals| totals.visible_files_bytes),
         }
     }
+}
+
+/// 定时器在任务跑起来时才建：建它要在 tokio 运行时里。
+fn hover_timer_task(delay: Duration, elapsed: InfoPanelMessage) -> Task<Message> {
+    Task::perform(async move { tokio::time::sleep(delay).await }, move |()| {
+        Message::InfoPanel(elapsed)
+    })
 }
 
 #[cfg(test)]

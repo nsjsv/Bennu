@@ -130,7 +130,7 @@ where
     let mut details = vec![detail_text(size, TREE_SIZE_WIDTH)];
     if show_dates {
         details.push(detail_text(
-            node.modified.map(format_utc_minute).unwrap_or_default(),
+            node.modified.map(format_local_minute).unwrap_or_default(),
             TREE_DATE_WIDTH,
         ));
     }
@@ -190,7 +190,7 @@ where
         )];
         if show_dates {
             details.push(detail_text(
-                entry.modified.map(format_utc_minute).unwrap_or_default(),
+                entry.modified.map(format_local_minute).unwrap_or_default(),
                 TREE_DATE_WIDTH,
             ));
         }
@@ -270,33 +270,19 @@ fn detail_text<Message: 'static>(content: String, width: f32) -> Element<'static
         .into()
 }
 
-/// 「2024-05-01 12:34」（UTC，和文件列表一样不换时区）。
-fn format_utc_minute(time: std::time::SystemTime) -> String {
-    let seconds = match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs() as i64,
-        Err(error) => -(error.duration().as_secs() as i64),
-    };
-    let (days, seconds_of_day) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
-    // 公历日期由距 1970-01-01 的天数推算（按 400 年一个周期）。
-    let shifted = days + 719_468;
-    let era = shifted.div_euclid(146_097);
-    let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era =
-        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
-    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
-    let month_index = (5 * day_of_year + 2) / 153;
-    let day = day_of_year - (153 * month_index + 2) / 5 + 1;
-    let month = if month_index < 10 {
-        month_index + 3
-    } else {
-        month_index - 9
-    };
-    let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}",
-        seconds_of_day / 3_600,
-        seconds_of_day % 3_600 / 60
-    )
+/// 「2024-05-01 12:34」，本机时区（跟文件列表一样跟着系统的时区）。
+fn format_local_minute(time: std::time::SystemTime) -> String {
+    format_minute_in(time, &chrono::Local)
+}
+
+fn format_minute_in<Zone: chrono::TimeZone>(time: std::time::SystemTime, zone: &Zone) -> String
+where
+    Zone::Offset: std::fmt::Display,
+{
+    chrono::DateTime::<chrono::Utc>::from(time)
+        .with_timezone(zone)
+        .format("%Y-%m-%d %H:%M")
+        .to_string()
 }
 
 /// 目录/归档树共用滚动容器：填满剩余高度的 scrollable + 常驻细线滑块；
@@ -457,18 +443,26 @@ fn status_row<Message: 'static>(depth: usize, message: String) -> Element<'stati
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
-    use super::format_utc_minute;
+    use super::format_minute_in;
 
     #[test]
-    fn archive_times_read_as_utc_minutes() {
-        assert_eq!(format_utc_minute(UNIX_EPOCH), "1970-01-01 00:00");
+    fn archive_times_read_as_minutes_in_the_zone() {
+        let utc = |time| format_minute_in(time, &chrono::Utc);
+        assert_eq!(utc(UNIX_EPOCH), "1970-01-01 00:00");
         assert_eq!(
-            format_utc_minute(UNIX_EPOCH + Duration::from_secs(1_714_566_840)),
+            utc(UNIX_EPOCH + Duration::from_secs(1_714_566_840)),
             "2024-05-01 12:34"
         );
         assert_eq!(
-            format_utc_minute(UNIX_EPOCH - Duration::from_secs(60)),
+            utc(UNIX_EPOCH - Duration::from_secs(60)),
             "1969-12-31 23:59"
+        );
+        assert_eq!(
+            format_minute_in(
+                UNIX_EPOCH,
+                &chrono::FixedOffset::east_opt(8 * 3600).unwrap()
+            ),
+            "1970-01-01 08:00"
         );
     }
 }

@@ -34,7 +34,6 @@ rustix = { workspace = true, features = ["event", "process", "stdio"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 thumbnails = { path = "../thumbnails" }
-time.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

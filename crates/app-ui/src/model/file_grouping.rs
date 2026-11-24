@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::time::SystemTime;
 
+use chrono::Datelike;
 use file_core::SortDirection;
-use time::OffsetDateTime;
 
 use crate::config::UiLanguage;
 use crate::formatting::{format_file_size, format_file_size_compact};
@@ -340,17 +340,25 @@ pub(crate) fn kind_category_group_key(name: &str) -> KindCategory {
     }
 }
 
-/// 日期时段桶分组键；日界按 UTC 日历日，与列表时间列的 UTC 显示口径一致。
+/// 日期时段桶分组键；日界按本机时区的日历日，跟列表里显示的时间同一个时区。
 /// `now` 注入便于测试。元数据未加载（None）→ Earlier 兜底；时间戳落在
 /// 未来（时钟偏差）按今天处理。桶定义：今天 / 昨天 / 过去 7 天内余下
 /// 日历日 / 过去 30 天内余下日历日 / 当年更早按日历月 / 往年。
 pub(crate) fn date_group_key(timestamp: Option<SystemTime>, now: SystemTime) -> DateBucket {
+    date_group_key_in(timestamp, now, &chrono::Local)
+}
+
+fn date_group_key_in<Zone: chrono::TimeZone>(
+    timestamp: Option<SystemTime>,
+    now: SystemTime,
+    zone: &Zone,
+) -> DateBucket {
     let Some(timestamp) = timestamp else {
         return DateBucket::Earlier;
     };
-    let now_date = OffsetDateTime::from(now).date();
-    let timestamp_date = OffsetDateTime::from(timestamp).date();
-    let day_difference = (now_date - timestamp_date).whole_days();
+    let now_date = crate::formatting::date_in(now, zone);
+    let timestamp_date = crate::formatting::date_in(timestamp, zone);
+    let day_difference = (now_date - timestamp_date).num_days();
     match day_difference {
         i64::MIN..=0 => DateBucket::Today,
         1 => DateBucket::Yesterday,
@@ -358,7 +366,8 @@ pub(crate) fn date_group_key(timestamp: Option<SystemTime>, now: SystemTime) -> 
         7..=29 => DateBucket::ThisMonth,
         _ => {
             if timestamp_date.year() == now_date.year() {
-                DateBucket::Month(u8::from(timestamp_date.month()))
+                // 月份 1..=12，放得进 u8。
+                DateBucket::Month(timestamp_date.month() as u8)
             } else {
                 DateBucket::Earlier
             }

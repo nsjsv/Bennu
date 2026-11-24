@@ -145,8 +145,8 @@ impl RootGrouping {
     }
 }
 
-/// 排好的行流按它判断分组变没变:只算划分读的。日期分组按「今天」分桶,过了零点(UTC,与
-/// `date_group_key` 一致)组就变了,所以算今天是哪天,不算此刻。
+/// 排好的行流按它判断分组变没变:只算划分读的。日期分组按「今天」分桶,过了零点(本机时区,
+/// 与 `date_group_key` 一致)组就变了,所以算今天是哪天,不算此刻。
 impl Hash for RootGrouping {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.mode.hash(state);
@@ -158,7 +158,7 @@ impl Hash for RootGrouping {
                 | FileGroupingMode::CreatedTime
                 | FileGroupingMode::AccessedTime
         )
-        .then(|| time::OffsetDateTime::from(self.now).date().to_julian_day())
+        .then(|| crate::formatting::local_date(self.now))
         .hash(state);
     }
 }

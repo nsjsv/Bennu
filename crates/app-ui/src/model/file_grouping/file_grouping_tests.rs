@@ -1,17 +1,30 @@
 // 文件分组纯函数层的单元测试；与实现分文件以守住单文件 800 行约束。
 use std::time::Duration;
 
+use chrono::TimeZone;
 use file_core::SortDirection;
-use time::Month as TimeMonth;
 
 use super::*;
 
+/// UTC 里的某个时刻。
 fn system_time(year: i32, month: u8, day: u8, hour: u8, minute: u8) -> SystemTime {
-    let date = time::Date::from_calendar_date(year, TimeMonth::try_from(month).unwrap(), day)
+    let datetime = chrono::Utc
+        .with_ymd_and_hms(
+            year,
+            u32::from(month),
+            u32::from(day),
+            u32::from(hour),
+            u32::from(minute),
+            0,
+        )
+        .single()
         .expect("valid test date");
-    let datetime = date.midnight().assume_utc()
-        + Duration::from_secs(u64::from(hour) * 3600 + u64::from(minute) * 60);
-    SystemTime::UNIX_EPOCH + Duration::from_secs(datetime.unix_timestamp() as u64)
+    SystemTime::UNIX_EPOCH + Duration::from_secs(datetime.timestamp() as u64)
+}
+
+/// 这些用例的时刻都按 UTC 写，日界也按 UTC 算。
+fn utc_date_group_key(timestamp: Option<SystemTime>, now: SystemTime) -> DateBucket {
+    date_group_key_in(timestamp, now, &chrono::Utc)
 }
 
 fn name_initial_key(name: &str) -> FileGroupKey {
@@ -93,63 +106,78 @@ fn date_buckets_cover_fixed_now_boundaries() {
 
     // 今天（含当日任意时刻）与未来时间戳（时钟偏差）。
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 15, 0, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 15, 0, 0)), now),
         DateBucket::Today
     );
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 15, 23, 30)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 15, 23, 30)), now),
         DateBucket::Today
     );
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 16, 8, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 16, 8, 0)), now),
         DateBucket::Today
     );
 
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 14, 23, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 14, 23, 0)), now),
         DateBucket::Yesterday
     );
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 14, 0, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 14, 0, 0)), now),
         DateBucket::Yesterday
     );
 
     // 过去 7 天窗口：日历日差 2..=6。
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 13, 12, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 13, 12, 0)), now),
         DateBucket::ThisWeek
     );
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 9, 0, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 9, 0, 0)), now),
         DateBucket::ThisWeek
     );
 
     // 过去 30 天窗口：日历日差 7..=29。
     assert_eq!(
-        date_group_key(Some(system_time(2024, 4, 8, 12, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 4, 8, 12, 0)), now),
         DateBucket::ThisMonth
     );
     assert_eq!(
-        date_group_key(Some(system_time(2024, 3, 17, 12, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 3, 17, 12, 0)), now),
         DateBucket::ThisMonth
     );
 
     // 当年更早按日历月；边界日差 30 归月桶。
     assert_eq!(
-        date_group_key(Some(system_time(2024, 3, 16, 12, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 3, 16, 12, 0)), now),
         DateBucket::Month(3)
     );
     assert_eq!(
-        date_group_key(Some(system_time(2024, 1, 1, 0, 0)), now),
+        utc_date_group_key(Some(system_time(2024, 1, 1, 0, 0)), now),
         DateBucket::Month(1)
     );
 
     // 往年与元数据缺失。
     assert_eq!(
-        date_group_key(Some(system_time(2023, 12, 31, 12, 0)), now),
+        utc_date_group_key(Some(system_time(2023, 12, 31, 12, 0)), now),
         DateBucket::Earlier
     );
-    assert_eq!(date_group_key(None, now), DateBucket::Earlier);
+    assert_eq!(utc_date_group_key(None, now), DateBucket::Earlier);
+}
+
+#[test]
+fn the_day_boundary_is_the_one_of_the_given_zone() {
+    // 上海 4 月 15 日上午 9 点；文件是上海 15 日凌晨 2 点改的 = UTC 14 日 18 点。
+    let now = system_time(2024, 4, 15, 1, 0);
+    let early_morning = system_time(2024, 4, 14, 18, 0);
+    assert_eq!(
+        date_group_key_in(Some(early_morning), now, &chrono_tz::Asia::Shanghai),
+        DateBucket::Today
+    );
+    assert_eq!(
+        utc_date_group_key(Some(early_morning), now),
+        DateBucket::Yesterday
+    );
 }
 
 #[test]
@@ -157,18 +185,18 @@ fn date_buckets_cross_year_boundaries() {
     let january_now = system_time(2024, 1, 10, 12, 0);
     // 30 天滚动窗口优先于日历月：12 月末条目在 1 月初仍归 ThisMonth。
     assert_eq!(
-        date_group_key(Some(system_time(2023, 12, 20, 12, 0)), january_now),
+        utc_date_group_key(Some(system_time(2023, 12, 20, 12, 0)), january_now),
         DateBucket::ThisMonth
     );
     // 窗口之外的往年条目 → Earlier。
     assert_eq!(
-        date_group_key(Some(system_time(2023, 11, 1, 12, 0)), january_now),
+        utc_date_group_key(Some(system_time(2023, 11, 1, 12, 0)), january_now),
         DateBucket::Earlier
     );
     // 2 月回看 1 月：30 天窗口内归 ThisMonth。
     let february_now = system_time(2024, 2, 5, 12, 0);
     assert_eq!(
-        date_group_key(Some(system_time(2024, 1, 20, 12, 0)), february_now),
+        utc_date_group_key(Some(system_time(2024, 1, 20, 12, 0)), february_now),
         DateBucket::ThisMonth
     );
 }
@@ -351,7 +379,7 @@ fn partition_carries_descriptor_rank_for_date_keys() {
             direction: SortDirection::Ascending,
             language: UiLanguage::English,
         },
-        |(timestamp, _)| FileGroupKey::Date(date_group_key(Some(*timestamp), now)),
+        |(timestamp, _)| FileGroupKey::Date(utc_date_group_key(Some(*timestamp), now)),
     );
     let titles: Vec<&str> = sections
         .iter()
@@ -454,7 +482,7 @@ fn index_labels_use_short_words_and_month_short_forms_for_dates() {
         (system_time(2023, 3, 1, 9, 0), "Earlier", "更早"),
     ];
     for (timestamp, english, chinese) in cases {
-        let key = FileGroupKey::Date(date_group_key(Some(timestamp), now));
+        let key = FileGroupKey::Date(utc_date_group_key(Some(timestamp), now));
         assert_eq!(index_label_of(key, UiLanguage::English), english);
         assert_eq!(index_label_of(key, UiLanguage::Chinese), chinese);
     }

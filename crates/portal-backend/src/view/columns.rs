@@ -152,7 +152,7 @@ fn lane_entry_row(
         && matches!(entry.media_by_name(), MediaByName::Image(_))
     {
         match session.thumbnail_ready(entry.path()) {
-            Some(cached) => image(image::Handle::from_path(&cached.output))
+            Some(cached) => image(cached.image_handle())
                 .width(Length::Fixed(LANE_ICON_EDGE))
                 .height(Length::Fixed(LANE_ICON_EDGE))
                 .into(),

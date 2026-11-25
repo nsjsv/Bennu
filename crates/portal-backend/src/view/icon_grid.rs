@@ -86,13 +86,13 @@ fn tile(
         muted_icon_svg_style()
     };
     // 图片 tile 有就绪缩略图时用 PNG 替换类型图标（96×96，image 默认
-    // ContentFit::Contain 保持纵横比）。Handle::from_path 只持路径不驻
-    // 留像素，每帧重建成本可忽略。
+    // ContentFit::Contain 保持纵横比）。句柄只持路径不驻留像素，每帧重建
+    // 成本可忽略。
     let icon: Element<'static, SessionMessage> = if entry.kind() == FileKind::File
         && matches!(entry.media_by_name(), MediaByName::Image(_))
     {
         match session.thumbnail_ready(entry.path()) {
-            Some(cached) => image(image::Handle::from_path(&cached.output))
+            Some(cached) => image(cached.image_handle())
                 .width(Length::Fixed(ICON_EDGE as f32))
                 .height(Length::Fixed(ICON_EDGE as f32))
                 .into(),

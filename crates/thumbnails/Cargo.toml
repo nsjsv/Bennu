@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 blake3.workspace = true
 file-core = { path = "../file-core" }
+# 只用它的图片句柄：`CachedThumbnail::image_handle` 给界面按源文件版本认图。
+iced_core = "0.14"
 image.workspace = true
 md-5.workspace = true
 # 与 image 用的同一版本；image 的 PNG 编码器写不了 Thumb::* 文本块。

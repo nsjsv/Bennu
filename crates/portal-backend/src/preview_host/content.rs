@@ -264,7 +264,7 @@ impl PreviewHost {
             daemon
                 .preview
                 .set_thumbnail_display(path.clone(), &ready, ready_edge);
-            let placeholder = Some(iced::widget::image::Handle::from_path(&ready.output));
+            let placeholder = Some(ready.image_handle());
             if preview_edge > ready_edge.saturating_add(PREVIEW_RESIZE_EXTRA_PIXELS) {
                 // 已有缩略图明显小于预览档位：并行生成预览档位升级展示。
                 session.enqueue_preview_thumbnail_request(request);
@@ -470,7 +470,7 @@ impl PreviewHost {
         self.engine.preview = Some(PreviewState::Ready(PreviewContent::Image(
             ImagePreviewContent::Thumbnail {
                 path,
-                handle: iced::widget::image::Handle::from_path(&ready.output),
+                handle: ready.image_handle(),
                 width: ready.width,
                 height: ready.height,
                 max_edge,

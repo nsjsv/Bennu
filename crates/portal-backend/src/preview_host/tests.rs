@@ -427,6 +427,7 @@ fn fake_cached(request: &ThumbnailRequest, width: u32, height: u32) -> CachedThu
         width,
         height,
         cache_hit: true,
+        source_version: request.metadata,
     }
 }
 

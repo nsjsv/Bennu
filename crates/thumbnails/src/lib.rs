@@ -6,6 +6,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use file_core::image_decode::{decode_image, image_dimensions, DecodeBound, ImageDecodeError};
 use file_core::{media_by_name, ImageKind, MediaByName, RasterSource};
+use iced_core::image::Handle;
 use thiserror::Error;
 
 mod cache_format;
@@ -94,6 +95,24 @@ pub struct CachedThumbnail {
     pub width: u32,
     pub height: u32,
     pub cache_hit: bool,
+    /// 缩略图画的是源文件哪一版：核对缓存或生成时当场读到的大小和修改时间。
+    pub source_version: ThumbnailSourceMetadata,
+}
+
+impl CachedThumbnail {
+    /// 显示用的图片句柄。缩略图文件按源文件地址命名，源文件换了内容就原地重写；渲染器按句柄编号
+    /// 留着解码好的像素，`Handle::from_path` 的编号只由路径算，换了内容也照画旧的。这里的编号由
+    /// 路径和这一版源文件一起算：同一版（界面先用空的、再用补全的大小和修改时间来要）不重复解码，
+    /// 换了一版就重读文件。
+    pub fn image_handle(&self) -> Handle {
+        let mut identity = self.output.clone().into_os_string();
+        identity.push(format!(
+            "\0{:?}\0{}",
+            self.source_version.modified, self.source_version.len
+        ));
+        // 只借它由路径算编号的办法，算的是上面这串；读图仍读缩略图文件。
+        Handle::Path(Handle::from_path(identity).id(), self.output.clone())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -235,6 +254,7 @@ impl CacheSlot {
                 width,
                 height,
                 cache_hit: true,
+                source_version: facts,
             }),
             None => Err((self, facts)),
         })
@@ -319,6 +339,7 @@ fn generate_thumbnail_blocking(
         width: image.width(),
         height: image.height(),
         cache_hit: false,
+        source_version: facts,
     })
 }
 

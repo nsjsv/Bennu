@@ -299,7 +299,7 @@ impl ThumbnailCache {
     ) -> ThumbnailHandleEntry {
         let key = thumbnail.key.clone();
         let entry = ThumbnailHandleEntry {
-            handle: image::Handle::from_path(thumbnail.output.clone()),
+            handle: thumbnail.image_handle(),
             source: thumbnail.source.clone(),
             width: thumbnail.width,
             height: thumbnail.height,
@@ -751,6 +751,7 @@ mod tests {
             width: LIST_THUMBNAIL_EDGE,
             height: LIST_THUMBNAIL_EDGE,
             cache_hit: true,
+            source_version: request.metadata,
         }
     }
 }

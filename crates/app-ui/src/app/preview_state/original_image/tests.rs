@@ -175,6 +175,7 @@ fn ready_listing_thumbnail_shows_immediately_and_starts_original() {
             width: 96,
             height: 64,
             cache_hit: false,
+            source_version: listing_request.metadata,
         },
         LIST_THUMBNAIL_EDGE,
     );
@@ -223,6 +224,7 @@ fn small_ready_thumbnail_upgrades_when_preview_thumbnail_arrives() {
             width: 96,
             height: 64,
             cache_hit: false,
+            source_version: listing_request.metadata,
         },
         LIST_THUMBNAIL_EDGE,
     );
@@ -529,6 +531,7 @@ fn ready_preview_outcome(
         width,
         height,
         cache_hit: false,
+        source_version: request.metadata,
     };
     ThumbnailLoadOutcome {
         work: preview_work(request),

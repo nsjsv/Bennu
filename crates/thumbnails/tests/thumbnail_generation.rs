@@ -106,6 +106,8 @@ async fn changed_source_is_regenerated_in_place() {
     assert!(!second.cache_hit);
     assert_eq!(second.output, first.output);
     assert_ne!(second.key, first.key);
+    // 同一个文件换了内容：界面上的句柄得换编号，否则渲染器照画留着的旧像素。
+    assert_ne!(second.image_handle().id(), first.image_handle().id());
     assert_eq!((second.width, second.height), (40, 40));
     assert_eq!(
         text(&png_texts(&second.output), "Thumb::MTime"),
@@ -148,6 +150,8 @@ async fn request_made_before_metadata_is_known_still_uses_the_real_source_facts(
         .await
         .unwrap();
     assert!(known.cache_hit);
+    // 同一版先后用空的、补全的元数据来要：句柄编号不变，渲染器不重复解码。
+    assert_eq!(known.image_handle().id(), first.image_handle().id());
 }
 
 #[tokio::test]

@@ -234,13 +234,13 @@ fn entry_row(
         muted_icon_svg_style()
     };
     // 图片行有就绪缩略图时用行内 PNG 替换类型图标（18×18 与图标槽同
-    // 尺寸；image 默认 ContentFit::Contain 保持纵横比）。Handle::from_path
-    // 只持路径不驻留像素，每帧重建成本可忽略。
+    // 尺寸；image 默认 ContentFit::Contain 保持纵横比）。句柄只持路径不驻留
+    // 像素，每帧重建成本可忽略。
     let icon: Element<'static, SessionMessage> = if entry.kind() == FileKind::File
         && matches!(entry.media_by_name(), MediaByName::Image(_))
     {
         match session.thumbnail_ready(entry.path()) {
-            Some(cached) => image(image::Handle::from_path(&cached.output))
+            Some(cached) => image(cached.image_handle())
                 .width(Length::Fixed(18.0))
                 .height(Length::Fixed(18.0))
                 .into(),

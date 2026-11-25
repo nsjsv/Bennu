@@ -5886,6 +5886,7 @@ version = "0.4.7"
 dependencies = [
  "blake3",
  "file-core",
+ "iced_core",
  "image",
  "md-5",
  "png 0.18.1",

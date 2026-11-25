@@ -471,6 +471,7 @@ mod tests {
             width: THUMBNAIL_MAX_EDGE,
             height: THUMBNAIL_MAX_EDGE,
             cache_hit: false,
+            source_version: request.metadata,
         }
     }
 

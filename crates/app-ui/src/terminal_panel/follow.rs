@@ -2,9 +2,9 @@
 //!
 //! - 文件区的目标变了 → 激活的 shell 标签 cd 过去：只在 shell 空闲（前台没有程序）时，先用
 //!   SIGINT 清掉敲了一半的命令——不然 `rm -rf *` 后面接上 cd 就成了另一条命令。
-//! - shell 自己换了目录（读线程报 `DirectoryChanged`）→ 文件区跳过去：只在终端有键盘焦点时。
-//!   文件区连换几个目录时，读线程可能晚一步报出我们自己发的某个 cd；谁有焦点谁说了算，这种
-//!   迟到的报告就不会把文件区拽回去，不用记哪些 cd 是我们发的。
+//! - shell 自己换了目录（屏幕变了时看到的，见 `TerminalSession::directory_change`）→ 文件区
+//!   跳过去：只在终端有键盘焦点时。文件区连换几个目录时，可能晚一步才看到我们自己发的某个
+//!   cd；谁有焦点谁说了算，这种迟到的变化就不会把文件区拽回去，不用记哪些 cd 是我们发的。
 
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
@@ -112,11 +112,12 @@ impl FileBrowser {
         }
         active_tab.session.signal(libc::SIGINT);
         active_tab.session.write_input(&quoting.cd_line(&directory));
-        // 先记成它的目录：读线程报上来之前文件区又换回原来的目录（A→B→A）时照样发 cd。
+        // 先记成它的目录：看到 shell 真换过去之前文件区又换回原来的目录（A→B→A）时照样发 cd。
         active_tab.directory = directory;
     }
 
-    /// shell 换了目录：记下（标签标题、跟随判断用）；用户正在终端里打字时文件区跟过去。
+    /// shell 标签的 shell 换了目录：记下（标签标题、跟随判断用）；用户正在终端里打字时文件区
+    /// 跟过去。
     pub(super) fn accept_shell_directory(
         &mut self,
         session: SessionId,
@@ -132,9 +133,6 @@ impl FileBrowser {
         else {
             return Task::none();
         };
-        if !matches!(tab.program, TabProgram::Shell(_)) {
-            return Task::none();
-        }
         tab.directory = directory.clone();
         if !typing_here || self.terminal_panel.follow_target_snapshot.as_ref() == Some(&directory) {
             return Task::none();
@@ -258,6 +256,33 @@ mod tests {
         drop(browser.accept_shell_directory(7, inner.clone()));
 
         assert_eq!(browser.tab().current_directory(), Some(inner.as_path()));
+        assert_eq!(
+            browser.terminal_panel.active_tab().unwrap().directory,
+            inner
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cd_in_the_focused_terminal_moves_the_file_area_once_the_prompt_shows() {
+        use iced::futures::StreamExt;
+
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().canonicalize().unwrap();
+        let inner = root.join("inner");
+        std::fs::create_dir(&inner).unwrap();
+        let mut browser = browser_with_shell(&root, "cd inner && printf '$ ' && read x");
+        browser.terminal_panel.focused = true;
+
+        let mut events = Box::pin(browser.terminal_panel.events.stream());
+        while browser.tab().current_directory() != Some(inner.as_path()) {
+            let message = tokio::time::timeout(std::time::Duration::from_secs(20), events.next())
+                .await
+                .expect("the shell's prompt arrives")
+                .expect("the event stream stays open");
+            if let Message::TerminalPanel(message) = message {
+                drop(browser.handle_terminal_panel_message(message));
+            }
+        }
         assert_eq!(
             browser.terminal_panel.active_tab().unwrap().directory,
             inner

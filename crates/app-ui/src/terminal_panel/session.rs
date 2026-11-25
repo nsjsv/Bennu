@@ -6,7 +6,7 @@
 
 use std::fs::File;
 use std::io::{ErrorKind, Read, Write};
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::os::fd::BorrowedFd;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, OnceLock};
@@ -31,8 +31,6 @@ const READ_CHUNK_BYTES: usize = 64 * 1024;
 pub(crate) enum SessionEvent {
     /// 屏幕内容变了。
     Wakeup,
-    /// shell 在前台时它的当前目录变了（读线程从 /proc 读的）。
-    DirectoryChanged(PathBuf),
     /// 要界面回答或转交的终端请求：颜色查询、尺寸查询、写剪贴板。
     Request(Event),
     /// 输出读到头、进程已收：退出状态；读不下去时是原因。
@@ -51,6 +49,8 @@ pub(crate) struct TerminalSession {
     process: Option<u32>,
     /// 进程输出过东西了（shell 打出了提示符）。
     printed: Arc<AtomicBool>,
+    /// 上次看到的 shell 当前目录（[`Self::directory_change`]）。
+    seen_directory: PathBuf,
 }
 
 pub(crate) fn shell_for_user() -> String {
@@ -175,7 +175,6 @@ pub(crate) fn spawn_terminal_session(
         child,
         failure,
         events: events.clone(),
-        directory: program.working_directory.clone(),
     };
     std::thread::Builder::new()
         .name(format!("terminal-read-{id}"))
@@ -188,6 +187,7 @@ pub(crate) fn spawn_terminal_session(
         master,
         process,
         printed,
+        seen_directory: program.working_directory.clone(),
     })
 }
 
@@ -263,10 +263,26 @@ impl TerminalSession {
     /// shell 起来了、在等输入：输出过东西（还在读 rc 文件时一个 SIGINT 会打断它的配置），
     /// 而且它自己在前台，没有程序在跑。
     pub(crate) fn shell_is_idle(&self) -> bool {
-        self.printed.load(Ordering::Relaxed)
-            && self.process.is_some_and(|process| {
-                self.master.process_group_leader() == Some(process as libc::pid_t)
-            })
+        self.printed.load(Ordering::Relaxed) && self.shell_in_foreground().is_some()
+    }
+
+    /// shell 自己在前台时它的当前目录，跟上次看到的不一样才返回。界面在屏幕变了时问：
+    /// 在 shell 里 cd 以后一定会打提示符。不放在读线程每读一块问一次——大量输出时一秒读
+    /// 十几万次，每次多一个 ioctl 都要抢终端的锁，把写输出的程序拖慢。
+    pub(crate) fn directory_change(&mut self) -> Option<PathBuf> {
+        let process = self.shell_in_foreground()?;
+        let directory = std::fs::read_link(format!("/proc/{process}/cwd")).ok()?;
+        if directory == self.seen_directory {
+            return None;
+        }
+        self.seen_directory = directory.clone();
+        Some(directory)
+    }
+
+    /// 领头进程（shell）自己在前台：没有程序在跑。
+    fn shell_in_foreground(&self) -> Option<u32> {
+        self.process
+            .filter(|&process| self.master.process_group_leader() == Some(process as libc::pid_t))
     }
 
     /// 测试里造一个断开的会话（真的读写失败不好碰上）。
@@ -383,8 +399,6 @@ struct OutputReader {
     child: Box<dyn Child + Send + Sync>,
     failure: Arc<OnceLock<String>>,
     events: SessionEventSender,
-    /// shell 上次报告的当前目录。
-    directory: PathBuf,
 }
 
 impl OutputReader {
@@ -415,11 +429,14 @@ impl OutputReader {
         let mut processor: Processor = Processor::new();
         let mut buffer = vec![0; READ_CHUNK_BYTES];
         loop {
-            if !wait_readable(&self.reader, processor.sync_timeout().sync_timeout())? {
-                // 程序开了同步更新（DECSET 2026）迟迟不收尾：超时了照样把攒着的画出来。
-                processor.stop_sync(&mut *self.term.lock());
-                self.send(SessionEvent::Wakeup);
-                continue;
+            // 只有同步更新（DECSET 2026）开着时才要按时醒：程序迟迟不收尾，超时了照样把攒着的
+            // 画出来。平时直接阻塞在读上，不每块先 poll 一次（多一次系统调用、多抢一次终端的锁）。
+            if let Some(deadline) = processor.sync_timeout().sync_timeout() {
+                if !wait_readable(&self.reader, deadline)? {
+                    processor.stop_sync(&mut *self.term.lock());
+                    self.send(SessionEvent::Wakeup);
+                    continue;
+                }
             }
             let length = match self.reader.read(&mut buffer) {
                 Ok(0) => return Ok(()),
@@ -435,27 +452,6 @@ impl OutputReader {
             if processor.sync_bytes_count() < length {
                 self.send(SessionEvent::Wakeup);
             }
-            self.report_directory();
-        }
-    }
-
-    /// shell 自己在前台（没有程序在跑）时看它的当前目录，变了就告诉界面。每读一块看一次：
-    /// 在 shell 里 cd 以后一定会输出提示符；程序在前台时只多一次 ioctl。
-    fn report_directory(&mut self) {
-        let Some(process) = self.child.process_id() else {
-            return;
-        };
-        // SAFETY: 只读这个 fd 所在终端的前台进程组。
-        let foreground = unsafe { libc::tcgetpgrp(self.reader.as_raw_fd()) };
-        if foreground != process as libc::pid_t {
-            return;
-        }
-        let Ok(directory) = std::fs::read_link(format!("/proc/{process}/cwd")) else {
-            return;
-        };
-        if directory != self.directory {
-            self.directory = directory.clone();
-            self.send(SessionEvent::DirectoryChanged(directory));
         }
     }
 
@@ -466,18 +462,16 @@ impl OutputReader {
 }
 
 /// 等到主端可读；`deadline` 到了还没有就返回 `false`。
-fn wait_readable(reader: &File, deadline: Option<Instant>) -> std::io::Result<bool> {
+fn wait_readable(reader: &File, deadline: Instant) -> std::io::Result<bool> {
     use rustix::event::{poll, PollFd, PollFlags, Timespec};
     loop {
-        let timeout = deadline.map(|deadline| {
-            let left = deadline.saturating_duration_since(Instant::now());
-            Timespec {
-                tv_sec: left.as_secs() as _,
-                tv_nsec: left.subsec_nanos() as _,
-            }
-        });
+        let left = deadline.saturating_duration_since(Instant::now());
+        let timeout = Timespec {
+            tv_sec: left.as_secs() as _,
+            tv_nsec: left.subsec_nanos() as _,
+        };
         let mut fds = [PollFd::new(reader, PollFlags::IN)];
-        match poll(&mut fds, timeout.as_ref()) {
+        match poll(&mut fds, Some(&timeout)) {
             Ok(0) => return Ok(false),
             Ok(_) => return Ok(true),
             Err(rustix::io::Errno::INTR) => continue,
@@ -543,10 +537,22 @@ mod tests {
         let (session, mut events) =
             spawn("/bin/sh", &["-c", "printf hello; read x"], folder.path());
 
-        wait_for(&mut events, |event| {
-            (matches!(event, SessionEvent::Wakeup) && session.emulator.last_lines(1) == "hello")
-                .then_some(())
-        });
+        wait_for_line(&session, &mut events, "hello");
+        session.write_input(b"\r");
+        assert!(ended(&mut events).unwrap().success());
+    }
+
+    #[test]
+    fn an_unfinished_synchronized_update_is_shown_after_its_timeout() {
+        let folder = tempfile::tempdir().unwrap();
+        // 开了同步更新（DECSET 2026）不收尾、也不再输出：读线程得自己按时醒来把攒着的画出来。
+        let (session, mut events) = spawn(
+            "/bin/sh",
+            &["-c", "printf '\\033[?2026hheld'; read x"],
+            folder.path(),
+        );
+
+        wait_for_line(&session, &mut events, "held");
         session.write_input(b"\r");
         assert!(ended(&mut events).unwrap().success());
     }
@@ -559,24 +565,49 @@ mod tests {
         assert_eq!(ended(&mut events).unwrap().exit_code(), 3);
     }
 
+    /// 等到屏幕最后一行是 `line`。
+    fn wait_for_line(session: &TerminalSession, events: &mut Events, line: &str) {
+        wait_for(events, |event| {
+            (matches!(event, SessionEvent::Wakeup) && session.emulator.last_lines(1) == line)
+                .then_some(())
+        });
+    }
+
     #[test]
-    fn a_directory_change_of_the_waiting_shell_is_reported() {
+    fn a_directory_change_of_the_waiting_shell_is_seen_once() {
         let folder = tempfile::tempdir().unwrap();
         let inner = folder.path().canonicalize().unwrap().join("inner");
         std::fs::create_dir(&inner).unwrap();
-        let (session, mut events) = spawn(
+        let (mut session, mut events) = spawn(
             "/bin/sh",
             &["-c", "cd inner && printf x && read x"],
             folder.path(),
         );
 
-        let reported = wait_for(&mut events, |event| match event {
-            SessionEvent::DirectoryChanged(directory) => Some(directory.clone()),
-            _ => None,
-        });
-        assert_eq!(reported, inner);
+        wait_for_line(&session, &mut events, "x");
+        assert_eq!(session.directory_change(), Some(inner));
+        assert_eq!(session.directory_change(), None);
         session.write_input(b"\r");
         ended(&mut events).unwrap();
+    }
+
+    #[test]
+    fn the_directory_of_a_shell_running_a_foreground_job_is_not_looked_at() {
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir(folder.path().join("inner")).unwrap();
+        // `set -m`：前台作业有自己的进程组，跟交互 shell 一样。
+        let (mut session, mut events) = spawn(
+            "/bin/sh",
+            &["-c", "set -m; cd inner && printf x && sleep 30"],
+            folder.path(),
+        );
+
+        wait_for_line(&session, &mut events, "x");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while session.shell_in_foreground().is_some() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(session.directory_change(), None);
     }
 
     #[test]

@@ -12,6 +12,7 @@ use iced::Task;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::session::{SessionEvent, SessionEventSender, SessionId};
+use super::tabs::TabProgram;
 use super::{palette, view, TerminalPanelMessage};
 use crate::app::FileBrowser;
 use crate::model::Message;
@@ -104,19 +105,14 @@ impl FileBrowser {
     ) -> Task<Message> {
         match event {
             SessionEvent::Wakeup => self.terminal_screen_changed(session),
-            SessionEvent::DirectoryChanged(directory) => {
-                return self.accept_shell_directory(session, directory);
-            }
-            SessionEvent::Request(request) => {
-                return self.answer_terminal_request(session, request)
-            }
-            SessionEvent::Ended(end) => return self.terminal_session_ended(session, end),
+            SessionEvent::Request(request) => self.answer_terminal_request(session, request),
+            SessionEvent::Ended(end) => self.terminal_session_ended(session, end),
         }
-        Task::none()
     }
 
-    /// 后台标签亮未读圆点；超级输入框的命令打开了全屏界面就转进标签条让用户操作。
-    fn terminal_screen_changed(&mut self, session: SessionId) {
+    /// 后台标签亮未读圆点；shell 标签看一眼 shell 是不是换了目录（打提示符也是屏幕变化）；
+    /// 超级输入框的命令打开了全屏界面就转进标签条让用户操作。
+    fn terminal_screen_changed(&mut self, session: SessionId) -> Task<Message> {
         let active_session_id = self.terminal_panel.active_session_id;
         if let Some(tab) = self
             .terminal_panel
@@ -127,12 +123,18 @@ impl FileBrowser {
             if active_session_id != Some(session) {
                 tab.has_unread_output = true;
             }
+            if matches!(tab.program, TabProgram::Shell(_)) {
+                if let Some(directory) = tab.session.directory_change() {
+                    return self.accept_shell_directory(session, directory);
+                }
+            }
         } else if self
             .hidden_terminal_session(session)
             .is_some_and(|hidden| hidden.emulator.is_full_screen())
         {
             self.show_super_box_command(session);
         }
+        Task::none()
     }
 
     /// 进程收了：超级输入框的命令把结果交回去；终端标签正常退出就关掉，断开的留着
@@ -204,11 +206,10 @@ impl FileBrowser {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::time::Duration;
 
     use super::*;
-    use crate::terminal_panel::tabs::{TabProgram, TerminalTab};
+    use crate::terminal_panel::tabs::TerminalTab;
     use crate::terminal_panel::{emulator_dimensions, session};
 
     #[test]
@@ -216,7 +217,7 @@ mod tests {
         let mut batch = vec![
             (1, SessionEvent::Wakeup),
             (2, SessionEvent::Wakeup),
-            (1, SessionEvent::DirectoryChanged(PathBuf::from("/tmp"))),
+            (1, SessionEvent::Request(Event::Bell)),
             (1, SessionEvent::Wakeup),
             (1, SessionEvent::Ended(Err("gone".to_owned()))),
         ];
@@ -226,7 +227,6 @@ mod tests {
             .map(|(session, event)| {
                 let kind = match event {
                     SessionEvent::Wakeup => "wakeup",
-                    SessionEvent::DirectoryChanged(_) => "directory",
                     SessionEvent::Request(_) => "request",
                     SessionEvent::Ended(_) => "ended",
                 };
@@ -235,7 +235,7 @@ mod tests {
             .collect();
         assert_eq!(
             kept,
-            vec![(2, "wakeup"), (1, "directory"), (1, "wakeup"), (1, "ended")]
+            vec![(2, "wakeup"), (1, "request"), (1, "wakeup"), (1, "ended")]
         );
     }
 

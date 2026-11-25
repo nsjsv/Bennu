@@ -138,6 +138,16 @@ pub(crate) fn spawn_terminal_session(
     let pair = native_pty_system()
         .openpty(pty_size(dimensions))
         .map_err(|error| not_started(&error))?;
+    // 在进程起来之前设：shell 记下启动时的设置，跑命令时照它恢复。设不上只是删字少删几个
+    // 字节，终端照常可用。
+    if let Err(error) = enable_utf8_line_input(pair.master.as_ref()) {
+        tracing::warn!(
+            target: "app_ui::terminal",
+            event = "terminal_utf8_input_failed",
+            %error,
+            "erasing in line input may leave parts of a character"
+        );
+    }
 
     let mut command = CommandBuilder::new(&program.program);
     command.args(&program.arguments);
@@ -208,6 +218,17 @@ fn duplicate_master(master: &dyn MasterPty) -> std::io::Result<File> {
         master_fd(master)?,
         0,
     )?))
+}
+
+/// 行输入（`read`、`cat` 读一行）按 UTF-8 删字：退格删掉整个汉字，不留半个。别的终端都这么设。
+fn enable_utf8_line_input(master: &dyn MasterPty) -> std::io::Result<()> {
+    use rustix::termios::{tcgetattr, tcsetattr, InputModes, OptionalActions};
+    // 在主端上设就是设给这一对伪终端。
+    let fd = master_fd(master)?;
+    let mut termios = tcgetattr(fd)?;
+    termios.input_modes |= InputModes::IUTF8;
+    tcsetattr(fd, OptionalActions::Now, &termios)?;
+    Ok(())
 }
 
 fn master_fd(master: &dyn MasterPty) -> std::io::Result<BorrowedFd<'_>> {
@@ -562,6 +583,24 @@ mod tests {
         wait_for_line(&session, &mut events, "held");
         session.write_input(b"\r");
         assert!(ended(&mut events).unwrap().success());
+    }
+
+    #[test]
+    fn erasing_in_line_input_removes_a_whole_character() {
+        let folder = tempfile::tempdir().unwrap();
+        let (session, mut events) = spawn(
+            "/bin/sh",
+            &["-c", "read -r line; printf %s \"$line\" > got"],
+            folder.path(),
+        );
+
+        // 退格（^?）删掉三个字节的「中」，不留半个字。
+        session.write_input("中\x7f文\r".as_bytes());
+        assert!(ended(&mut events).unwrap().success());
+        assert_eq!(
+            std::fs::read(folder.path().join("got")).unwrap(),
+            "文".as_bytes()
+        );
     }
 
     #[test]

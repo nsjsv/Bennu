@@ -30,7 +30,7 @@ local-send = { path = "../local-send" }
 parking_lot = "0.12"
 regex = "1.12.3"
 resvg.workspace = true
-rustix = { workspace = true, features = ["event", "process", "stdio"] }
+rustix = { workspace = true, features = ["event", "process", "stdio", "termios"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json.workspace = true
 thumbnails = { path = "../thumbnails" }

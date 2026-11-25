@@ -12,9 +12,8 @@ use crate::model::Message;
 use bennu_theme::controls::full_name_bubble;
 use bennu_theme::icons::{rotated_chevron_right_view, IconSymbol};
 use bennu_theme::measured_text::measured_middle_ellipsized_text_with_hint;
-use bennu_theme::styles::{hovered_sidebar_item_style, selected_sidebar_item_style};
+use bennu_theme::styles::sidebar_item_button_style;
 use bennu_theme::typography::BODY_SIZE;
-use bennu_theme::ui_colors;
 
 const INDENT_PER_LEVEL: f32 = 14.0;
 const EXPANDER_WIDTH: f32 = 18.0;
@@ -98,7 +97,15 @@ fn folder_row<'a>(
         .padding([0.0, ROW_PADDING_X])
         .width(Length::Fill)
         .height(Length::Fixed(FOLDER_ROW_HEIGHT))
-        .style(move |theme: &Theme, status| row_style(theme, status, selected, drop_hovered));
+        .style(move |theme: &Theme, status| {
+            // 拖文件停在上面的那一行和鼠标悬停画得一样。
+            let status = if drop_hovered {
+                button::Status::Hovered
+            } else {
+                status
+            };
+            sidebar_item_button_style(theme, status, selected)
+        });
     let item = mouse_area(item)
         .on_middle_press(Message::OpenDirectoryFromMiddleClick(pane, path.clone()))
         .on_release(Message::DragSelectionFinished);
@@ -126,27 +133,4 @@ fn expander(expander: Expander, path: &std::path::Path) -> Element<'static, Mess
     )))
     .interaction(iced::mouse::Interaction::Pointer)
     .into()
-}
-
-/// 跟侧栏的行一样：当前目录是选中底色，悬停（或拖文件停在上面）是浅一点的底色。
-fn row_style(
-    theme: &Theme,
-    status: button::Status,
-    selected: bool,
-    drop_hovered: bool,
-) -> button::Style {
-    let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-    let look = if selected {
-        selected_sidebar_item_style(theme)
-    } else if drop_hovered || hovered {
-        hovered_sidebar_item_style(theme)
-    } else {
-        container::Style::default()
-    };
-    button::Style {
-        background: look.background,
-        text_color: look.text_color.unwrap_or(ui_colors(theme).on_surface),
-        border: look.border,
-        ..button::Style::default()
-    }
 }

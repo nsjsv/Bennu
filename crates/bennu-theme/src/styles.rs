@@ -147,6 +147,27 @@ pub fn hovered_sidebar_item_style(theme: &Theme) -> container::Style {
     }
 }
 
+/// 侧边栏行本身就是按钮时（设置分类、文件夹树）：悬停看按钮自己的状态，不用应用另记。
+pub fn sidebar_item_button_style(
+    theme: &Theme,
+    status: button::Status,
+    selected: bool,
+) -> button::Style {
+    let look = if selected {
+        selected_sidebar_item_style(theme)
+    } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+        hovered_sidebar_item_style(theme)
+    } else {
+        container::Style::default()
+    };
+    button::Style {
+        background: look.background,
+        text_color: look.text_color.unwrap_or(ui_colors(theme).on_surface),
+        border: look.border,
+        ..button::Style::default()
+    }
+}
+
 /// 收藏夹拖放插入位指示线：primary 细条，自 app-ui appearance.rs 下沉。
 pub fn sidebar_bookmark_drop_slot_style(theme: &Theme) -> container::Style {
     let accent = ui_colors(theme).primary;
@@ -528,6 +549,23 @@ mod tests {
                 Some(Background::Color(colors.surface_container_low))
             );
             assert_eq!(odd.border.radius, 7.0.into());
+        }
+    }
+
+    /// 按钮做的侧栏行：悬停、按下有底色，选中的一直是选中底色，平时没有底色。
+    #[test]
+    fn sidebar_item_buttons_light_up_under_the_pointer() {
+        let theme = Theme::Dark;
+        let background =
+            |status, selected| sidebar_item_button_style(&theme, status, selected).background;
+        let hovered = hovered_sidebar_item_style(&theme).background;
+        let selected = selected_sidebar_item_style(&theme).background;
+
+        assert_eq!(background(button::Status::Active, false), None);
+        assert_eq!(background(button::Status::Hovered, false), hovered);
+        assert_eq!(background(button::Status::Pressed, false), hovered);
+        for status in [button::Status::Active, button::Status::Hovered] {
+            assert_eq!(background(status, true), selected);
         }
     }
 }

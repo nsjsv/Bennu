@@ -2,13 +2,11 @@ use iced::widget::{button, container, scrollable, Button, Column};
 use iced::{Element, Length};
 
 use crate::app::smooth_scroll::{smooth_scroll, smooth_scroll_id};
-use crate::appearance::{
-    enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction, selected_sidebar_item_style,
-    transparent_button_style,
-};
+use crate::appearance::{enhanced_scrollbar_style, enhanced_vertical_scrollbar_direction};
 use crate::model::{Message, ScrollbarRegion};
 use bennu_preview::panel_text::readable_text;
 use bennu_theme::scrollbar::{enhanced_scrollbar, ScrollbarAxis};
+use bennu_theme::styles::sidebar_item_button_style;
 
 /// 设置窗口的侧栏宽度（主窗口侧栏可拖宽，另算）。
 pub(super) const AUXILIARY_SIDEBAR_WIDTH: f32 = 196.0;
@@ -16,8 +14,8 @@ pub(super) const AUXILIARY_SIDEBAR_WIDTH: f32 = 196.0;
 /// 侧栏顶栏下面的分类列表。
 pub(super) fn auxiliary_sidebar_list<'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Message> {
     Column::with_children(items)
-        .spacing(2)
-        .padding([4, 8])
+        .spacing(12)
+        .padding([9, 18])
         .width(Length::Fill)
         .into()
 }
@@ -27,19 +25,11 @@ pub(super) fn auxiliary_sidebar_button(
     selected: bool,
     message: Message,
 ) -> Button<'static, Message> {
-    let label = container(readable_text(label))
-        .padding([7, 10])
-        .width(Length::Fill);
-    let label = if selected {
-        label.style(selected_sidebar_item_style)
-    } else {
-        label
-    };
-
-    button(label)
+    button(readable_text(label))
         .on_press(message)
+        .padding([7, 10])
         .width(Length::Fill)
-        .style(transparent_button_style())
+        .style(move |theme, status| sidebar_item_button_style(theme, status, selected))
 }
 
 pub(super) fn auxiliary_detail_scroller<'a>(

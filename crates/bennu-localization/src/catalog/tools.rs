@@ -119,6 +119,7 @@ pub(super) const ENTRIES: &[(&str, &str)] = &[
     ("Opening...", "正在打开..."),
     // 校验
     ("File Checksum", "文件校验"),
+    ("Computing %1%", "计算中 %1%"),
     ("Checksum computation canceled", "校验计算已取消"),
     ("Failed to compute checksum: %1", "计算校验失败：%1"),
     ("Paste expected checksum", "粘贴期望的校验值"),

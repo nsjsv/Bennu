@@ -1,24 +1,30 @@
 //! 文件校验值计算与校验文件解析。
 //!
-//! 引擎在一次读取中同时喂入五个 hasher,调用方通过 mpsc 接收节流后的
-//! 进度上报,并通过取消令牌中止读取;解析器负责 md5sum/sha256sum 标准
+//! 引擎读一遍文件,把同一份数据同时喂给五个 hasher,调用方通过 mpsc 接收
+//! 节流后的进度上报,并通过取消令牌中止读取;解析器负责 md5sum/sha256sum 标准
 //! 格式与裸单值校验文件,校验结果比对逻辑与 UI 无关,便于独立测试。
 
+use std::fs::File;
+use std::io::Read;
 use std::path::Path;
-use std::path::PathBuf;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::Arc;
+use std::thread::{Scope, ScopedJoinHandle};
+use std::time::Instant;
 
 use md5::{Digest, Md5};
 use sha1::Sha1;
 use sha2::{Sha256, Sha512};
-use tokio::fs;
-use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::FileError;
 
-/// 读取块大小:兼顾小文件的调度开销与大文件的内存占用。
+/// 读取块大小:兼顾线程间交接的开销与在途块的内存占用。
 const READ_CHUNK_BYTES: usize = 256 * 1024;
+/// 每个 hasher 最多排队的块数:读取最多领先最慢的 hasher 这么多块,
+/// 在途内存因此封顶在几个块。
+const QUEUED_CHUNKS_PER_HASHER: usize = 2;
 /// 进度上报节流间隔:避免高频 send 拖慢 UI 消息循环。
 const PROGRESS_SEND_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 /// 受支持算法的摘要十六进制长度;64 同时命中 SHA-256 与默认 256 位输出的 BLAKE3。
@@ -91,75 +97,112 @@ pub struct ChecksumProgress {
     pub total_bytes: u64,
 }
 
-/// 单趟读取文件并计算全部受支持算法的摘要。
+/// 读出的一块文件数据,五个 hasher 线程共享同一份。
+type FileChunk = Arc<Vec<u8>>;
+
+/// 单趟读取文件并计算全部受支持算法的摘要;会阻塞,调用方放进 `spawn_blocking`。
 ///
+/// 五个算法各占一个线程:同一个线程里依次算,耗时是五个相加,大文件要几分钟;
+/// 分开后只取决于最慢的那个,读盘也和计算重叠。
 /// 进度发送失败按既有约定忽略(进度通道不是操作成败的一部分);
 /// 取消后返回 [`FileError::Cancelled`],由调用方决定如何呈现。
-pub async fn compute_file_checksums(
-    path: PathBuf,
+pub fn compute_file_checksums(
+    path: &Path,
     progress: mpsc::Sender<ChecksumProgress>,
     cancel: CancellationToken,
 ) -> Result<FileChecksums, FileError> {
-    let mut file = fs::File::open(&path)
-        .await
-        .map_err(|source| checksum_io_error(&path, source))?;
-    let total_bytes = file
-        .metadata()
-        .await
-        .map_err(|source| checksum_io_error(&path, source))?
-        .len();
+    let io_error = |source| checksum_io_error(path, source);
+    let mut file = File::open(path).map_err(io_error)?;
+    let total_bytes = file.metadata().map_err(io_error)?.len();
 
-    let mut md5_hasher = Md5::new();
-    let mut sha1_hasher = Sha1::new();
-    let mut sha256_hasher = Sha256::new();
-    let mut sha512_hasher = Sha512::new();
-    let mut blake3_hasher = blake3::Hasher::new();
+    std::thread::scope(|scope| {
+        let (md5_feed, md5) = spawn_hasher(scope, "md5", |chunks| digest_hex(Md5::new(), chunks))
+            .map_err(io_error)?;
+        let (sha1_feed, sha1) =
+            spawn_hasher(scope, "sha1", |chunks| digest_hex(Sha1::new(), chunks))
+                .map_err(io_error)?;
+        let (sha256_feed, sha256) =
+            spawn_hasher(scope, "sha256", |chunks| digest_hex(Sha256::new(), chunks))
+                .map_err(io_error)?;
+        let (sha512_feed, sha512) =
+            spawn_hasher(scope, "sha512", |chunks| digest_hex(Sha512::new(), chunks))
+                .map_err(io_error)?;
+        let (blake3_feed, blake3) = spawn_hasher(scope, "blake3", |chunks| {
+            let mut hasher = blake3::Hasher::new();
+            for chunk in chunks {
+                hasher.update(&chunk);
+            }
+            hex_encode(hasher.finalize().as_bytes())
+        })
+        .map_err(io_error)?;
 
-    let mut buffer = vec![0u8; READ_CHUNK_BYTES];
-    let mut bytes_done: u64 = 0;
-    let mut last_sent = tokio::time::Instant::now() - PROGRESS_SEND_INTERVAL;
-    loop {
-        if cancel.is_cancelled() {
-            return Err(FileError::Cancelled);
-        }
-        let read = file
-            .read(&mut buffer)
-            .await
-            .map_err(|source| checksum_io_error(&path, source))?;
-        if read == 0 {
-            break;
-        }
-        let chunk = &buffer[..read];
-        md5_hasher.update(chunk);
-        sha1_hasher.update(chunk);
-        sha256_hasher.update(chunk);
-        sha512_hasher.update(chunk);
-        blake3_hasher.update(chunk);
-        bytes_done += read as u64;
-        if last_sent.elapsed() >= PROGRESS_SEND_INTERVAL {
-            let _ = progress
-                .send(ChecksumProgress {
+        // 出错或取消提前返回时 feeds 随之丢弃,hasher 收完已排队的块就退出,scope 等它们结束。
+        let feeds = [md5_feed, sha1_feed, sha256_feed, sha512_feed, blake3_feed];
+        let mut bytes_done: u64 = 0;
+        let mut next_report = Instant::now();
+        loop {
+            if cancel.is_cancelled() {
+                return Err(FileError::Cancelled);
+            }
+            let mut chunk = vec![0u8; READ_CHUNK_BYTES];
+            let read = file.read(&mut chunk).map_err(io_error)?;
+            if read == 0 {
+                break;
+            }
+            chunk.truncate(read);
+            let chunk = Arc::new(chunk);
+            for feed in &feeds {
+                // hasher 只会因 panic 提前断开,scope 收尾时会把 panic 传出来。
+                let _ = feed.send(Arc::clone(&chunk));
+            }
+            bytes_done += read as u64;
+            if Instant::now() >= next_report {
+                let _ = progress.blocking_send(ChecksumProgress {
                     bytes_done,
                     total_bytes,
-                })
-                .await;
-            last_sent = tokio::time::Instant::now();
+                });
+                next_report = Instant::now() + PROGRESS_SEND_INTERVAL;
+            }
         }
-    }
-    let _ = progress
-        .send(ChecksumProgress {
+        drop(feeds);
+        let _ = progress.blocking_send(ChecksumProgress {
             bytes_done: total_bytes,
             total_bytes,
-        })
-        .await;
+        });
 
-    Ok(FileChecksums {
-        md5: hex_encode(&md5_hasher.finalize()),
-        sha1: hex_encode(&sha1_hasher.finalize()),
-        sha256: hex_encode(&sha256_hasher.finalize()),
-        sha512: hex_encode(&sha512_hasher.finalize()),
-        blake3: hex_encode(blake3_hasher.finalize().as_bytes()),
+        Ok(FileChecksums {
+            md5: join_hasher(md5),
+            sha1: join_hasher(sha1),
+            sha256: join_hasher(sha256),
+            sha512: join_hasher(sha512),
+            blake3: join_hasher(blake3),
+        })
     })
+}
+
+fn spawn_hasher<'scope>(
+    scope: &'scope Scope<'scope, '_>,
+    algorithm: &str,
+    digest: impl FnOnce(Receiver<FileChunk>) -> String + Send + 'scope,
+) -> std::io::Result<(SyncSender<FileChunk>, ScopedJoinHandle<'scope, String>)> {
+    let (feed, chunks) = sync_channel(QUEUED_CHUNKS_PER_HASHER);
+    let hasher = std::thread::Builder::new()
+        .name(format!("checksum-{algorithm}"))
+        .spawn_scoped(scope, move || digest(chunks))?;
+    Ok((feed, hasher))
+}
+
+fn digest_hex(mut hasher: impl Digest, chunks: Receiver<FileChunk>) -> String {
+    for chunk in chunks {
+        hasher.update(chunk.as_slice());
+    }
+    hex_encode(&hasher.finalize())
+}
+
+fn join_hasher(hasher: ScopedJoinHandle<'_, String>) -> String {
+    hasher
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -304,23 +347,19 @@ mod tests {
         ),
     ];
 
-    async fn write_temp_file(contents: &[u8]) -> tempfile::NamedTempFile {
+    fn write_temp_file(contents: &[u8]) -> tempfile::NamedTempFile {
         let mut file = tempfile::NamedTempFile::new().expect("create temp file");
         std::io::Write::write_all(&mut file, contents).expect("write temp file");
         file
     }
 
-    #[tokio::test]
-    async fn compute_matches_known_vectors() {
-        let file = write_temp_file(b"abc").await;
+    #[test]
+    fn compute_matches_known_vectors() {
+        let file = write_temp_file(b"abc");
         let (progress_sender, mut progress_receiver) = mpsc::channel(4);
-        let checksums = compute_file_checksums(
-            file.path().to_path_buf(),
-            progress_sender,
-            CancellationToken::new(),
-        )
-        .await
-        .expect("compute checksums");
+        let checksums =
+            compute_file_checksums(file.path(), progress_sender, CancellationToken::new())
+                .expect("compute checksums");
 
         for (algorithm, expected) in ABC_DIGESTS {
             assert_eq!(
@@ -331,31 +370,61 @@ mod tests {
             );
         }
         // 计算完成前一定会发出 100% 的收尾进度。
-        let final_progress = progress_receiver.recv().await.expect("final progress");
-        assert_eq!(final_progress.bytes_done, 3);
-        assert_eq!(final_progress.total_bytes, 3);
+        let mut last_progress = None;
+        while let Ok(progress) = progress_receiver.try_recv() {
+            last_progress = Some(progress);
+        }
+        assert_eq!(
+            last_progress,
+            Some(ChecksumProgress {
+                bytes_done: 3,
+                total_bytes: 3,
+            })
+        );
     }
 
-    #[tokio::test]
-    async fn cancel_aborts_computation() {
-        let file = write_temp_file(b"abc").await;
+    #[test]
+    fn compute_matches_single_pass_digests_across_many_chunks() {
+        // 跨多个块且末块不满:每个 hasher 都要按顺序收到全部块。
+        let contents: Vec<u8> = (0..READ_CHUNK_BYTES * 3 + 12_345)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let file = write_temp_file(&contents);
+        let (progress_sender, _progress_receiver) = mpsc::channel(64);
+        let checksums =
+            compute_file_checksums(file.path(), progress_sender, CancellationToken::new())
+                .expect("compute checksums");
+
+        assert_eq!(
+            checksums,
+            FileChecksums {
+                md5: hex_encode(&Md5::digest(&contents)),
+                sha1: hex_encode(&Sha1::digest(&contents)),
+                sha256: hex_encode(&Sha256::digest(&contents)),
+                sha512: hex_encode(&Sha512::digest(&contents)),
+                blake3: hex_encode(blake3::hash(&contents).as_bytes()),
+            }
+        );
+    }
+
+    #[test]
+    fn cancel_aborts_computation() {
+        let file = write_temp_file(b"abc");
         let (progress_sender, _progress_receiver) = mpsc::channel(4);
         let cancel = CancellationToken::new();
         cancel.cancel();
-        let outcome =
-            compute_file_checksums(file.path().to_path_buf(), progress_sender, cancel).await;
+        let outcome = compute_file_checksums(file.path(), progress_sender, cancel);
         assert!(matches!(outcome, Err(FileError::Cancelled)));
     }
 
-    #[tokio::test]
-    async fn missing_file_returns_structured_error() {
+    #[test]
+    fn missing_file_returns_structured_error() {
         let (progress_sender, _progress_receiver) = mpsc::channel(4);
         let outcome = compute_file_checksums(
-            PathBuf::from("/nonexistent/checksum-target"),
+            Path::new("/nonexistent/checksum-target"),
             progress_sender,
             CancellationToken::new(),
-        )
-        .await;
+        );
         assert!(matches!(outcome, Err(FileError::Checksum { .. })));
     }
 

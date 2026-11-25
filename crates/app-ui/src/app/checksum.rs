@@ -390,11 +390,10 @@ fn checksum_compute_command(
     cancel_token: CancellationToken,
 ) -> Task<Message> {
     let (progress_sender, mut progress_receiver) = tokio::sync::mpsc::channel(8);
-    let compute_handle = tokio::spawn(compute_file_checksums(
-        path.clone(),
-        progress_sender,
-        cancel_token,
-    ));
+    // 读盘和哈希都会阻塞,必须放到阻塞线程池,大文件算几十秒也不占 async 工作线程。
+    let compute_handle = tokio::task::spawn_blocking(move || {
+        compute_file_checksums(&path, progress_sender, cancel_token)
+    });
     Task::stream(stream::channel(16, async move |mut output| {
         while let Some(progress) = progress_receiver.recv().await {
             if output

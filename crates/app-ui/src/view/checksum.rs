@@ -97,8 +97,8 @@ fn file_chip_list(state: &ChecksumState) -> Element<'static, Message> {
 fn computation_section(state: &ChecksumState) -> Element<'static, Message> {
     let mut body = column![digest_card(state)].spacing(6).width(Length::Fill);
 
-    // 计算中不渲染任何进度/取消行:该行的显隐引起面板高度抖动,值位 "—" 已表达
-    // 未就绪;要中止直接关面板,dismiss_floating 会取消仍在跑的计算。
+    // 计算中不渲染任何进度/取消行:该行的显隐引起面板高度抖动,进度写在值位里;
+    // 要中止直接关面板,dismiss_floating 会取消仍在跑的计算。
     let status_line: Option<Element<'static, Message>> = match state.computation() {
         ChecksumComputation::Computing { .. } | ChecksumComputation::Completed(_) => None,
         ChecksumComputation::Canceled => {
@@ -136,9 +136,21 @@ fn digest_row(
     digest: Option<&str>,
     algorithm: ChecksumAlgorithm,
 ) -> Element<'static, Message> {
-    let value_text = match digest {
-        Some(digest) => format_middle_ellipsized_text(digest, DIGEST_MAX_CHARS),
-        None => String::from("—"),
+    // 进度写在值的位置而不是单独一行:行的显隐会让面板高度跳动;
+    // 只写 "—" 的话,大文件要算很久,看着像卡死。
+    let value_text = match (digest, state.computation()) {
+        (Some(digest), _) => format_middle_ellipsized_text(digest, DIGEST_MAX_CHARS),
+        (
+            None,
+            ChecksumComputation::Computing {
+                bytes_done,
+                total_bytes,
+            },
+        ) => {
+            let percent = (bytes_done * 100).checked_div(*total_bytes).unwrap_or(0);
+            tr!("Computing %1%", percent)
+        }
+        (None, _) => String::from("—"),
     };
     // 对勾只在"该算法当前确实显示着已复制的值"时出现,否则取消/重算后旧对勾会挂在空值行上。
     let copy_icon = if digest.is_some() && state.last_copied() == Some(algorithm) {

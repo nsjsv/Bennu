@@ -84,8 +84,7 @@ pub(crate) enum ThumbnailLoadResult {
 #[derive(Debug, Clone)]
 pub(crate) struct ThumbnailHandleEntry {
     pub(crate) handle: image::Handle,
-    /// 请求源路径：就绪表只按 ThumbnailKey(哈希) 索引,预览会话需要
-    /// 按源路径回查"当前已有的最大尺寸缩略图",必须冗余记录。
+    /// 请求源路径：清出就绪表时据此从 `ready_sources` 里拿掉这一档。
     pub(crate) source: PathBuf,
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -104,11 +103,21 @@ pub(crate) enum ThumbnailScope {
     PaneLocation { pane_id: u64, location: LocationKey },
 }
 
+/// 一个源文件在就绪表里的那一版和它各档的键。
+#[derive(Debug)]
+struct ReadySource {
+    version: ThumbnailSourceMetadata,
+    keys: Vec<ThumbnailKey>,
+}
+
 #[derive(Debug)]
 pub(crate) struct ThumbnailCache {
     cache_dir: PathBuf,
     ready: HashMap<ThumbnailKey, ThumbnailHandleEntry>,
     ready_order: VecDeque<ThumbnailKey>,
+    /// 就绪表里每个源文件只留一版：同名文件换了内容，旧版各档不能再被认出来。目录重扫后大小、
+    /// 修改时间补上之前的键认不出版本，预览挑最大一档时也不看版本，旧版留着就会先显示旧图。
+    ready_sources: HashMap<PathBuf, ReadySource>,
     queued: HashMap<ThumbnailKey, ThumbnailWork>,
     queue_order: VecDeque<ThumbnailKey>,
     inflight: HashMap<ThumbnailKey, ThumbnailPurpose>,
@@ -124,6 +133,7 @@ impl ThumbnailCache {
             cache_dir,
             ready: HashMap::new(),
             ready_order: VecDeque::new(),
+            ready_sources: HashMap::new(),
             queued: HashMap::new(),
             queue_order: VecDeque::new(),
             inflight: HashMap::new(),
@@ -306,11 +316,46 @@ impl ThumbnailCache {
             max_edge,
         };
 
+        let source = self
+            .ready_sources
+            .entry(thumbnail.source)
+            .or_insert_with(|| ReadySource {
+                version: thumbnail.source_version,
+                keys: Vec::new(),
+            });
+        let stale_keys = if source.version == thumbnail.source_version {
+            Vec::new()
+        } else {
+            source.version = thumbnail.source_version;
+            std::mem::take(&mut source.keys)
+        };
+        if !source.keys.contains(&key) {
+            source.keys.push(key.clone());
+        }
+        self.forget_ready_keys(&stale_keys);
+
         self.ready.insert(key.clone(), entry.clone());
         self.ready_order.retain(|ready_key| ready_key != &key);
         self.ready_order.push_back(key);
         self.trim_ready_cache();
         entry
+    }
+
+    /// 磁盘上这个文件变了（删掉、改名走、换了内容）：新的一版读到之前，旧版各档都不再拿出来。
+    pub(crate) fn forget_source(&mut self, source: &Path) {
+        if let Some(source) = self.ready_sources.remove(source) {
+            self.forget_ready_keys(&source.keys);
+        }
+    }
+
+    fn forget_ready_keys(&mut self, keys: &[ThumbnailKey]) {
+        if keys.is_empty() {
+            return;
+        }
+        for key in keys {
+            self.ready.remove(key);
+        }
+        self.ready_order.retain(|key| !keys.contains(key));
     }
 
     pub(crate) fn ready_for_entry(
@@ -335,9 +380,11 @@ impl ThumbnailCache {
     /// 同一源路径下已就绪的最大尺寸缩略图（不限请求档位）：
     /// 预览会话用它把列表阶段已生成的缩略图直接抬上屏。
     pub(crate) fn largest_ready_for_source(&self, source: &Path) -> Option<&ThumbnailHandleEntry> {
-        self.ready
-            .values()
-            .filter(|entry| entry.source == source)
+        self.ready_sources
+            .get(source)?
+            .keys
+            .iter()
+            .filter_map(|key| self.ready.get(key))
             .max_by_key(|entry| entry.max_edge)
     }
 
@@ -437,7 +484,18 @@ impl ThumbnailCache {
             let Some(key) = self.ready_order.pop_front() else {
                 break;
             };
-            self.ready.remove(&key);
+            let entry = self
+                .ready
+                .remove(&key)
+                .expect("ready_order lists exactly the ready keys");
+            let source = self
+                .ready_sources
+                .get_mut(&entry.source)
+                .expect("every ready key is listed under its source");
+            source.keys.retain(|source_key| source_key != &key);
+            if source.keys.is_empty() {
+                self.ready_sources.remove(&entry.source);
+            }
         }
         // 失败表过期即清扫：上界恒等于最近一个退避周期内的失败数，
         // 避免视图早已移走的失败键永久滞留内存。
@@ -729,6 +787,75 @@ mod tests {
         assert!(cache.ready_for_request(&newest_request).is_some());
     }
 
+    /// 每个源文件只留一版：读到新一版时旧版各档（含大小、修改时间还没补上时的键）都拿不出来，
+    /// 同一版换个键来要照常留着。
+    #[test]
+    fn a_new_version_of_a_source_replaces_every_size_of_the_old_one() {
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
+        let source = PathBuf::from("photo.png");
+        let old_version = ThumbnailSourceMetadata {
+            len: 1,
+            modified: Some(std::time::UNIX_EPOCH + Duration::from_secs(1)),
+        };
+        let unknown = ThumbnailSourceMetadata {
+            len: 0,
+            modified: None,
+        };
+        let new_version = ThumbnailSourceMetadata {
+            len: 2,
+            modified: Some(std::time::UNIX_EPOCH + Duration::from_secs(2)),
+        };
+        let pending = ThumbnailRequest::new(&source, unknown, LIST_THUMBNAIL_EDGE);
+        let old_list = ThumbnailRequest::new(&source, old_version, LIST_THUMBNAIL_EDGE);
+        let old_preview = ThumbnailRequest::new(&source, old_version, PREVIEW_THUMBNAIL_MAX_EDGE);
+        for request in [&pending, &old_list, &old_preview] {
+            cache.insert_ready(thumbnail_depicting(request, old_version), request.max_edge);
+        }
+        assert!(cache.ready_for_request(&pending).is_some());
+        assert_eq!(
+            cache.largest_ready_for_source(&source).unwrap().max_edge,
+            PREVIEW_THUMBNAIL_MAX_EDGE
+        );
+
+        let new_list = ThumbnailRequest::new(&source, new_version, LIST_THUMBNAIL_EDGE);
+        cache.insert_ready(
+            thumbnail_depicting(&new_list, new_version),
+            LIST_THUMBNAIL_EDGE,
+        );
+
+        for stale in [&pending, &old_list, &old_preview] {
+            assert!(cache.ready_for_request(stale).is_none());
+        }
+        assert_eq!(
+            cache.largest_ready_for_source(&source).unwrap().max_edge,
+            LIST_THUMBNAIL_EDGE
+        );
+        assert_eq!(cache.ready.len(), 1);
+        assert_eq!(cache.ready_order.len(), 1);
+    }
+
+    #[test]
+    fn forgetting_a_source_drops_all_its_sizes_only() {
+        let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
+        let changed = thumbnail_request("changed.png", 1);
+        let changed_preview = ThumbnailRequest::new(
+            &changed.source,
+            changed.metadata,
+            PREVIEW_THUMBNAIL_MAX_EDGE,
+        );
+        let untouched = thumbnail_request("untouched.png", 2);
+        for request in [&changed, &changed_preview, &untouched] {
+            cache.insert_ready(cached_thumbnail_for_request(request), request.max_edge);
+        }
+
+        cache.forget_source(&changed.source);
+
+        assert!(cache.largest_ready_for_source(&changed.source).is_none());
+        assert!(cache.ready_for_request(&changed_preview).is_none());
+        assert!(cache.ready_for_request(&untouched).is_some());
+        assert_eq!(cache.ready_order.len(), 1);
+    }
+
     #[test]
     fn failure_entries_expire_after_backoff_window() {
         let mut cache = ThumbnailCache::new(PathBuf::from("cache"));
@@ -741,6 +868,16 @@ mod tests {
 
         cache.sweep_expired_failures(Instant::now() + FAILURE_BACKOFF);
         assert!(!cache.failures.contains_key(&key));
+    }
+
+    fn thumbnail_depicting(
+        request: &ThumbnailRequest,
+        version: ThumbnailSourceMetadata,
+    ) -> CachedThumbnail {
+        CachedThumbnail {
+            source_version: version,
+            ..cached_thumbnail_for_request(request)
+        }
     }
 
     fn cached_thumbnail_for_request(request: &ThumbnailRequest) -> CachedThumbnail {

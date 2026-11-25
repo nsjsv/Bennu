@@ -14,7 +14,7 @@ use crate::model::{
     DirectoryCollectionPhase, DirectoryExpansionLoadContext, DirectoryLoadRequest,
     ExpandedDirectoryStatus, PrebuiltDirectoryDiscovery, SplitAxis,
 };
-use crate::thumbnail_cache::ColumnViewport;
+use crate::thumbnail_cache::{ColumnViewport, LIST_THUMBNAIL_EDGE};
 use file_operations::CompletedTransfer;
 
 async fn discovery_for(path: &std::path::Path) -> DirectoryDiscovery {
@@ -259,6 +259,91 @@ async fn hidden_changes_apply_incrementally_when_hidden_files_are_shown() {
         .is_some());
 
     assert_eq!(entry_paths(&browser), vec![".hidden", "a.txt"]);
+}
+
+/// 磁盘上变了的文件（删掉、换了内容、改名走、被改名盖住、原处又出现一个），程序里留着的缩略图
+/// 不再拿出来，免得先显示旧图；没变的留着。
+#[test]
+fn changed_files_drop_their_ready_thumbnails() {
+    let workspace = tempfile::tempdir().unwrap();
+    let [removed, rewritten, moved_from, moved_to, reappeared, kept] = [
+        "removed.png",
+        "rewritten.png",
+        "moved-from.png",
+        "moved-to.png",
+        "reappeared.png",
+        "kept.png",
+    ]
+    .map(|name| workspace.path().join(name));
+    for path in [&rewritten, &moved_to, &reappeared, &kept] {
+        std::fs::write(path, b"png").unwrap();
+    }
+    let (mut browser, _) = FileBrowser::new(config::default_user_config());
+    for path in [
+        &removed,
+        &rewritten,
+        &moved_from,
+        &moved_to,
+        &reappeared,
+        &kept,
+    ] {
+        browser
+            .thumbnail_cache
+            .insert_ready(ready_thumbnail(path), LIST_THUMBNAIL_EDGE);
+    }
+    let entry = |path: &Path| match added(path.to_path_buf()) {
+        ResolvedEntryChange::Added(entry) => entry,
+        _ => unreachable!(),
+    };
+
+    drop(browser.apply_entry_changes(
+        workspace.path(),
+        &[
+            ResolvedEntryChange::Removed {
+                path: removed.clone(),
+            },
+            ResolvedEntryChange::ContentChanged(entry(&rewritten)),
+            ResolvedEntryChange::Renamed {
+                from: moved_from.clone(),
+                to: entry(&moved_to),
+            },
+            added(reappeared.clone()),
+        ],
+    ));
+
+    for path in [&removed, &rewritten, &moved_from, &moved_to, &reappeared] {
+        assert!(
+            browser
+                .thumbnail_cache
+                .largest_ready_for_source(path)
+                .is_none(),
+            "{path:?}"
+        );
+    }
+    assert!(browser
+        .thumbnail_cache
+        .largest_ready_for_source(&kept)
+        .is_some());
+}
+
+fn ready_thumbnail(source: &Path) -> thumbnails::CachedThumbnail {
+    let request = thumbnails::ThumbnailRequest::new(
+        source,
+        thumbnails::ThumbnailSourceMetadata {
+            len: 3,
+            modified: None,
+        },
+        LIST_THUMBNAIL_EDGE,
+    );
+    thumbnails::CachedThumbnail {
+        key: request.key(),
+        source: request.source.clone(),
+        output: PathBuf::from("/tmp/thumbnail.png"),
+        width: 64,
+        height: 64,
+        cache_hit: true,
+        source_version: request.metadata,
+    }
 }
 
 #[test]

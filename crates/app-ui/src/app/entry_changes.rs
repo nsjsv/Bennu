@@ -36,6 +36,9 @@ impl FileBrowser {
         if changes.is_empty() {
             return Some(Task::none());
         }
+        for path in changes.iter().flat_map(changed_paths) {
+            self.thumbnail_cache.forget_source(path);
+        }
         if changes
             .iter()
             .any(|change| matches!(change, ResolvedEntryChange::RescanRequired))
@@ -241,6 +244,18 @@ impl FileBrowser {
             || lists
                 .iter()
                 .all(|entries| entries.iter().any(|entry| entry.path() == path))
+    }
+}
+
+/// 这条变化之后，这些路径上的文件不再是原来那个了。
+fn changed_paths(change: &ResolvedEntryChange) -> Vec<&Path> {
+    match change {
+        ResolvedEntryChange::Added(entry) | ResolvedEntryChange::ContentChanged(entry) => {
+            vec![entry.path()]
+        }
+        ResolvedEntryChange::Removed { path } => vec![path],
+        ResolvedEntryChange::Renamed { from, to } => vec![from, to.path()],
+        ResolvedEntryChange::RescanRequired => Vec::new(),
     }
 }
 

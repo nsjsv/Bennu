@@ -363,7 +363,7 @@ pub fn address_bar_mask_style(theme: &Theme) -> container::Style {
     }
 }
 
-/// 透明无框按钮样式入口（地址栏面包屑段等使用）。
+/// 透明无框按钮样式入口。
 pub fn transparent_button_style() -> fn(&Theme, button::Status) -> button::Style {
     transparent_icon_button_style
 }
@@ -425,15 +425,15 @@ pub fn selected_path_suggestion_item_style(theme: &Theme) -> container::Style {
     }
 }
 
-/// 面包屑段按钮：透明底随编辑渐变淡出；拖放悬停目标复用补全选中行
-/// 的底色/描边，保证“可放置”反馈与选中语义同色。
+/// 面包屑段按钮：平时透明、悬停和按下浅浅一层底（和图标按钮一样），整体随编辑渐变淡出；
+/// 拖放悬停目标复用补全选中行的底色/描边，保证“可放置”反馈与选中语义同色。
 pub fn faded_button_style(
     theme: &Theme,
     status: button::Status,
     opacity: f32,
     is_drop_target: bool,
 ) -> button::Style {
-    let mut style = transparent_icon_button_style(theme, status);
+    let mut style = crate::controls::icon_button_style(theme, status);
     if is_drop_target {
         let target_style = selected_path_suggestion_item_style(theme);
         style.background = target_style.background;
@@ -567,5 +567,24 @@ mod tests {
         for status in [button::Status::Active, button::Status::Hovered] {
             assert_eq!(background(status, true), selected);
         }
+    }
+
+    /// 面包屑段：指针放上去、按下时有看得见的底，平时没有；编辑渐变里底色一起淡出。
+    #[test]
+    fn breadcrumb_segments_light_up_under_the_pointer() {
+        let theme = Theme::Dark;
+        let alpha =
+            |status, opacity| match faded_button_style(&theme, status, opacity, false).background {
+                Some(Background::Color(color)) => color.a,
+                _ => 0.0,
+            };
+
+        assert_eq!(alpha(button::Status::Active, 1.0), 0.0);
+        assert!(alpha(button::Status::Hovered, 1.0) > 0.0);
+        assert!(alpha(button::Status::Pressed, 1.0) > alpha(button::Status::Hovered, 1.0));
+        assert_eq!(
+            alpha(button::Status::Hovered, 0.5),
+            alpha(button::Status::Hovered, 1.0) * 0.5
+        );
     }
 }

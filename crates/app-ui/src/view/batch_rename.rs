@@ -742,7 +742,6 @@ fn preview_row<'a>(
     .on_press(Message::BatchRename(
         BatchRenameMessage::PreviewDragStarted(row_state.source.clone()),
     ))
-    .interaction(iced::mouse::Interaction::Grab)
     .into();
     let target_cell: Element<'a, Message> = if is_editing {
         text_field(&tr!("New name"), editing_input)

@@ -101,21 +101,6 @@ impl<Message: Clone> Widget<Message, iced::Theme, iced::Renderer> for TitleDragS
         }
     }
 
-    fn mouse_interaction(
-        &self,
-        _tree: &widget::Tree,
-        layout: Layout<'_>,
-        cursor: mouse::Cursor,
-        _viewport: &Rectangle,
-        _renderer: &iced::Renderer,
-    ) -> mouse::Interaction {
-        if cursor.is_over(layout.bounds()) {
-            mouse::Interaction::Grab
-        } else {
-            mouse::Interaction::None
-        }
-    }
-
     fn draw(
         &self,
         _tree: &widget::Tree,

@@ -34,7 +34,6 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
         .unwrap_or(0);
     let rows = browser.user_config().context_menus.settings_rows(page);
     let entry_type_checked = entry_types_checked_for(browser, page);
-    let dragged_index = browser.context_menu_settings_drag_index();
     let item_rows: Vec<Element<'static, Message>> = rows
         .iter()
         .enumerate()
@@ -48,7 +47,6 @@ pub(super) fn context_menu_settings_section(browser: &FileBrowser) -> Element<'_
                 entry,
                 checked,
                 browser.context_menu_settings_drag_offset(index),
-                dragged_index == Some(index),
             )
         })
         .collect();
@@ -224,9 +222,7 @@ fn context_menu_item_row(
     entry: &ContextMenuSettingsRow,
     entry_type_checked: Option<bool>,
     drag_offset: Option<f32>,
-    is_being_dragged: bool,
 ) -> Element<'static, Message> {
-    // 手柄光标:悬停为 Grab,拖动本行时为 Grabbing。
     let grip = mouse_area(
         container(
             themed_icon(
@@ -242,11 +238,6 @@ fn context_menu_item_row(
         .align_x(Alignment::Center)
         .align_y(Alignment::Center),
     )
-    .interaction(if is_being_dragged {
-        iced::mouse::Interaction::Grabbing
-    } else {
-        iced::mouse::Interaction::Grab
-    })
     .on_press(Message::ContextMenuSettingsDragStarted { page, index });
 
     let menu_icon = if entry.visible {

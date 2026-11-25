@@ -416,7 +416,7 @@ fn header_cell(
     .on_enter(Message::ListHeaderColumnEntered(pane_id, column.kind))
     .on_exit(Message::ListHeaderColumnExited(pane_id, column.kind))
     .on_release(Message::DragSelectionFinished)
-    .interaction(iced::mouse::Interaction::Grab)
+    .interaction(iced::mouse::Interaction::Pointer)
     .into()
 }
 

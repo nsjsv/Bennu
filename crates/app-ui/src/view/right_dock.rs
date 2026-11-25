@@ -142,7 +142,6 @@ fn title_bar(panel: DockPanel) -> Element<'static, Message> {
     .height(Length::Fixed(HEADER_HEIGHT));
     mouse_area(container(bar).width(Length::Fill).style(app_content_style))
         .on_press(Message::RightDock(RightDockMessage::PanelPressed(panel)))
-        .interaction(Interaction::Grab)
         .into()
 }
 
@@ -174,11 +173,7 @@ fn tab_strip(panels: &[DockPanel], active: DockPanel, locked: bool) -> Element<'
         strip = strip.push(
             mouse_area(tab)
                 .on_press(Message::RightDock(RightDockMessage::PanelPressed(panel)))
-                .interaction(if locked {
-                    Interaction::Pointer
-                } else {
-                    Interaction::Grab
-                }),
+                .interaction(Interaction::Pointer),
         );
     }
     container(strip)

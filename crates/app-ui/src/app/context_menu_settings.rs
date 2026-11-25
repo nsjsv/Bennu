@@ -105,14 +105,6 @@ impl FileBrowser {
         Task::none()
     }
 
-    /// 当前正在被拖动的行号(仅限正在配置的页)。
-    pub(crate) fn context_menu_settings_drag_index(&self) -> Option<usize> {
-        self.context_menu_settings_drag
-            .as_ref()
-            .filter(|drag| drag.page == self.context_menu_settings_page)
-            .map(|drag| drag.current_index)
-    }
-
     /// 视图渲染被拖行时的纵向位移:光标偏移补偿已发生的换位,并夹在列表范围内。
     pub(crate) fn context_menu_settings_drag_offset(&self, index: usize) -> Option<f32> {
         let drag = self.context_menu_settings_drag.as_ref()?;

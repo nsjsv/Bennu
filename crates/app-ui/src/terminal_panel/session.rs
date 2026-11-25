@@ -201,14 +201,21 @@ fn pty_size(dimensions: TerminalDimensions) -> PtySize {
 }
 
 /// 读线程自己的一份主端：要 poll 它（同步更新超时要按时醒），portable-pty 给的读端是
-/// `Box<dyn Read>`，拿不到 fd。
+/// `Box<dyn Read>`，拿不到 fd。exec 时关掉：应用后来起的程序（缩略图、解码……）不该拿着
+/// 终端。
 fn duplicate_master(master: &dyn MasterPty) -> std::io::Result<File> {
+    Ok(File::from(rustix::io::fcntl_dupfd_cloexec(
+        master_fd(master)?,
+        0,
+    )?))
+}
+
+fn master_fd(master: &dyn MasterPty) -> std::io::Result<BorrowedFd<'_>> {
     let fd = master
         .as_raw_fd()
         .ok_or_else(|| std::io::Error::other("the pseudo terminal has no file descriptor"))?;
-    // SAFETY: fd 归 `master`，这里只借来复制一份，复制出的 fd 自己持有。
-    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
-    Ok(File::from(rustix::io::dup(borrowed)?))
+    // SAFETY: fd 归 `master`，借出的生命期跟着 `master`。
+    Ok(unsafe { BorrowedFd::borrow_raw(fd) })
 }
 
 impl TerminalSession {
@@ -555,6 +562,25 @@ mod tests {
         wait_for_line(&session, &mut events, "held");
         session.write_input(b"\r");
         assert!(ended(&mut events).unwrap().success());
+    }
+
+    #[test]
+    fn programs_started_later_do_not_get_the_terminal() {
+        let folder = tempfile::tempdir().unwrap();
+        let (session, mut events) = spawn("/bin/sh", &["-c", "printf x; read x"], folder.path());
+        wait_for_line(&session, &mut events, "x");
+
+        let listed = std::process::Command::new("ls")
+            .args(["-l", "/proc/self/fd"])
+            .output()
+            .unwrap();
+        assert!(
+            !String::from_utf8_lossy(&listed.stdout).contains("ptmx"),
+            "{}",
+            String::from_utf8_lossy(&listed.stdout)
+        );
+        session.write_input(b"\r");
+        ended(&mut events).unwrap();
     }
 
     #[test]

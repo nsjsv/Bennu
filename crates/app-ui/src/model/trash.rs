@@ -11,6 +11,8 @@ pub(crate) struct TrashRefreshRequest {
 pub(crate) enum TrashRefreshCompletionDecision {
     #[default]
     Apply,
+    /// 读的时候回收站又变了：这次的结果照常用上，再读一次。
+    ApplyThenRefresh,
     StartReplacement,
     Discard,
 }
@@ -43,6 +45,17 @@ impl TrashRefreshState {
             generation: self.generation,
             cancellation,
         })
+    }
+
+    /// 回收站变了：没在读就开读；正在读的不打断，读完用上再补读一次。打断重读的话，变化接连
+    /// 不断时（别的程序一个个往回收站里删）每次都读不完，列表一直不动。
+    pub(crate) fn begin_after_change(&mut self) -> Option<TrashRefreshRequest> {
+        if self.active_generation.is_some()
+            && self.active_completion_decision == TrashRefreshCompletionDecision::Apply
+        {
+            self.active_completion_decision = TrashRefreshCompletionDecision::ApplyThenRefresh;
+        }
+        self.begin_if_idle()
     }
 
     pub(crate) fn invalidate_pending(&mut self) {
@@ -142,6 +155,25 @@ mod tests {
             TrashRefreshCompletionDecision::Apply
         );
         assert!(!state.is_pending());
+    }
+
+    #[test]
+    fn change_during_a_read_keeps_it_and_reads_once_more_after() {
+        let mut state = TrashRefreshState::default();
+        let running = state
+            .begin_after_change()
+            .expect("idle state starts a read");
+
+        // 变化接连来：不打断这次，也只补一次。
+        assert!(state.begin_after_change().is_none());
+        assert!(state.begin_after_change().is_none());
+        assert!(!running.cancellation.is_cancelled());
+
+        assert_eq!(
+            state.classify_completion(running.generation),
+            TrashRefreshCompletionDecision::ApplyThenRefresh
+        );
+        assert!(state.begin_after_change().is_some());
     }
 
     #[test]

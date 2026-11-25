@@ -330,7 +330,8 @@ impl FileBrowser {
         match result {
             Ok(path) => {
                 self.invalidate_list_directory_summary_subtree_and_ancestor_chain(&path);
-                self.reload_current_preserving_list_directory_summaries()
+                self.clear_transient_interaction_state();
+                self.reload_pane(self.active_pane_id())
             }
             Err(error) => {
                 self.show_global_error(error);

@@ -49,6 +49,7 @@ mod network_connections;
 mod network_settings;
 mod open_with;
 mod pane_drag;
+mod pane_reload;
 #[cfg(test)]
 mod pane_lifecycle_tests;
 pub(crate) mod panes;

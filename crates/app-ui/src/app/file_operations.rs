@@ -162,15 +162,13 @@ impl FileBrowser {
                 if self.transfers_are_reflected_in_visible_directories(&pairs) {
                     self.schedule_visible_list_directory_summaries()
                 } else {
-                    self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
+                    self.reload_visible_panes_after_file_operation()
                 }
             }
             (QueuedFileOperation::Copy { .. }, true) => {
                 self.schedule_visible_list_directory_summaries()
             }
-            _ => {
-                self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
-            }
+            _ => self.reload_visible_panes_after_file_operation(),
         }
     }
 
@@ -420,6 +418,8 @@ impl FileBrowser {
             self.invalidate_list_directory_summaries_for_file_operation(operation);
             self.finish_refresh_task_for_operation(operation, completed_successfully)
         } else {
+            // 不知道是哪个操作，失效不了哪几个：看得见的文件夹项数都重数。
+            self.invalidate_list_directory_summaries_for_visible_panes();
             self.reload_visible_panes_after_file_operation()
         };
         // 挂起期间回收站可能被本批任务改了很多条;终结时若仍有别的批次在跑,
@@ -430,7 +430,7 @@ impl FileBrowser {
             && self.trash_batch_rescan_pending
         {
             self.trash_batch_rescan_pending = false;
-            self.refresh_trash_snapshot_for_trash_tabs()
+            self.refresh_trash_snapshot_after_change()
         } else {
             Task::none()
         };

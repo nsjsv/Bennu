@@ -22,9 +22,70 @@ fn file_operation_without_a_trash_tab_discards_the_cached_snapshot() {
         skipped: Vec::new(),
     });
 
-    drop(browser.refresh_trash_snapshot_for_visible_panes());
+    drop(browser.refresh_trash_snapshot_after_change());
 
     assert!(browser.trash_refresh.snapshot().is_none());
+}
+
+/// 回收站可能变了（F5、切到回收站标签、拖着文件切过去、文件操作做完、磁盘监视报来）时正在读的
+/// 那次可能早于这个变化：不打断它，读完照常用上，再读一次。
+#[test]
+fn a_change_while_the_trash_is_being_read_is_read_again_after() {
+    let changes: [(&str, fn(&mut FileBrowser) -> iced::Task<Message>); 5] = [
+        ("visible panes", FileBrowser::reload_visible_panes),
+        ("current", FileBrowser::reload_current),
+        ("file drop", FileBrowser::reload_current_for_file_drop),
+        (
+            "file operation",
+            FileBrowser::reload_visible_panes_after_file_operation,
+        ),
+        ("watch event", |browser| {
+            let watch_root = file_core::trash_bin::trash_watch_directories()
+                .into_iter()
+                .next()
+                .expect("home trash watch root");
+            browser.reload_observed_directory(observed_changes(&watch_root.join("info")))
+        }),
+    ];
+    for (name, change) in changes {
+        let (mut browser, _) = FileBrowser::new(config::default_user_config());
+        browser.tab_mut().location = BrowserLocation::Trash;
+        let running = browser
+            .trash_refresh
+            .begin_if_idle()
+            .expect("read already running");
+
+        drop(change(&mut browser));
+
+        assert!(!running.cancellation.is_cancelled(), "{name}");
+        let trashed = PathBuf::from("/trash/files/report.txt");
+        drop(browser.accept_trash_refresh_completion(
+            running.generation,
+            Ok(TrashScan {
+                entries: vec![trash_entry(&trashed)],
+                skipped: Vec::new(),
+            }),
+        ));
+        assert_eq!(browser.tab().entries.len(), 1, "{name}");
+        assert!(browser.trash_refresh.begin_if_idle().is_none(), "{name}");
+    }
+}
+
+fn trash_entry(path: &Path) -> TrashEntry {
+    TrashEntry::from_historical_entry(
+        path.to_path_buf(),
+        PathBuf::from("/trash/info/report.txt.trashinfo"),
+        PathBuf::from("/home/test/report.txt"),
+        None,
+        DirectoryEntry::new(
+            path.to_path_buf(),
+            FileKind::File,
+            EntryMetadata::default(),
+            false,
+            false,
+            false,
+        ),
+    )
 }
 
 #[test]

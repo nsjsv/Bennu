@@ -14,7 +14,7 @@ use crate::model::{
     DirectoryCollectionPhase, DirectoryEntrySnapshot, DirectoryExpansionLoadContext,
     DirectoryLoadRequest, DirectoryLoadingPlaceholder, DirectoryLoadingPlaceholderEntry,
     DirectoryOrderPhase, ExpandedDirectory, ExpandedDirectoryLoadRequest, HistoryEntry,
-    IconGridExpansionState, LocationKey, Message, NavigationMode,
+    IconGridExpansionState, Message, NavigationMode,
 };
 use crate::startup_trace;
 impl FileBrowser {
@@ -350,140 +350,6 @@ impl FileBrowser {
         ])
     }
 
-    pub(super) fn reload_current(&mut self) -> Task<Message> {
-        self.invalidate_list_directory_summaries_for_pane(self.active_pane_id());
-        if self.tab().location == BrowserLocation::Trash {
-            self.invalidate_trash_snapshot_refresh();
-        }
-        self.reload_current_preserving_list_directory_summaries()
-    }
-
-    pub(in crate::app) fn reload_current_for_file_drop(&mut self) -> Task<Message> {
-        self.invalidate_list_directory_summaries_for_pane(self.active_pane_id());
-        if self.tab().location == BrowserLocation::Trash {
-            self.invalidate_trash_snapshot_refresh();
-        }
-        self.schedule_directory_reload(self.active_pane_id())
-    }
-
-    pub(super) fn reload_current_preserving_list_directory_summaries(&mut self) -> Task<Message> {
-        self.clear_transient_interaction_state();
-        self.schedule_directory_reload(self.active_pane_id())
-    }
-
-    /// 重新加载窗格活动标签的内容：回收站视图重拉快照，搜索结果按同样的意图重搜，
-    /// 其余重扫目录并刷新已展开的子目录。图标展开只属于活动窗格的交互上下文。
-    fn schedule_directory_reload(&mut self, pane_id: BrowserPaneId) -> Task<Message> {
-        let is_active = pane_id == self.active_pane_id();
-        let has_trash_snapshot = self.trash_refresh.snapshot().is_some();
-        let location = self
-            .pane_by_id(pane_id)
-            .map(|pane| pane.tab().location.key())
-            .expect("a reload targets an existing pane");
-        let current_dir = match location {
-            LocationKey::Search(session_id) => return self.restart_search(session_id),
-            LocationKey::Trash => {
-                if is_active {
-                    self.clear_icon_grid_expansion();
-                }
-                let pane = self
-                    .pane_by_id_mut(pane_id)
-                    .expect("a reload targets an existing pane");
-                pane.directory_loading_placeholder = None;
-                let tab = pane.tab_mut();
-                tab.directory_collection_phase = if has_trash_snapshot {
-                    DirectoryCollectionPhase::Ready
-                } else {
-                    DirectoryCollectionPhase::Discovering
-                };
-                tab.close_expanded_directories();
-                pane.cancel_directory_load();
-                self.retract_global_error(GlobalErrorSource::DirectoryLoad);
-                self.prune_list_directory_summaries_to_live_roots();
-                return self.request_trash_snapshot_refresh();
-            }
-            LocationKey::Directory(directory) => directory,
-        };
-        let pane = self
-            .pane_by_id_mut(pane_id)
-            .expect("a reload targets an existing pane");
-        pane.directory_loading_placeholder = None;
-        let tab = pane.tab_mut();
-        // 已显示完整列表时是刷新：旧列表一直留着，结果落地整体替换。
-        tab.directory_collection_phase = match tab.directory_collection_phase {
-            DirectoryCollectionPhase::Discovering => DirectoryCollectionPhase::Discovering,
-            DirectoryCollectionPhase::Ready | DirectoryCollectionPhase::Refreshing => {
-                DirectoryCollectionPhase::Refreshing
-            }
-        };
-        self.retract_global_error(GlobalErrorSource::DirectoryLoad);
-
-        let mut commands = self.refresh_expanded_directory_commands(pane_id);
-        if is_active {
-            commands.extend(self.refresh_icon_grid_expansion_commands());
-        }
-        let (request, cancellation) = self.begin_directory_load(pane_id, current_dir);
-        commands.push(load_directory_command(
-            request,
-            self.listing_options(pane_id),
-            cancellation,
-        ));
-        Task::batch(commands)
-    }
-
-    pub(super) fn reload_visible_panes(&mut self) -> Task<Message> {
-        self.invalidate_list_directory_summaries_for_visible_panes();
-        self.reload_visible_panes_preserving_list_directory_summaries()
-    }
-
-    pub(super) fn reload_visible_panes_after_file_operation(&mut self) -> Task<Message> {
-        self.invalidate_list_directory_summaries_for_visible_panes();
-        self.reload_visible_panes_after_file_operation_preserving_list_directory_summaries()
-    }
-
-    pub(super) fn reload_visible_panes_after_file_operation_preserving_list_directory_summaries(
-        &mut self,
-    ) -> Task<Message> {
-        let mut commands = vec![self.refresh_trash_snapshot_for_visible_panes()];
-        // 搜索结果在操作完成时已就地更新（改名跟着走、删掉的拿掉），不整次重搜。
-        let rescanned_panes = self
-            .pane_layout
-            .visible_pane_ids()
-            .into_iter()
-            .filter(|pane_id| {
-                self.pane_by_id(*pane_id)
-                    .is_some_and(|pane| pane.tab().location.search().is_none())
-            })
-            .collect::<Vec<_>>();
-        commands.extend(
-            rescanned_panes
-                .into_iter()
-                .map(|pane_id| self.schedule_directory_reload(pane_id)),
-        );
-        Task::batch(commands)
-    }
-
-    /// 显不显示隐藏文件、怎么排序是所有窗格共用的列表规则：变了以后可见窗格都按新规则重读
-    /// （后台标签切过去时本来就重读）。回收站快照按旧规则拉，正在拉的作废重拉。目录摘要
-    /// 隐藏的也数、和顺序无关，留着。
-    pub(super) fn relist_visible_panes(&mut self) -> Task<Message> {
-        self.invalidate_trash_snapshot_refresh();
-        self.reload_visible_panes_preserving_list_directory_summaries()
-    }
-
-    pub(super) fn reload_visible_panes_preserving_list_directory_summaries(
-        &mut self,
-    ) -> Task<Message> {
-        self.clear_transient_interaction_state();
-        Task::batch(
-            self.pane_layout
-                .visible_pane_ids()
-                .into_iter()
-                .map(|pane_id| self.schedule_directory_reload(pane_id))
-                .collect::<Vec<_>>(),
-        )
-    }
-
     /// 目录监视报来的变化：文件夹树和各窗格各按自己的规则用。
     pub(super) fn reload_observed_directory(
         &mut self,
@@ -509,7 +375,7 @@ impl FileBrowser {
                 self.trash_batch_rescan_pending = true;
                 return Task::none();
             }
-            return self.refresh_trash_snapshot_for_trash_tabs();
+            return self.refresh_trash_snapshot_after_change();
         }
 
         // 增量优先：结构化变更直接修正条目，列表不重置；RescanRequired 或
@@ -544,7 +410,7 @@ impl FileBrowser {
         };
         if current_directory == path {
             // 磁盘上的变化不是用户操作：不收右键菜单、不清预览、不打断重命名。
-            return self.schedule_directory_reload(pane_id);
+            return self.reload_pane(pane_id);
         }
         let load_context = self.expanded_directory_load_context(pane_id, path);
         let options = self.listing_options(pane_id);
@@ -745,44 +611,6 @@ impl FileBrowser {
         self.context_menu = None;
         self.renaming = None;
         self.selection_marquee = None;
-    }
-
-    /// 把窗格活动标签里已展开的目录全部置为加载中并发起重新加载。
-    fn refresh_expanded_directory_commands(
-        &mut self,
-        pane_id: BrowserPaneId,
-    ) -> Vec<Task<Message>> {
-        let expanded_directories = &mut self
-            .pane_by_id_mut(pane_id)
-            .expect("a reload targets an existing pane")
-            .tab_mut()
-            .expanded_directories;
-        let paths = expanded_directories.keys().cloned().collect::<Vec<_>>();
-        for expanded in expanded_directories.values_mut() {
-            expanded.status = expanded.status.reloading();
-            expanded.is_expanded = true;
-            expanded.is_collapsing = false;
-            expanded.animation_progress = 1.0;
-        }
-
-        paths
-            .into_iter()
-            .filter_map(|path| {
-                let load_context = self.expanded_directory_load_context(pane_id, &path);
-                let expanded = self
-                    .pane_by_id_mut(pane_id)?
-                    .tab_mut()
-                    .expanded_directories
-                    .get_mut(&path)?;
-                let (request, cancellation) =
-                    Self::next_expanded_directory_load_request(load_context, path, expanded);
-                Some(load_expanded_directory_command(
-                    request,
-                    self.listing_options(pane_id),
-                    cancellation,
-                ))
-            })
-            .collect()
     }
 }
 

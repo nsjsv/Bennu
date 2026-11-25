@@ -69,7 +69,7 @@ mod path_migration;
 mod split_layout;
 pub(crate) use split_layout::{SPLIT_DIVIDER_WIDTH, SPLIT_PORTION_TOTAL};
 mod trash;
-pub(crate) use trash::{TrashRefreshCompletionDecision, TrashRefreshState};
+pub(crate) use trash::{TrashRefreshCompletionDecision, TrashRefreshRequest, TrashRefreshState};
 mod selection;
 pub(crate) use selection::{
     ColumnEntryBounds, SelectionMarquee, SelectionMarqueePhase, SelectionMarqueeScrollAnchor,

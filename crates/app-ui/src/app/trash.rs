@@ -7,7 +7,7 @@ use super::FileBrowser;
 use crate::commands::load_trash_command;
 use crate::model::{
     BrowserLocation, BrowserTab, ContextMenuState, DirectoryCollectionPhase, Message,
-    TrashContextMenuState, TrashRefreshCompletionDecision,
+    TrashContextMenuState, TrashRefreshCompletionDecision, TrashRefreshRequest,
 };
 
 impl FileBrowser {
@@ -56,12 +56,19 @@ impl FileBrowser {
         outcome: Result<TrashScan, String>,
     ) -> Task<Message> {
         match self.trash_refresh.classify_completion(generation) {
-            TrashRefreshCompletionDecision::Discard => return Task::none(),
+            TrashRefreshCompletionDecision::Discard => Task::none(),
             TrashRefreshCompletionDecision::StartReplacement => {
-                return self.refresh_trash_snapshot_for_trash_tabs();
+                self.refresh_trash_snapshot_after_change()
             }
-            TrashRefreshCompletionDecision::Apply => {}
+            TrashRefreshCompletionDecision::Apply => self.apply_trash_refresh_outcome(outcome),
+            TrashRefreshCompletionDecision::ApplyThenRefresh => {
+                let applied = self.apply_trash_refresh_outcome(outcome);
+                Task::batch([applied, self.refresh_trash_snapshot_after_change()])
+            }
         }
+    }
+
+    fn apply_trash_refresh_outcome(&mut self, outcome: Result<TrashScan, String>) -> Task<Message> {
         let scan = match outcome {
             Ok(scan) => scan,
             Err(error) => {
@@ -132,15 +139,31 @@ impl FileBrowser {
         }
     }
 
+    /// 要显示回收站：有快照正在读就等它。
     pub(super) fn request_trash_snapshot_refresh(&mut self) -> Task<Message> {
-        let Some(request) = self.trash_refresh.begin_if_idle() else {
+        let request = self.trash_refresh.begin_if_idle();
+        self.load_trash(request)
+    }
+
+    /// 回收站可能变了（磁盘监视报来、文件操作做完、用户要求刷新）：有标签显示回收站就保证再读
+    /// 一次在这之后开始的；没有就丢掉快照，免得下次打开先显示过时的。
+    pub(super) fn refresh_trash_snapshot_after_change(&mut self) -> Task<Message> {
+        if !self.has_trash_tab() {
+            self.trash_refresh.discard_snapshot();
             return Task::none();
-        };
-        load_trash_command(
-            request.generation,
-            self.options.clone(),
-            request.cancellation,
-        )
+        }
+        let request = self.trash_refresh.begin_after_change();
+        self.load_trash(request)
+    }
+
+    fn load_trash(&self, request: Option<TrashRefreshRequest>) -> Task<Message> {
+        request.map_or_else(Task::none, |request| {
+            load_trash_command(
+                request.generation,
+                self.options.clone(),
+                request.cancellation,
+            )
+        })
     }
 
     pub(super) fn invalidate_trash_snapshot_refresh(&mut self) {
@@ -152,22 +175,6 @@ impl FileBrowser {
             .iter()
             .flat_map(|pane| pane.tabs.iter())
             .any(|tab| tab.location == BrowserLocation::Trash)
-    }
-
-    pub(super) fn refresh_trash_snapshot_for_trash_tabs(&mut self) -> Task<Message> {
-        if !self.has_trash_tab() {
-            return Task::none();
-        }
-        self.request_trash_snapshot_refresh()
-    }
-
-    pub(super) fn refresh_trash_snapshot_for_visible_panes(&mut self) -> Task<Message> {
-        if !self.has_trash_tab() {
-            self.trash_refresh.discard_snapshot();
-            return Task::none();
-        }
-        self.invalidate_trash_snapshot_refresh();
-        self.request_trash_snapshot_refresh()
     }
 }
 
